@@ -554,6 +554,72 @@ function makeIndiamanLetter(s, peppLifted, cinnLifted, shipName) {
   };
 }
 
+// ─────────── TEAK CONCESSION ───────────
+// The hook seeded by Wilbraham's papers and held open by the Vizier's clerk
+// turns into a one-time formal letter from the palace. Player chooses what
+// happens to the concession; the result modifies later ship-building costs.
+// Each response carries a fixedOutcome so handleLetterResponse can apply
+// it deterministically (no AI call) — the consequences are mechanical.
+
+function makeTeakConcessionLetter(s) {
+  return {
+    id: 2000000 + s.day,
+    from: 'The Rajah’s Vizier',
+    subject: 'On the matter of the inland teak',
+    body: `Sir, — His Highness the Rajah, considering yr. station and the late Mr Wilbraham’s papers, is mindful of the inland teak concession which has lately stood in suspense. The wood is of the kind they call ironwood in the tongue of the inland people, fit for the keel of a country ship and not subject to the worm.
+
+The Hollander Mynheer ter Borch has these five years pressed for the concession at a tenant’s rent. We need not pretend to think well of him; he has been patient.
+
+His Highness wd. hear yr. counsel in the matter. The grant lies in his gift, the price in yr. negotiation, the consequence — that wd. be felt — entirely yrs.
+
+Yr. obedt. servant,
+The Vizier`,
+    responses: [
+      {
+        label: 'Take the concession for the Company, with a tribute',
+        seed: 'tribute paid; concession secured for the Company',
+        fixedOutcome: {
+          prose: 'You attend the palace next Friday with a chest of forty rupees and a bolt of crimson calico. The Vizier accepts both with the smallest motion of his head, has the document drawn in three languages, and signs in his own hand. Hodge presents you a fair copy by the evening. The teak is yours — to fell, to season, to keel a ship under.',
+          changes: {
+            money: -120,
+            reputation: { rajah: 5, dutch: -10 },
+            flags: { teakConcession: 'self' },
+            journal: 'The teak concession was granted to the Company for a tribute of forty rupees and a bolt of calico. Ter Borch will hear of it.',
+            hook: 'ter Borch has been deprived of the teak; some answer is to be expected.',
+          },
+        },
+      },
+      {
+        label: 'Sell the concession on to ter Borch, take the cash',
+        seed: 'concession passes to the Dutch; cash now',
+        fixedOutcome: {
+          prose: 'Mynheer ter Borch is at yr. dock by Tuesday with a lacquered case and a draft on the Dutch factor at Eustace. Two hundred pounds, the formalities at the palace done by the Vizier himself for a small consideration. Hodge counts the silver three times.',
+          changes: {
+            money: 200,
+            reputation: { dutch: 15, rajah: -5 },
+            flags: { teakConcession: 'dutch' },
+            journal: 'Sold the teak concession on to ter Borch for £200. The Vizier conducted the palace formalities. The Rajah has not commented.',
+            hook: 'The teak concession is in Dutch hands; future ships built at home must pay for imported timber.',
+          },
+        },
+      },
+      {
+        label: 'Decline to act in the matter for the present',
+        seed: 'the matter rests',
+        fixedOutcome: {
+          prose: 'You return the Vizier’s clerk with a note professing further reflection. The clerk’s face does not move. The matter is, then, in suspense — though the Vizier is not a man who repeats an offer.',
+          changes: {
+            reputation: { rajah: -2 },
+            flags: { teakConcession: 'declined' },
+            journal: 'Declined to act on the teak concession for the present. The matter rests.',
+          },
+        },
+      },
+    ],
+    read: false,
+  };
+}
+
 // ─────────── HOME SIMULATION ───────────
 // Each day the Factor is away (or any day passes), the colony lives.
 // Construction progresses, NPCs act, small incidents accrue.
@@ -753,6 +819,22 @@ function tickDays(gs, days) {
         : `${peppLifted} cwt pepper and ${cinnLifted} cwt cinnamon lifted from the godown.`;
       s.awayLog.push({ day: s.day, type: 'indiaman', text: `${ShipName}, of the Company, called for the returns. ${tail} A letter from the Court came by the same packet.` });
       s.indiaman = { lastVisit: s.day, nextDay: s.day + INDIAMAN_INTERVAL, visits: (s.indiaman.visits || 0) + 1 };
+    }
+
+    // ── Teak concession: once the Factor has earned a measure of standing
+    // with the Rajah, the Vizier writes to lay the long-suspended concession
+    // before him. One-off; the flag prevents re-firing.
+    if (
+      !s.flags?.teakLetterSent &&
+      !s.flags?.teakConcession &&
+      s.day >= 60 &&
+      (s.reputation?.rajah || 0) >= 5
+    ) {
+      const letter = makeTeakConcessionLetter(s);
+      s.letters = [...s.letters, letter];
+      s.flags = { ...(s.flags || {}), teakLetterSent: true };
+      s.lettersGenerated = (s.lettersGenerated || 0) + 1;
+      s.awayLog.push({ day: s.day, type: 'letter', text: 'A formal letter came down from the palace, the Vizier’s seal upon it.' });
     }
 
     // ── Raid: opportunists at the godown. Stockade halves the chance, the
@@ -1991,6 +2073,27 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
       choices: [],
       letter,
     });
+    // Some letter responses carry a fixedOutcome — deterministic events
+    // whose mechanical consequences must not be left to the model. Skip the
+    // AI call and apply the prose + changes directly.
+    if (response.fixedOutcome) {
+      setPending(true);
+      setPendingMsg('Sealing the letter');
+      // Brief pause so the loading vignette registers; matches the AI path.
+      await new Promise(r => setTimeout(r, 400));
+      setPending(false);
+      setGs(prev => ({
+        ...prev,
+        letters: prev.letters.map(l => l.id === letter.id ? { ...l, replied: true, replyLabel: response.label } : l),
+      }));
+      const safeChanges = { ...(response.fixedOutcome.changes || {}), days: 0 };
+      setOutcome({
+        prose: response.fixedOutcome.prose,
+        changes: safeChanges,
+        encounter: { type: 'letter' },
+      });
+      return;
+    }
     setPending(true);
     setPendingMsg('Sealing the letter');
     const { result, log } = await genOutcome(gs, `Letter from ${letter.from}: ${letter.body}`, response, { isLetter: true });
@@ -2028,17 +2131,21 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
     if (gs.shipCommission) return;
     if (!gs.outpost?.buildings?.shipwright?.built) return;
     if (gs.ship?.type !== 'pinnace') return;
-    const COST = 900;
+    const ownTeak = gs.flags?.teakConcession === 'self';
+    const COST = ownTeak ? 600 : 900;
     const TRADE_IN = 100;
     const DAYS = 60;
     if (gs.money < COST) return;
     const cleanName = (proposedName || 'The Astrolabe').trim() || 'The Astrolabe';
     const name = cleanName.startsWith('The ') ? cleanName : `The ${cleanName}`;
+    const teakLine = ownTeak
+      ? ` The timber is from yr. own concession inland; the saving on imported plank is conspicuous.`
+      : '';
     setGs(prev => ({
       ...prev,
       money: prev.money - COST,
       shipCommission: { type: 'brigantine', name, daysLeft: DAYS, paid: COST, tradeIn: TRADE_IN },
-      journal: [...prev.journal, { day: prev.day, entry: `Laid the order with the master shipwright at Bayan-Kor for a teak brigantine, ${name}. £${COST} disbursed; the keel will be laid this week.` }],
+      journal: [...prev.journal, { day: prev.day, entry: `Laid the order with the master shipwright at Bayan-Kor for a teak brigantine, ${name}. £${COST} disbursed; the keel will be laid this week.${teakLine}` }],
     }));
   };
 
@@ -3522,7 +3629,8 @@ function GodownPanel({ gs, lodgeGoods, withdrawGoods }) {
 
 function CommissionPanel({ gs, commissionBrigantine }) {
   const [proposedName, setProposedName] = useState('Astrolabe');
-  const COST = 900;
+  const ownTeak = gs.flags?.teakConcession === 'self';
+  const COST = ownTeak ? 600 : 900;
   const TRADE_IN = 100;
   const DAYS = 60;
   const t = SHIP_TYPES.brigantine;
@@ -3563,12 +3671,23 @@ function CommissionPanel({ gs, commissionBrigantine }) {
 
   return (
     <div style={{ marginTop: '1.5rem', padding: '0.9rem 1rem', background: 'rgba(255,255,255,0.3)', borderLeft: '3px solid #5c1a08' }}>
-      <div className="display" style={{ fontSize: '0.9em', color: '#5c1a08', marginBottom: '0.3rem' }}>COMMISSION A BRIGANTINE</div>
+      <div className="display" style={{ fontSize: '0.9em', color: '#5c1a08', marginBottom: '0.3rem' }}>
+        COMMISSION A BRIGANTINE{ownTeak ? ' — INLAND TEAK' : ''}
+      </div>
       <p className="italic" style={{ margin: '0 0 0.5rem 0', color: '#4a3220', fontSize: '0.92em' }}>
         {t.blurb} Sixty days on the stocks; the pinnace will be sold off to the Bugis traders for £{TRADE_IN} on the day she is launched.
+        {ownTeak && ' The timber will come down from yr. own inland concession, which is no small saving.'}
       </p>
       <div style={{ fontSize: '0.85em', color: '#6b4423', marginBottom: '0.5rem' }}>
-        £{COST} · {DAYS} days · hold {t.holdCwt} cwt · {t.wearMin}–{t.wearMax} wear/day · −1 day on long voyages
+        {ownTeak ? (
+          <>
+            <span style={{ textDecoration: 'line-through', color: '#a08560' }}>£900</span>{' '}
+            <span style={{ color: '#5c1a08', fontWeight: 'bold' }}>£{COST}</span>
+          </>
+        ) : (
+          <>£{COST}</>
+        )}
+        {' · '}{DAYS} days · hold {t.holdCwt} cwt · {t.wearMin}–{t.wearMax} wear/day · −1 day on long voyages
       </div>
       <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
         <label style={{ fontSize: '0.85em', color: '#6b4423' }}>Name her:</label>

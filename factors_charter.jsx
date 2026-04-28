@@ -347,6 +347,13 @@ const ensureShape = (gs) => {
   if (next.shipCommission === undefined) {
     next.shipCommission = null;
   }
+  if (!next.lettersAuto || typeof next.lettersAuto !== 'object') {
+    // Returning saves: schedule the next letter ~30–55 days out from today.
+    next.lettersAuto = { nextDay: (next.day || 1) + 30 + Math.floor(Math.random() * 25) };
+  }
+  if (!Array.isArray(next.pendingLetterRequests)) {
+    next.pendingLetterRequests = [];
+  }
   return next;
 };
 
@@ -495,6 +502,11 @@ Mr. W. died this morning at half past four. The Reverend will not come down from
   daysRemaining: 1095,
   indiaman: { lastVisit: 0, nextDay: 180, visits: 0, lastQuarterly: 0 },
   shipCommission: null, // { type, name, daysLeft, paid, tradeIn } when laying down a new vessel
+  // Auto-delivered AI letters from the wider world (sister, captains, factions).
+  // The Director (Indiaman + quarterly) and the Vizier (teak letter) have their
+  // own dedicated cadences; this is for everyone else.
+  lettersAuto: { nextDay: 35 },
+  pendingLetterRequests: [],
   journal: [],
   letters: [directorLetter, wilbrahamPapers],
   hooks: ['The inland teak concession \u2014 ter Borch wants it.'],
@@ -672,6 +684,66 @@ function makeQuarterlyNagLetter(s) {
   };
 }
 
+// ─────────── AUTO LETTER SENDERS ───────────
+// Senders gated by reputation / flags so the post reflects the Factor's
+// standing. The Director and the Vizier have dedicated cadences elsewhere
+// (Indiaman + quarterly nags; teak concession) and are excluded here so we
+// don't double up. Weights bias toward senders the Factor would more
+// plausibly hear from often.
+
+const AUTO_SENDERS = [
+  {
+    key: 'wexley',
+    from: 'Mrs. Eliza Wexley, your sister',
+    faction: null,
+    mood: 'familial, news of home, gentle reproach, a child or aunt named, the weather in Bristol',
+    weight: 4,
+  },
+  {
+    key: 'faulke',
+    from: 'Capt. Faulke of the Albatross',
+    faction: null,
+    mood: 'weather-beaten, offering passage or news of the strait, the price of pepper at Madras, perhaps a warning',
+    weight: 3,
+  },
+  {
+    key: 'pyke',
+    from: 'Reverend Pyke of the Mission',
+    faction: 'mission',
+    mood: 'pious, requesting favour, warning of moral peril, perhaps a small subscription wanted',
+    weight: 2,
+    gate: (s) => (s.reputation?.mission || 0) >= -10,
+  },
+  {
+    key: 'pirates',
+    from: 'An Anonymous Hand',
+    faction: 'pirates',
+    mood: 'guarded, suggesting an arrangement profitable to both, written in a hand the Factor does not recognise',
+    weight: 2,
+    gate: (s) => (s.reputation?.pirates || 0) >= 5,
+  },
+  {
+    key: 'terborch',
+    from: 'Mynheer ter Borch',
+    faction: 'dutch',
+    mood: 'formal, suspicious, perhaps offering a deal, perhaps testing — a Calvinist clarity, a trader\'s caution',
+    weight: 2,
+    gate: (s) => (s.reputation?.dutch || 0) >= -25,
+  },
+];
+
+function pickAutoSender(s) {
+  const eligible = AUTO_SENDERS.filter(snd => !snd.gate || snd.gate(s));
+  if (eligible.length === 0) return null;
+  const total = eligible.reduce((a, b) => a + b.weight, 0);
+  let r = Math.random() * total;
+  for (const snd of eligible) {
+    r -= snd.weight;
+    if (r <= 0) return snd;
+  }
+  return eligible[eligible.length - 1];
+}
+
 // ─────────── HOME SIMULATION ───────────
 // Each day the Factor is away (or any day passes), the colony lives.
 // Construction progresses, NPCs act, small incidents accrue.
@@ -691,6 +763,8 @@ function tickDays(gs, days) {
     indiaman: { ...(gs.indiaman || { lastVisit: 0, nextDay: 180, visits: 0, lastQuarterly: 0 }) },
     shipCommission: gs.shipCommission ? { ...gs.shipCommission } : null,
     ship: gs.ship ? { ...gs.ship } : null,
+    lettersAuto: { ...(gs.lettersAuto || { nextDay: 35 }) },
+    pendingLetterRequests: [...(gs.pendingLetterRequests || [])],
   };
   const hasStockade = !!s.outpost.buildings.stockade?.built;
   const hasBarracks = !!s.outpost.buildings.barracks?.built;
@@ -900,6 +974,26 @@ function tickDays(gs, days) {
       s.lettersGenerated = (s.lettersGenerated || 0) + 1;
       s.indiaman = { ...s.indiaman, lastQuarterly: s.day };
       s.awayLog.push({ day: s.day, type: 'letter', text: 'A packet from London — the Court desires word of yr. progress.' });
+    }
+
+    // ── Auto-delivered AI letters from the wider world. The request is
+    // queued here; an effect in GameHub generates the body asynchronously
+    // and pushes the finished letter into the inbox. Schedule advances
+    // whether or not a sender is eligible — quiet stretches reflect a
+    // Factor with few correspondents.
+    if ((s.daysRemaining || 0) > 0 && s.day >= (s.lettersAuto?.nextDay || Infinity)) {
+      const sender = pickAutoSender(s);
+      if (sender) {
+        const seedId = Date.now() + s.day * 13 + (s.pendingLetterRequests?.length || 0);
+        s.pendingLetterRequests = [...(s.pendingLetterRequests || []), {
+          seedId,
+          senderKey: sender.key,
+          from: sender.from,
+          mood: sender.mood,
+          requestedDay: s.day,
+        }];
+      }
+      s.lettersAuto = { nextDay: s.day + 30 + Math.floor(Math.random() * 25) };
     }
 
     // ── Teak concession: once the Factor has earned a measure of standing
@@ -1118,28 +1212,32 @@ Reputation deltas should be small (-15 to +15). Only include factions that actua
   return { result, log };
 }
 
-async function genLetter(gs) {
-  const senders = [
-    { from: 'The Court of Directors', faction: 'company', mood: 'imperious, demanding quarterly returns' },
-    { from: 'Mrs. Eliza Wexley, your sister', faction: null, mood: 'familial, news of home, gentle reproach' },
-    { from: 'Capt. Faulke of the Albatross', faction: null, mood: 'weather-beaten, offering passage or news' },
-    { from: 'Reverend Pyke of the Mission', faction: 'mission', mood: 'pious, requesting favors or warning of moral peril' },
-    { from: 'An Anonymous Hand', faction: 'pirates', mood: 'guarded, suggesting an arrangement profitable to both parties' },
-    { from: 'Mynheer ter Borch', faction: 'dutch', mood: 'formal, suspicious, perhaps offering a deal' },
-    { from: 'The Rajah\u2019s Vizier', faction: 'rajah', mood: 'elaborate, oblique, with a request behind the courtesy' },
-  ];
-  const sender = senders[gs.lettersGenerated % senders.length];
+async function genLetter(gs, sender) {
+  // Caller (the auto-letter scheduler) selects the sender. The mood line +
+  // stateContext drive the AI to write something the Factor's actual
+  // circumstances make plausible.
   const prompt = `Generate a letter delivered to the Factor at ${gs.location}.
 From: ${sender.from} (${sender.mood})
+
 ${stateContext(gs)}
+
+WRITING THE LETTER:
+- Lean on the Factor's reckoning above. The sender knows what they would plausibly know \u2014 Mrs. Wexley reads of the returns at Blackwall, Capt. Faulke hears the prices at Madras and the Strait, the Mission and the Rajah's people see the godown each day, ter Borch knows what the Dutch factor at Eustace knows, the Brotherhood listen on the wharves.
+- Reference the world by name when natural: the godown stocks, an Indiaman due or recently called, the brigantine on the stocks, the teak concession (and who holds it), Hodge or Dass or the Vizier by name, a port the Factor has lately put into.
+- Period 1720s mercantile English. No anachronism. Open with "Sir, \u2014" or a familial salutation; close with a period sign-off. 3\u20135 sentences.
+- Imply something the Factor might respond to or act upon.
+
+CONSTRAINTS:
+- The Factor cannot meet home-station characters (Hodge, Dass, the Vizier, Reverend Pyke) outside Bayan-Kor. They CAN write him letters from Bayan-Kor.
+- Do not invent named characters who duplicate or replace the home-station NPCs.
 
 Return JSON:
 {
   "from": "${sender.from}",
   "subject": "5-8 word subject",
-  "body": "3-5 sentences of a period letter. Sign off appropriately. Reference the current situation if natural. Should imply something the Factor might respond to or act upon.",
+  "body": "the letter body, with salutation and period sign-off",
   "responses": [
-    { "label": "5-8 word response", "seed": "tonal consequence" },
+    { "label": "5-8 word response in the Factor's voice", "seed": "tonal consequence" },
     { "label": "5-8 word response", "seed": "tonal consequence" },
     { "label": "Set aside, do not reply", "seed": "ignore, possible drift" }
   ]
@@ -1167,7 +1265,7 @@ Return JSON:
     error: call.error,
     startedAt: call.startedAt,
     endedAt: call.endedAt,
-    meta: { senderFrom: sender.from, senderFaction: sender.faction },
+    meta: { senderFrom: sender.from, senderFaction: sender.faction, senderKey: sender.key },
   };
   return { result, log };
 }
@@ -2060,6 +2158,58 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
     return () => { cancelled = true; };
   }, [gs.letters]);
 
+  // Auto-letters: tickDays queues a request, this effect drains it. On
+  // success, push the finished letter into the inbox; on failure, drop
+  // the request silently. The schedule (gs.lettersAuto.nextDay) advances
+  // in tickDays whether or not the API call succeeds, so a quiet stretch
+  // simply means a quiet inbox.
+  const generatingLetterRef = useRef(false);
+  useEffect(() => {
+    if (generatingLetterRef.current) return;
+    const next = (gs.pendingLetterRequests || [])[0];
+    if (!next) return;
+    generatingLetterRef.current = true;
+    let cancelled = false;
+    (async () => {
+      try {
+        const sender = AUTO_SENDERS.find(s => s.key === next.senderKey) || {
+          key: next.senderKey, from: next.from, mood: next.mood, faction: null,
+        };
+        const { result, log } = await genLetter(gs, sender);
+        if (cancelled) return;
+        if (!result || !result.body) {
+          setGs(prev => ({
+            ...prev,
+            pendingLetterRequests: (prev.pendingLetterRequests || []).filter(r => r.seedId !== next.seedId),
+          }));
+          return;
+        }
+        const letter = {
+          id: next.seedId,
+          from: result.from || next.from,
+          subject: result.subject || 'A letter received',
+          body: result.body,
+          responses: Array.isArray(result.responses) && result.responses.length ? result.responses : [
+            { label: 'Reply with cautious interest', seed: 'opens dialogue' },
+            { label: 'Reply with formal refusal', seed: 'closes door politely' },
+            { label: 'Set aside, do not reply', seed: 'silence' },
+          ],
+          read: false,
+        };
+        setGs(prev => ({
+          ...prev,
+          letters: [...prev.letters, letter],
+          lettersGenerated: (prev.lettersGenerated || 0) + 1,
+          pendingLetterRequests: (prev.pendingLetterRequests || []).filter(r => r.seedId !== next.seedId),
+          aiLog: log ? pushAiLog(prev.aiLog, log) : prev.aiLog,
+        }));
+      } finally {
+        generatingLetterRef.current = false;
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [gs.pendingLetterRequests]);
+
   // Open a specific letter from anywhere (e.g. the Journal "Read" card).
   const openLetterById = (id) => {
     setTab('letters');
@@ -2272,20 +2422,6 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
     // so the summary and the actual state agree.
     const safeChanges = { ...result.changes, days: 0 };
     setOutcome({ ...result, changes: safeChanges, encounter: { type: 'letter' } });
-  };
-
-  const requestNewLetter = async () => {
-    setPending(true);
-    setPendingMsg('A messenger crosses the compound');
-    const { result: letter, log } = await genLetter(gs);
-    setPending(false);
-    setGs(prev => ({
-      ...prev,
-      letters: [...prev.letters, { ...letter, id: Date.now(), read: false }],
-      lettersGenerated: prev.lettersGenerated + 1,
-      aiLog: log ? pushAiLog(prev.aiLog, log) : prev.aiLog,
-    }));
-    setTab('letters');
   };
 
   // Commission a brigantine at the Bayan-Kor slipway. Pays up front; pinnace
@@ -2577,9 +2713,9 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
           {tab === 'map' && <MapView gs={gs} sailTo={sailTo} />}
           {tab === 'port' && <PortView gs={gs} buyGood={buyGood} sellGood={sellGood} refitShip={refitShip} arrivalProse={arrivalProse} setTab={setTab} lodgeGoods={lodgeGoods} withdrawGoods={withdrawGoods} commissionBrigantine={commissionBrigantine} />}
           {tab === 'outpost' && atHome && <OutpostView gs={gs} startBuild={startBuild} expediteBuild={expediteBuild} />}
-          {tab === 'letters' && <LettersView gs={gs} setGs={setGs} onRespond={handleLetterResponse} onRequestNew={requestNewLetter} openLetterId={openLetterId} setOpenLetterId={setOpenLetterId} />}
+          {tab === 'letters' && <LettersView gs={gs} setGs={setGs} onRespond={handleLetterResponse} openLetterId={openLetterId} setOpenLetterId={setOpenLetterId} />}
         </div>
-        <ProvisionsDrawer gs={gs} setGs={setGs} requestNewLetter={requestNewLetter} lastSavedAt={lastSavedAt} />
+        <ProvisionsDrawer gs={gs} setGs={setGs} lastSavedAt={lastSavedAt} />
       </div>
     </Page>
   );
@@ -4108,7 +4244,7 @@ function AwayDigestScreen({ digest, onContinue, onResolveRaid }) {
 
 // ─────────── LETTERS VIEW ───────────
 
-function LettersView({ gs, setGs, onRespond, onRequestNew, openLetterId, setOpenLetterId }) {
+function LettersView({ gs, setGs, onRespond, openLetterId, setOpenLetterId }) {
   const markRead = (id) => {
     setGs(prev => ({ ...prev, letters: prev.letters.map(l => l.id === id ? { ...l, read: true } : l) }));
   };
@@ -4163,10 +4299,7 @@ function LettersView({ gs, setGs, onRespond, onRequestNew, openLetterId, setOpen
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '1rem' }}>
-        <h2 className="display" style={{ fontSize: '1.4em', color: '#5c1a08', margin: 0 }}>Correspondence</h2>
-        <button className="ghost-button" onClick={onRequestNew}>Await the post</button>
-      </div>
+      <h2 className="display" style={{ fontSize: '1.4em', color: '#5c1a08', margin: '0 0 1rem 0' }}>Correspondence</h2>
       {gs.letters.length === 0 ? (
         <p className="italic" style={{ color: '#6b4423' }}>No letters in your hand.</p>
       ) : (
@@ -4246,7 +4379,7 @@ function ChangesSummary({ changes }) {
 // ─────────── PROVISIONS DRAWER ───────────
 // Save status, export to JSON for off-device backup, import back, reset.
 
-function ProvisionsDrawer({ gs, setGs, requestNewLetter, lastSavedAt }) {
+function ProvisionsDrawer({ gs, setGs, lastSavedAt }) {
   const [open, setOpen] = useState(false);
   const [importText, setImportText] = useState('');
   const [importMode, setImportMode] = useState(false);
@@ -4345,12 +4478,8 @@ function ProvisionsDrawer({ gs, setGs, requestNewLetter, lastSavedAt }) {
             </div>
           )}
 
-          <div className="display" style={{ fontSize: '0.85em', color: '#6b4423', marginTop: '1.2rem', marginBottom: '0.5rem' }}>OTHER</div>
-          <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-            <button className="ghost-button-sm" onClick={requestNewLetter}>Conjure a letter</button>
-          </div>
-          <div style={{ fontStyle: 'italic', color: '#6b4423', fontSize: '0.82em', marginTop: '0.6rem' }}>
-            To begin a fresh charter, return to the title from the menu &mdash; this charter will be kept on the rolls.
+          <div style={{ fontStyle: 'italic', color: '#6b4423', fontSize: '0.82em', marginTop: '1.2rem' }}>
+            Letters arrive as the post will bring them. To begin a fresh charter, return to the title from the menu &mdash; this charter will be kept on the rolls.
           </div>
         </div>
       )}

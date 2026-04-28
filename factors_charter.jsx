@@ -2729,6 +2729,10 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
 // The PAT is kept in its own localStorage key so it never lands in a
 // manuscript export.
 
+// GitHub backup is hidden in the Claude artifact runtime (CSP blocks
+// api.github.com). Flip to true when running the game outside Claude.
+const ENABLE_GITHUB_BACKUP = false;
+
 const GH_CONFIG_KEY = 'factor_github_config';
 
 const loadGithubConfig = async () => {
@@ -3093,8 +3097,9 @@ function Header({ gs, onReturnToTitle }) {
   const [githubConfig, setGithubConfig] = useState(null);
 
   // Load GitHub config (if any) once on mount. The modal also re-reads it,
-  // so this is just for menu-label hinting.
+  // so this is just for menu-label hinting. Skipped when the feature is off.
   useEffect(() => {
+    if (!ENABLE_GITHUB_BACKUP) return;
     let cancelled = false;
     (async () => {
       const cfg = await loadGithubConfig();
@@ -3191,13 +3196,25 @@ function Header({ gs, onReturnToTitle }) {
           >
             ⎘ Show AI log ({(gs.aiLog || []).length})
           </button>
-          <button
-            className="ghost-button"
-            style={{ width: '100%', textAlign: 'left', marginBottom: '0.6rem' }}
-            onClick={() => { setGithubOpen(true); setMenuOpen(false); }}
-          >
-            ↑ GitHub backup{githubConfig ? ` — ${githubConfig.owner}/${githubConfig.repo}` : ' (configure)'}
-          </button>
+          {/*
+            GitHub backup is intentionally disabled inside the Claude artifact
+            runtime: the iframe's Content Security Policy blocks fetches to
+            api.github.com (only api.anthropic.com is allowlisted), so the
+            push always fails with TypeError "Failed to fetch". The
+            GithubBackupModal, pushFileToGitHub, and loadGithubConfig
+            helpers are left intact so this menu entry can be restored
+            wholesale when the game runs outside Claude. To re-enable, set
+            ENABLE_GITHUB_BACKUP to true.
+          */}
+          {ENABLE_GITHUB_BACKUP && (
+            <button
+              className="ghost-button"
+              style={{ width: '100%', textAlign: 'left', marginBottom: '0.6rem' }}
+              onClick={() => { setGithubOpen(true); setMenuOpen(false); }}
+            >
+              ↑ GitHub backup{githubConfig ? ` — ${githubConfig.owner}/${githubConfig.repo}` : ' (configure)'}
+            </button>
+          )}
 
           <div className="display" style={{ fontSize: '0.75em', color: '#6b4423', letterSpacing: '0.08em', padding: '0 0.3rem', marginBottom: '0.4rem' }}>
             ⁂ NAVIGATE
@@ -4480,6 +4497,9 @@ function ProvisionsDrawer({ gs, setGs, lastSavedAt }) {
 
           <div style={{ fontStyle: 'italic', color: '#6b4423', fontSize: '0.82em', marginTop: '1.2rem' }}>
             Letters arrive as the post will bring them. To begin a fresh charter, return to the title from the menu &mdash; this charter will be kept on the rolls.
+          </div>
+          <div style={{ fontStyle: 'italic', color: '#6b4423', fontSize: '0.82em', marginTop: '0.6rem' }}>
+            For backups, use <strong>Show manuscript</strong> in the menu &mdash; copy the JSON and paste it where you keep your saves. <strong>Show AI log</strong> exports every prompt and response from this charter for review.
           </div>
         </div>
       )}

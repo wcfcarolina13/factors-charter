@@ -82,6 +82,18 @@ const SHIP_TYPES = {
     name: 'Pinnace',
     holdCwt: 60,
     blurb: 'A modest single-masted vessel. Quick on a fair wind, fragile in a foul one.',
+    wearMin: 1.0,
+    wearMax: 3.0,
+    voyageBonus: 0,
+  },
+  brigantine: {
+    name: 'Brigantine',
+    holdCwt: 180,
+    blurb: 'A two-masted country brigantine, square-rigged forward and fore-and-aft on the main. Built of Pegu teak, which the worm cannot find a tooth in.',
+    wearMin: 0.6,
+    wearMax: 1.5,
+    // -1 day on any voyage of 4+ days. Stacks with the Shipwright's Yard.
+    voyageBonus: 1,
   },
 };
 const MIN_SAIL_COND = 25;
@@ -223,20 +235,34 @@ const fmtCwt = (n) => {
   return n.toFixed(1);
 };
 
-// Wear applied per voyage day. Random within a small range so a long leg
-// adds up. Returns a new ship object — does not mutate.
+// Wear applied per voyage day. Random within the ship type's range so a long
+// leg adds up. Returns a new ship object — does not mutate. Teak-hulled
+// brigantines wear noticeably slower than the pinnace.
 const applyVoyageWear = (ship, days) => {
+  const t = SHIP_TYPES[ship?.type] || SHIP_TYPES.pinnace;
+  const span = (t.wearMax - t.wearMin);
   let hull = ship.hull;
   let sails = ship.sails;
   for (let i = 0; i < days; i++) {
-    hull  -= 1 + Math.random() * 2;   // 1–3 per day
-    sails -= 1 + Math.random() * 2;
+    hull  -= t.wearMin + Math.random() * span;
+    sails -= t.wearMin + Math.random() * span;
   }
   return {
     ...ship,
     hull:  Math.max(0, Math.round(hull)),
     sails: Math.max(0, Math.round(sails)),
   };
+};
+
+// Days at sea for a given destination, factoring in the Shipwright's Yard
+// (which trims one day off every voyage) and the ship type's voyageBonus
+// (the brigantine, on legs of 4+ days). Always returns at least 1.
+const voyageDays = (gs, port) => {
+  const base = port?.daysFromHome || 1;
+  const hasShipwright = !!gs.outpost?.buildings?.shipwright?.built;
+  const t = SHIP_TYPES[gs.ship?.type] || SHIP_TYPES.pinnace;
+  const shipBonus = (t.voyageBonus && base >= 4) ? t.voyageBonus : 0;
+  return Math.max(1, base - (hasShipwright ? 1 : 0) - shipBonus);
 };
 
 // Yard available to the player at their current port. Home upgrades from
@@ -315,6 +341,9 @@ const ensureShape = (gs) => {
     const visits = Math.floor((next.day || 1) / 180);
     const nextDay = Math.max(180, (next.day || 1) + 30);
     next.indiaman = { lastVisit: 0, nextDay, visits };
+  }
+  if (next.shipCommission === undefined) {
+    next.shipCommission = null;
   }
   return next;
 };
@@ -463,6 +492,7 @@ Mr. W. died this morning at half past four. The Reverend will not come down from
   quotas: { pepper: { needed: 400, have: 0 }, cinnamon: { needed: 200, have: 0 } },
   daysRemaining: 1095,
   indiaman: { lastVisit: 0, nextDay: 180, visits: 0 },
+  shipCommission: null, // { type, name, daysLeft, paid, tradeIn } when laying down a new vessel
   journal: [],
   letters: [directorLetter, wilbrahamPapers],
   hooks: ['The inland teak concession \u2014 ter Borch wants it.'],
@@ -541,6 +571,8 @@ function tickDays(gs, days) {
     letters: [...(gs.letters || [])],
     quotas: JSON.parse(JSON.stringify(gs.quotas || {})),
     indiaman: { ...(gs.indiaman || { lastVisit: 0, nextDay: 180, visits: 0 }) },
+    shipCommission: gs.shipCommission ? { ...gs.shipCommission } : null,
+    ship: gs.ship ? { ...gs.ship } : null,
   };
   const hasStockade = !!s.outpost.buildings.stockade?.built;
   const hasBarracks = !!s.outpost.buildings.barracks?.built;
@@ -585,6 +617,40 @@ function tickDays(gs, days) {
         }
       }
       s.outpost.queue = newQueue;
+    }
+
+    // ── ship commission progress. Like construction, slowed by Hodge's sobriety.
+    // On completion, the new ship replaces the old one (cargo, hull, sails reset
+    // to a fresh hundredweight on the slipway). The pinnace is sold off for the
+    // pre-quoted trade-in credit.
+    if (s.shipCommission && s.shipCommission.daysLeft > 0) {
+      const cspeed = s.npcs.hodge.sobriety > 40 ? 1 : (Math.random() < 0.6 ? 1 : 0);
+      const left = s.shipCommission.daysLeft - cspeed;
+      if (left <= 0) {
+        const t = SHIP_TYPES[s.shipCommission.type] || SHIP_TYPES.brigantine;
+        const oldShip = s.ship;
+        const newShip = {
+          name: s.shipCommission.name || `The ${t.name}`,
+          type: s.shipCommission.type,
+          holdCwt: t.holdCwt,
+          hull: 100,
+          sails: 100,
+          guns: s.shipCommission.type === 'brigantine' ? 6 : (oldShip?.guns || 0),
+        };
+        // Cargo carries over; the brigantine has more hold than the pinnace, so
+        // nothing in the old hold can fail to fit.
+        s.ship = newShip;
+        const credit = s.shipCommission.tradeIn || 0;
+        if (credit > 0) s.money = (s.money || 0) + credit;
+        s.awayLog.push({
+          day: s.day,
+          type: 'shipyard',
+          text: `${newShip.name} was launched at the slipway, two-masted and teak-built. The old ${oldShip?.name || 'pinnace'} went away with a Bugis trader for £${credit}.`,
+        });
+        s.shipCommission = null;
+      } else {
+        s.shipCommission = { ...s.shipCommission, daysLeft: left };
+      }
     }
 
     // ── plantation harvest every 30 days after built. Pepper is lodged in the
@@ -1845,7 +1911,6 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
 
   const sailTo = async (portKey) => {
     const port = PORTS[portKey];
-    const hasShipwright = !!gs.outpost.buildings.shipwright?.built;
     // Master refuses to put to sea if the ship is too far gone.
     if ((gs.ship?.hull ?? 100) < MIN_HULL_COND || (gs.ship?.sails ?? 100) < MIN_SAIL_COND) {
       return;
@@ -1860,7 +1925,7 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
       if (log) setGs(prev => ({ ...prev, aiLog: pushAiLog(prev.aiLog, log) }));
       setEncounter({ ...enc, type: 'voyage', destination: portKey });
     } else {
-      const baseDays = Math.max(1, (port.daysFromHome || 1) - (hasShipwright ? 1 : 0));
+      const baseDays = voyageDays(gs, port);
       setPendingMsg('The voyage is uneventful');
       await new Promise(r => setTimeout(r, 600));
 
@@ -1890,8 +1955,7 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
     if (encounter.type === 'voyage') {
       const dest = encounter.destination;
       const port = PORTS[dest];
-      const hasShipwright = !!gs.outpost.buildings.shipwright?.built;
-      const baseDays = Math.max(1, (port.daysFromHome || 1) - (hasShipwright ? 1 : 0));
+      const baseDays = voyageDays(gs, port);
       const totalDays = baseDays + (outcome.changes.days || 0);
 
       // Apply outcome changes (no time) — schema supports shipDamage at sea.
@@ -1954,6 +2018,28 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
       aiLog: log ? pushAiLog(prev.aiLog, log) : prev.aiLog,
     }));
     setTab('letters');
+  };
+
+  // Commission a brigantine at the Bayan-Kor slipway. Pays up front; pinnace
+  // remains in service until the new ship is launched, at which point a
+  // pre-quoted credit is paid for the pinnace.
+  const commissionBrigantine = (proposedName) => {
+    if (gs.location !== 'Bayan-Kor') return;
+    if (gs.shipCommission) return;
+    if (!gs.outpost?.buildings?.shipwright?.built) return;
+    if (gs.ship?.type !== 'pinnace') return;
+    const COST = 900;
+    const TRADE_IN = 100;
+    const DAYS = 60;
+    if (gs.money < COST) return;
+    const cleanName = (proposedName || 'The Astrolabe').trim() || 'The Astrolabe';
+    const name = cleanName.startsWith('The ') ? cleanName : `The ${cleanName}`;
+    setGs(prev => ({
+      ...prev,
+      money: prev.money - COST,
+      shipCommission: { type: 'brigantine', name, daysLeft: DAYS, paid: COST, tradeIn: TRADE_IN },
+      journal: [...prev.journal, { day: prev.day, entry: `Laid the order with the master shipwright at Bayan-Kor for a teak brigantine, ${name}. £${COST} disbursed; the keel will be laid this week.` }],
+    }));
   };
 
   const startBuild = (key) => {
@@ -2217,7 +2303,7 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
           {tab === 'journal' && <JournalView gs={gs} arrivalProse={arrivalProse} setTab={setTab} openLetterById={openLetterById} />}
           {tab === 'ledger' && <LedgerView gs={gs} />}
           {tab === 'map' && <MapView gs={gs} sailTo={sailTo} />}
-          {tab === 'port' && <PortView gs={gs} buyGood={buyGood} sellGood={sellGood} refitShip={refitShip} arrivalProse={arrivalProse} setTab={setTab} lodgeGoods={lodgeGoods} withdrawGoods={withdrawGoods} />}
+          {tab === 'port' && <PortView gs={gs} buyGood={buyGood} sellGood={sellGood} refitShip={refitShip} arrivalProse={arrivalProse} setTab={setTab} lodgeGoods={lodgeGoods} withdrawGoods={withdrawGoods} commissionBrigantine={commissionBrigantine} />}
           {tab === 'outpost' && atHome && <OutpostView gs={gs} startBuild={startBuild} expediteBuild={expediteBuild} />}
           {tab === 'letters' && <LettersView gs={gs} setGs={setGs} onRespond={handleLetterResponse} onRequestNew={requestNewLetter} openLetterId={openLetterId} setOpenLetterId={setOpenLetterId} />}
         </div>
@@ -3193,7 +3279,7 @@ function MapView({ gs, sailTo }) {
 
 // ─────────── PORT VIEW ───────────
 
-function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab, lodgeGoods, withdrawGoods }) {
+function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab, lodgeGoods, withdrawGoods, commissionBrigantine }) {
   const port = PORTS[gs.location];
   const sells = Object.keys(port.sells || {});
   const buys = Object.keys(port.buys || {});
@@ -3336,6 +3422,10 @@ function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab, lodg
         </div>
       )}
 
+      {atHome && commissionBrigantine && (
+        <CommissionPanel gs={gs} commissionBrigantine={commissionBrigantine} />
+      )}
+
       <Fleuron char="❧" />
       <div style={{ textAlign: 'center', marginTop: '1rem' }}>
         <p className="italic" style={{ color: '#6b4423', fontSize: '0.9em', marginBottom: '0.7rem' }}>
@@ -3425,6 +3515,86 @@ function GodownPanel({ gs, lodgeGoods, withdrawGoods }) {
 }
 
 // ─────────── OUTPOST VIEW ───────────
+
+// ─────────── COMMISSION PANEL ───────────
+// Shown at the Wharf at home. Three states: gated (no Shipwright's Yard /
+// already on a brigantine), in-progress (build counting down), or available.
+
+function CommissionPanel({ gs, commissionBrigantine }) {
+  const [proposedName, setProposedName] = useState('Astrolabe');
+  const COST = 900;
+  const TRADE_IN = 100;
+  const DAYS = 60;
+  const t = SHIP_TYPES.brigantine;
+  const hasYard = !!gs.outpost?.buildings?.shipwright?.built;
+  const inProgress = gs.shipCommission && gs.shipCommission.daysLeft > 0;
+  const alreadyBrig = gs.ship?.type === 'brigantine';
+  const canPay = gs.money >= COST;
+
+  if (alreadyBrig && !inProgress) return null;
+
+  if (inProgress) {
+    const c = gs.shipCommission;
+    const total = DAYS;
+    const pct = Math.max(0, Math.min(100, Math.round(((total - c.daysLeft) / total) * 100)));
+    return (
+      <div style={{ marginTop: '1.5rem', padding: '0.9rem 1rem', background: 'rgba(255,255,255,0.3)', borderLeft: '3px solid #5c1a08' }}>
+        <div className="display" style={{ fontSize: '0.9em', color: '#5c1a08', marginBottom: '0.3rem' }}>ON THE STOCKS — {c.name?.toUpperCase()}</div>
+        <p className="italic" style={{ margin: '0 0 0.6rem 0', color: '#4a3220', fontSize: '0.92em' }}>
+          The keel is laid; the planking goes on by the week. {c.daysLeft} day{c.daysLeft !== 1 ? 's' : ''} until launch. The {gs.ship?.name || 'pinnace'} remains in service until then.
+        </p>
+        <div style={{ height: '5px', background: 'rgba(74,44,20,0.15)', borderRadius: '2px' }}>
+          <div style={{ width: `${pct}%`, height: '100%', background: '#5c1a08', borderRadius: '2px' }} />
+        </div>
+      </div>
+    );
+  }
+
+  if (!hasYard) {
+    return (
+      <div style={{ marginTop: '1.5rem', padding: '0.9rem 1rem', background: 'rgba(255,255,255,0.2)', borderLeft: '3px dashed #6b4423' }}>
+        <div className="display" style={{ fontSize: '0.9em', color: '#6b4423', marginBottom: '0.3rem' }}>A LARGER VESSEL</div>
+        <p className="italic" style={{ margin: 0, color: '#4a3220', fontSize: '0.92em' }}>
+          A country brigantine could be laid down on the slipway, were there a proper Shipwright&rsquo;s Yard at Bayan-Kor.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ marginTop: '1.5rem', padding: '0.9rem 1rem', background: 'rgba(255,255,255,0.3)', borderLeft: '3px solid #5c1a08' }}>
+      <div className="display" style={{ fontSize: '0.9em', color: '#5c1a08', marginBottom: '0.3rem' }}>COMMISSION A BRIGANTINE</div>
+      <p className="italic" style={{ margin: '0 0 0.5rem 0', color: '#4a3220', fontSize: '0.92em' }}>
+        {t.blurb} Sixty days on the stocks; the pinnace will be sold off to the Bugis traders for £{TRADE_IN} on the day she is launched.
+      </p>
+      <div style={{ fontSize: '0.85em', color: '#6b4423', marginBottom: '0.5rem' }}>
+        £{COST} · {DAYS} days · hold {t.holdCwt} cwt · {t.wearMin}–{t.wearMax} wear/day · −1 day on long voyages
+      </div>
+      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
+        <label style={{ fontSize: '0.85em', color: '#6b4423' }}>Name her:</label>
+        <input
+          className="parchment-input"
+          value={proposedName}
+          onChange={(e) => setProposedName(e.target.value)}
+          maxLength={32}
+          style={{ flex: 1, minWidth: '10rem' }}
+        />
+      </div>
+      <button
+        className="wax-button"
+        disabled={!canPay}
+        onClick={() => commissionBrigantine(proposedName)}
+      >
+        Lay the keel — £{COST}
+      </button>
+      {!canPay && (
+        <div style={{ fontSize: '0.82em', color: '#8b1a1a', marginTop: '0.3rem', fontStyle: 'italic' }}>
+          The strongbox is short of the figure.
+        </div>
+      )}
+    </div>
+  );
+}
 
 function OutpostView({ gs, startBuild, expediteBuild }) {
   const built = Object.entries(gs.outpost.buildings).filter(([,v]) => v.built);

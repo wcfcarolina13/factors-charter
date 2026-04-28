@@ -136,6 +136,14 @@ He has a Drive folder for this project (id `1yqTKacEuy4j3_Ph2QR5CKr1T_xIqpjeU`, 
 
 ---
 
+## World-building feedstock
+
+Read `WORLD_NOTES.md` at the repo root before any session that touches narrative or new content. It's Bradley's notebook — inspirations, names he likes, anti-patterns, open hooks in plain English, and a record of which real-world references have already been transposed into the fictional SE-Asian setting (e.g. Bacalar → Tanjung Cermin). When new entries appear in the "INSPIRATIONS PENDING" section, translate them: usually one or more of `LORE`, `PORTS`, an auto-letter sender, an event hook. Never copy a real-world place 1:1 — always transpose for the world's geography.
+
+The runtime `LORE` registry in `factors_charter.jsx` is the bridge: lore entries are surfaced to the AI in `stateContext` only when their triggers (location, flag, faction standing, visited) match. Keep entries tight (2–4 short sentences) — every line costs prompt budget on every relevant call.
+
+---
+
 ## When in doubt
 
 Ship a fix and surface the file. Don't re-design. Don't add features the user didn't ask for. Don't write long prose responses on a small phone screen. Mirror his tone — direct, dry, no fluff.

@@ -75,6 +75,20 @@ const PORTS = {
     yard: 'rough',
     yardBlurb: 'The Brotherhood\u2019s wreckers can patch a hull in a hurry \u2014 with what timber they have lifted from elsewhere.',
   },
+  'Tanjung Cermin': {
+    name: 'Tanjung Cermin',
+    blurb: 'A deep lagoon further east, shown on no chart. Seven shades of blue water, an old Portuguese fort gone to the trees.',
+    daysFromHome: 14,
+    requiresRep: { pirates: 25 },
+    requiresVisited: 'The Pelican\u2019s Nest',
+    sells: { silver: 0.55, opium: 0.6, saltpetre: 0.55 },
+    stockMax: { silver: 220, opium: 24, saltpetre: 32 },
+    restock:  { silver: 1.7, opium: 0.25, saltpetre: 0.35 },
+    buys:  { rum: 1.9, calico: 1.5, rice: 1.6 },
+    faction: 'pirates',
+    yard: 'rough',
+    yardBlurb: 'A wreckers\u2019 slip among the palms \u2014 driftwood, prize timber, and what the lagoon will give up.',
+  },
 };
 
 // \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 SHIPS \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
@@ -1118,6 +1132,55 @@ async function callClaude(prompt) {
   }
 }
 
+// ─────────── LORE ───────────
+// World-building entries surfaced to the AI in the prompt only when their
+// trigger conditions match the current state. Add new entries here when a
+// real-world history, a place, or a character idea would enrich how the AI
+// writes about a location, faction, or moment. Keep texts tight (2–4 short
+// sentences) — every line eats prompt budget on every relevant call.
+//
+// Trigger keys (any combination, all must match):
+//   location   — exact port name (e.g. 'Bacalar Lagoon')
+//   visited    — only after the Factor has been to this port
+//   flag       — only when gs.flags[flag] is truthy
+//   repAtLeast — { factionKey: minRep }, all keys must satisfy
+//   always     — true (campaign-wide flavor; use sparingly)
+//
+// You can also add a `tag` for grouping (e.g. 'pirate-haven') for future
+// triggers that match by tag rather than by single key.
+
+const LORE = [
+  {
+    // Inspired by the history of Bacalar (Yucatan): a coastal lagoon held by
+    // pirates from the 1648 sack onward, "lagoon of seven colours" for the
+    // bands of blue, repeatedly contested and refortified by the colonial
+    // power. Transposed here to a Southeast-Asian context — abandoned
+    // Portuguese fortresses are period-plausible since Malacca fell to the
+    // Dutch in 1641 and Iberian outposts went dark across the region.
+    key: 'tanjung-cermin',
+    tag: 'pirate-haven',
+    trigger: { location: 'Tanjung Cermin' },
+    text: 'Tanjung Cermin shows seven distinct shades of blue from the dock to the deep — the Bugis call it the cape of mirrors. The Portuguese fort on the inner island is a ruin; its garrison withdrew when Malacca fell to the Dutch in ’41, and no power has held the cove since. The Brotherhood meets in its old chapel each monsoon to settle accounts. The Padre who blessed the keystones lies somewhere among the palms; the marker was long since taken for firewood.',
+  },
+];
+
+function loreForState(gs) {
+  if (!Array.isArray(LORE) || LORE.length === 0) return [];
+  return LORE.filter(e => {
+    const t = e.trigger || {};
+    if (t.always) return true;
+    if (t.location && gs.location !== t.location) return false;
+    if (t.visited && !gs.visited?.includes(t.visited)) return false;
+    if (t.flag && !gs.flags?.[t.flag]) return false;
+    if (t.repAtLeast) {
+      for (const [f, n] of Object.entries(t.repAtLeast)) {
+        if ((gs.reputation?.[f] || 0) < n) return false;
+      }
+    }
+    return true;
+  }).slice(0, 3); // cap to keep prompt budget under control
+}
+
 const stateContext = (gs) => {
   const reps = Object.entries(gs.reputation)
     .filter(([,v]) => v !== 0)
@@ -1145,7 +1208,10 @@ const stateContext = (gs) => {
   const indiamanLine = i.nextDay
     ? `Next Indiaman due in ${Math.max(0, i.nextDay - gs.day)} days (${(i.visits || 0)}/${INDIAMAN_TOTAL} calls made)`
     : 'Indiaman schedule not yet known';
-  return `Day ${gs.day}. Location: ${gs.location}. ${ship}. Crew: ${gs.crew.map(c=>`${c.name} (${c.trait} ${c.role})`).join(', ')}. Reputation: ${reps}. ${reckoning}. ${indiamanLine}. Days remaining on charter: ${gs.daysRemaining}. Recent: ${recentJournal}. Open threads: ${hooks}. Acquaintances: ${acquaintances}. Flags: ${flags}.`;
+  // Lore — only the entries whose triggers match the current state.
+  const lore = loreForState(gs).map(e => `[${e.key}] ${e.text}`).join(' ');
+  const loreLine = lore ? ` Local knowledge: ${lore}` : '';
+  return `Day ${gs.day}. Location: ${gs.location}. ${ship}. Crew: ${gs.crew.map(c=>`${c.name} (${c.trait} ${c.role})`).join(', ')}. Reputation: ${reps}. ${reckoning}. ${indiamanLine}. Days remaining on charter: ${gs.daysRemaining}. Recent: ${recentJournal}. Open threads: ${hooks}. Acquaintances: ${acquaintances}. Flags: ${flags}.${loreLine}`;
 };
 
 async function genVoyageEncounter(gs, fromPort, toPort) {
@@ -3827,7 +3893,14 @@ function LedgerView({ gs }) {
 // ─────────── MAP VIEW ───────────
 
 function MapView({ gs, sailTo }) {
-  const ports = Object.entries(PORTS).filter(([k]) => k !== gs.location);
+  // Ports with a `requiresVisited` gate stay off the chart until the
+  // prerequisite port has been put into. Preserves the atmosphere of a
+  // place "shown on no chart" until someone tells you about it.
+  const ports = Object.entries(PORTS).filter(([k, p]) => {
+    if (k === gs.location) return false;
+    if (p.requiresVisited && !gs.visited?.includes(p.requiresVisited)) return false;
+    return true;
+  });
   const ship = gs.ship || { hull: 100, sails: 100 };
   const tooDamaged = ship.hull < MIN_HULL_COND || ship.sails < MIN_SAIL_COND;
 

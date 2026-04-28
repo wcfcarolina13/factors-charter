@@ -340,7 +340,9 @@ const ensureShape = (gs) => {
     // so the Factor has time to lodge stock before the first call.
     const visits = Math.floor((next.day || 1) / 180);
     const nextDay = Math.max(180, (next.day || 1) + 30);
-    next.indiaman = { lastVisit: 0, nextDay, visits };
+    next.indiaman = { lastVisit: 0, nextDay, visits, lastQuarterly: 0 };
+  } else if (next.indiaman.lastQuarterly === undefined) {
+    next.indiaman = { ...next.indiaman, lastQuarterly: next.indiaman.lastVisit || 0 };
   }
   if (next.shipCommission === undefined) {
     next.shipCommission = null;
@@ -491,7 +493,7 @@ Mr. W. died this morning at half past four. The Reverend will not come down from
   awayLog: [],          // events accrued while away from Bayan-Kor; cleared on digest
   quotas: { pepper: { needed: 400, have: 0 }, cinnamon: { needed: 200, have: 0 } },
   daysRemaining: 1095,
-  indiaman: { lastVisit: 0, nextDay: 180, visits: 0 },
+  indiaman: { lastVisit: 0, nextDay: 180, visits: 0, lastQuarterly: 0 },
   shipCommission: null, // { type, name, daysLeft, paid, tradeIn } when laying down a new vessel
   journal: [],
   letters: [directorLetter, wilbrahamPapers],
@@ -517,6 +519,7 @@ const INDIAMAN_NAMES = [
   'the Devonshire', 'the Egmont', 'the Houghton',
 ];
 const INDIAMAN_INTERVAL = 180;
+const QUARTERLY_INTERVAL = 90;
 const INDIAMAN_TOTAL = 6;
 
 function makeIndiamanLetter(s, peppLifted, cinnLifted, shipName) {
@@ -620,6 +623,55 @@ The Vizier`,
   };
 }
 
+// ─────────── QUARTERLY DIRECTOR NAGS ───────────
+// Between Indiaman calls, the Court writes anyway. Templated tone based on
+// cumulative progress: pleased / reminding / pointed / dismayed. Fires every
+// QUARTERLY_INTERVAL days, offset to fall halfway between Indiaman visits
+// (lastVisit + 90).
+
+function makeQuarterlyNagLetter(s) {
+  const visits      = s.indiaman?.visits || 0;
+  const totalPepper = (s.quotas?.pepper?.have   || 0);
+  const totalCinn   = (s.quotas?.cinnamon?.have || 0);
+  const lodgedPep   = Math.floor(s.outpost?.warehouse?.pepper   || 0);
+  const lodgedCinn  = Math.floor(s.outpost?.warehouse?.cinnamon || 0);
+  const expectedPep = Math.round((400 * visits) / INDIAMAN_TOTAL);
+  const expectedCin = Math.round((200 * visits) / INDIAMAN_TOTAL);
+  const onTrack     = (totalPepper + lodgedPep) >= expectedPep * 0.85
+                   && (totalCinn   + lodgedCinn) >= expectedCin * 0.85;
+  const finalStretch = (s.daysRemaining || 0) < 365;
+  const nothingYet   = visits === 0 && totalPepper === 0 && totalCinn === 0
+                     && lodgedPep === 0 && lodgedCinn === 0;
+  const reckoning    = `${totalPepper} of 400 pepper and ${totalCinn} of 200 cinnamon shipped, with ${lodgedPep} and ${lodgedCinn}cwt respectively in yr. godown awaiting the next call.`;
+
+  let subject, body;
+  if (nothingYet) {
+    subject = 'A First Quarterly Note';
+    body = `Sir, — We open yr. file at the Court for the present charter. The first Indiaman is despatched in due course; we shall expect a return at her holds. We pray you have laid the ground.\n\nWe are mindful of the climate, the politics, and the price of plank. We are mindful also that the late Mr. Wilbraham held the post for two years on similar excuses.\n\nYr. obedt. servants, the Court of Directors.`;
+  } else if (finalStretch && !onTrack) {
+    subject = 'A Pointed Word';
+    body = `Sir, — A reckoning at this hand: ${reckoning} The third year is upon us, and the figures are not what we are owed. The Court has the names of two replacements before it. We trust you take our meaning.\n\nYr. servants, the Court of Directors.`;
+  } else if (onTrack) {
+    subject = 'Yr. Progress Noted';
+    body = `Sir, — Returns reckon ${reckoning} The Court is content with the present pace. Press on.\n\nYr. obedt. servants, the Court of Directors.`;
+  } else {
+    subject = 'A Quarterly Reminder';
+    body = `Sir, — We have to remind you that the present hand finds the books at ${reckoning} The next Indiaman comes round in due course, and we shall watch what she brings.\n\nYr. servants, the Court of Directors.`;
+  }
+  return {
+    id: 3000000 + s.day,
+    from: 'The Court of Directors, London',
+    subject,
+    body,
+    responses: [
+      { label: 'Acknowledge with formal compliance', seed: 'no surprises; perhaps a small standing nudge' },
+      { label: 'Reply with a measured account of difficulties', seed: 'company notes the case' },
+      { label: 'Set the letter aside, return to the work', seed: 'no rep change' },
+    ],
+    read: false,
+  };
+}
+
 // ─────────── HOME SIMULATION ───────────
 // Each day the Factor is away (or any day passes), the colony lives.
 // Construction progresses, NPCs act, small incidents accrue.
@@ -636,7 +688,7 @@ function tickDays(gs, days) {
     portStocks: JSON.parse(JSON.stringify(gs.portStocks || {})),
     letters: [...(gs.letters || [])],
     quotas: JSON.parse(JSON.stringify(gs.quotas || {})),
-    indiaman: { ...(gs.indiaman || { lastVisit: 0, nextDay: 180, visits: 0 }) },
+    indiaman: { ...(gs.indiaman || { lastVisit: 0, nextDay: 180, visits: 0, lastQuarterly: 0 }) },
     shipCommission: gs.shipCommission ? { ...gs.shipCommission } : null,
     ship: gs.ship ? { ...gs.ship } : null,
   };
@@ -818,7 +870,23 @@ function tickDays(gs, days) {
         ? 'The hold went away empty, by the harbourmaster’s account.'
         : `${peppLifted} cwt pepper and ${cinnLifted} cwt cinnamon lifted from the godown.`;
       s.awayLog.push({ day: s.day, type: 'indiaman', text: `${ShipName}, of the Company, called for the returns. ${tail} A letter from the Court came by the same packet.` });
-      s.indiaman = { lastVisit: s.day, nextDay: s.day + INDIAMAN_INTERVAL, visits: (s.indiaman.visits || 0) + 1 };
+      s.indiaman = { lastVisit: s.day, nextDay: s.day + INDIAMAN_INTERVAL, visits: (s.indiaman.visits || 0) + 1, lastQuarterly: s.day };
+    }
+
+    // ── Quarterly nag from the Court — fires halfway between Indiaman calls.
+    // Doesn't fire on a day that already saw an Indiaman visit (above sets
+    // lastQuarterly = lastVisit, blocking same-day double letters).
+    if (
+      (s.indiaman?.visits || 0) < INDIAMAN_TOTAL &&
+      (s.daysRemaining || 0) > 0 &&
+      s.day >= (s.indiaman?.lastVisit || 0) + QUARTERLY_INTERVAL &&
+      (s.indiaman?.lastQuarterly || 0) < (s.indiaman?.lastVisit || 0) + QUARTERLY_INTERVAL
+    ) {
+      const letter = makeQuarterlyNagLetter(s);
+      s.letters = [...s.letters, letter];
+      s.lettersGenerated = (s.lettersGenerated || 0) + 1;
+      s.indiaman = { ...s.indiaman, lastQuarterly: s.day };
+      s.awayLog.push({ day: s.day, type: 'letter', text: 'A packet from London — the Court desires word of yr. progress.' });
     }
 
     // ── Teak concession: once the Factor has earned a measure of standing

@@ -1931,62 +1931,143 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
   );
 }
 
+// ─────────── EXPORT MODAL ───────────
+// Programmatic blob downloads (a.click() on a Blob URL) navigate the artifact
+// iframe away on mobile and tear down the React tree. This modal replaces them
+// with a copyable textarea + a Copy button that uses the clipboard API. Works
+// in any sandboxed iframe; falls back to manual long-press copying if the
+// clipboard is refused.
+function ExportModal({ title, content, filename, onClose }) {
+  const [flash, setFlash] = useState('');
+  const taRef = useRef(null);
+
+  // Try to copy automatically when opened — saves the user a tap if it works.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(content);
+          if (!cancelled) setFlash('Copied to clipboard.');
+        }
+      } catch (e) { /* user can copy manually from the textarea */ }
+    })();
+    return () => { cancelled = true; };
+  }, [content]);
+
+  const copyAgain = async () => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(content);
+        setFlash('Copied to clipboard.');
+        return;
+      }
+    } catch (e) { /* fall through */ }
+    // Fallback: select the textarea so the user can long-press → Copy.
+    if (taRef.current) {
+      taRef.current.focus();
+      taRef.current.select();
+      setFlash('Long-press the text and choose Copy.');
+    }
+  };
+
+  const sizeKB = Math.max(1, Math.round((content?.length || 0) / 1024));
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 100,
+        background: 'rgba(20,12,4,0.55)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '1rem',
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="parchment"
+        style={{
+          background: '#f0e3c4',
+          maxWidth: '40rem', width: '100%', maxHeight: '90vh',
+          padding: '1rem',
+          display: 'flex', flexDirection: 'column',
+          boxShadow: '0 4px 16px rgba(20,12,4,0.5)',
+          border: '1px solid rgba(74,44,20,0.4)',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.5rem' }}>
+          <div className="display" style={{ fontSize: '1em', color: '#5c1a08' }}>{title}</div>
+          <div style={{ fontSize: '0.78em', color: '#6b4423', fontStyle: 'italic' }}>~{sizeKB} kB</div>
+        </div>
+        {filename && (
+          <div style={{ fontSize: '0.78em', color: '#6b4423', fontStyle: 'italic', marginBottom: '0.4rem' }}>
+            Suggested filename: <code style={{ fontFamily: 'monospace' }}>{filename}</code>
+          </div>
+        )}
+        <p style={{ fontSize: '0.82em', color: '#4a3220', fontStyle: 'italic', marginTop: 0, marginBottom: '0.5rem' }}>
+          Copy this and save it where you keep your manuscripts. The artifact iframe cannot put files on disk for you.
+        </p>
+        <textarea
+          ref={taRef}
+          readOnly
+          value={content}
+          onFocus={(e) => e.currentTarget.select()}
+          style={{
+            flex: 1, minHeight: '12rem', width: '100%',
+            fontFamily: 'monospace', fontSize: '0.72em',
+            padding: '0.5rem',
+            background: 'rgba(255,255,255,0.5)',
+            border: '1px solid rgba(74,44,20,0.3)',
+            color: '#2a1a0a',
+            resize: 'vertical',
+            whiteSpace: 'pre',
+          }}
+        />
+        {flash && (
+          <div className="ink-fade-in" style={{ marginTop: '0.5rem', padding: '0.4rem 0.7rem', background: 'rgba(92,26,8,0.08)', borderLeft: '2px solid #5c1a08', fontSize: '0.85em', color: '#5c1a08' }}>
+            {flash}
+          </div>
+        )}
+        <div style={{ marginTop: '0.7rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <button className="ghost-button" onClick={copyAgain}>⎘ Copy to clipboard</button>
+          <button className="wax-button" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─────────── HEADER ───────────
 
 function Header({ gs, onReturnToTitle }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [flash, setFlash] = useState('');
+  const [exportPanel, setExportPanel] = useState(null); // { title, content, filename }
 
   const showFlash = (msg) => {
     setFlash(msg);
     setTimeout(() => setFlash(''), 2200);
   };
 
-  const downloadManuscript = () => {
-    try {
-      const data = JSON.stringify({ gs, phase: 'game', exportedAt: Date.now() }, null, 2);
-      const blob = new Blob([data], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `factors-charter-day${gs.day}-${Date.now()}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-      showFlash('Manuscript downloaded.');
-      setMenuOpen(false);
-    } catch (e) {
-      showFlash('Download failed; try Copy.');
-    }
+  const showManuscript = () => {
+    const data = JSON.stringify({ gs, phase: 'game', exportedAt: Date.now() }, null, 2);
+    setExportPanel({
+      title: 'Manuscript',
+      content: data,
+      filename: `factors-charter-day${gs.day}-${Date.now()}.json`,
+    });
+    setMenuOpen(false);
   };
 
-  const copyManuscript = () => {
-    try {
-      const data = JSON.stringify({ gs, phase: 'game', exportedAt: Date.now() });
-      navigator.clipboard.writeText(data).then(
-        () => { showFlash('Copied to clipboard.'); setMenuOpen(false); },
-        () => showFlash('Clipboard refused; use marginalia.')
-      );
-    } catch (e) {
-      showFlash('Copy failed.');
-    }
-  };
-
-  const downloadAiLog = () => {
-    try {
-      const log = gs.aiLog || [];
-      const data = JSON.stringify({ player: gs.player.name, day: gs.day, count: log.length, aiLog: log }, null, 2);
-      const blob = new Blob([data], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `factors-charter-ai-log-day${gs.day}-${Date.now()}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-      showFlash(`AI log downloaded (${log.length} entries).`);
-      setMenuOpen(false);
-    } catch (e) {
-      showFlash('Download failed.');
-    }
+  const showAiLog = () => {
+    const log = gs.aiLog || [];
+    const data = JSON.stringify({ player: gs.player.name, day: gs.day, count: log.length, aiLog: log }, null, 2);
+    setExportPanel({
+      title: `AI log (${log.length} entries)`,
+      content: data,
+      filename: `factors-charter-ai-log-day${gs.day}-${Date.now()}.json`,
+    });
+    setMenuOpen(false);
   };
 
   return (
@@ -2036,24 +2117,17 @@ function Header({ gs, onReturnToTitle }) {
           <button
             className="ghost-button"
             style={{ width: '100%', textAlign: 'left', marginBottom: '0.3rem' }}
-            onClick={downloadManuscript}
+            onClick={showManuscript}
           >
-            ↓ Download manuscript (JSON)
-          </button>
-          <button
-            className="ghost-button"
-            style={{ width: '100%', textAlign: 'left', marginBottom: '0.3rem' }}
-            onClick={copyManuscript}
-          >
-            ⎘ Copy to clipboard
+            ⎘ Show manuscript (JSON)
           </button>
           <button
             className="ghost-button"
             style={{ width: '100%', textAlign: 'left', marginBottom: '0.6rem' }}
-            onClick={downloadAiLog}
+            onClick={showAiLog}
             disabled={!gs.aiLog || gs.aiLog.length === 0}
           >
-            ↓ Download AI log ({(gs.aiLog || []).length})
+            ⎘ Show AI log ({(gs.aiLog || []).length})
           </button>
 
           <div className="display" style={{ fontSize: '0.75em', color: '#6b4423', letterSpacing: '0.08em', padding: '0 0.3rem', marginBottom: '0.4rem' }}>
@@ -2070,6 +2144,15 @@ function Header({ gs, onReturnToTitle }) {
             Your charter auto-saves. From the title screen you can continue, begin anew, or restore from a manuscript.
           </div>
         </div>
+      )}
+
+      {exportPanel && (
+        <ExportModal
+          title={exportPanel.title}
+          content={exportPanel.content}
+          filename={exportPanel.filename}
+          onClose={() => setExportPanel(null)}
+        />
       )}
     </div>
   );
@@ -2912,6 +2995,7 @@ function ProvisionsDrawer({ gs, setGs, requestNewLetter, lastSavedAt }) {
   const [importText, setImportText] = useState('');
   const [importMode, setImportMode] = useState(false);
   const [flash, setFlash] = useState('');
+  const [exportPanel, setExportPanel] = useState(null);
 
   const showFlash = (msg) => {
     setFlash(msg);
@@ -2927,43 +3011,13 @@ function ProvisionsDrawer({ gs, setGs, requestNewLetter, lastSavedAt }) {
     return `saved ${Math.floor(ago / 3600)}h ago`;
   })();
 
-  const exportJSON = () => {
-    try {
-      const data = JSON.stringify({ gs, phase: 'game', exportedAt: Date.now() }, null, 2);
-      // Try download
-      try {
-        const blob = new Blob([data], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `factors_charter_day${gs.day}.json`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        showFlash('Manuscript copied to your downloads.');
-      } catch (e) {
-        // Fallback: copy to clipboard
-        navigator.clipboard.writeText(data).then(
-          () => showFlash('Manuscript copied to clipboard.'),
-          () => showFlash('Could not export. Try the text copy below.')
-        );
-      }
-    } catch (e) {
-      showFlash('Export failed.');
-    }
-  };
-
-  const copyToClipboard = () => {
-    try {
-      const data = JSON.stringify({ gs, phase: 'game', exportedAt: Date.now() });
-      navigator.clipboard.writeText(data).then(
-        () => showFlash('Copied to clipboard. Paste somewhere safe.'),
-        () => showFlash('Clipboard refused. Long-press the text below to copy.')
-      );
-    } catch (e) {
-      showFlash('Copy failed.');
-    }
+  const showManuscript = () => {
+    const data = JSON.stringify({ gs, phase: 'game', exportedAt: Date.now() }, null, 2);
+    setExportPanel({
+      title: 'Manuscript',
+      content: data,
+      filename: `factors_charter_day${gs.day}.json`,
+    });
   };
 
   const importJSON = () => {
@@ -3009,8 +3063,7 @@ function ProvisionsDrawer({ gs, setGs, requestNewLetter, lastSavedAt }) {
             Take a copy of the manuscript before each long voyage. Paste it back to restore should the inkwell be overturned.
           </p>
           <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginBottom: '0.7rem' }}>
-            <button className="ghost-button-sm" onClick={exportJSON}>Download manuscript</button>
-            <button className="ghost-button-sm" onClick={copyToClipboard}>Copy to clipboard</button>
+            <button className="ghost-button-sm" onClick={showManuscript}>Show manuscript</button>
             <button className="ghost-button-sm" onClick={() => setImportMode(!importMode)}>
               {importMode ? 'Cancel import' : 'Restore from manuscript'}
             </button>
@@ -3040,13 +3093,22 @@ function ProvisionsDrawer({ gs, setGs, requestNewLetter, lastSavedAt }) {
           <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
             <button className="ghost-button-sm" onClick={requestNewLetter}>Conjure a letter</button>
             <button className="ghost-button-sm" onClick={async () => {
-              if (window.confirm('Begin a fresh charter? Current progress will be lost unless you have downloaded the manuscript.')) {
+              if (window.confirm('Begin a fresh charter? Current progress will be lost unless you have shown and copied the manuscript.')) {
                 await safeStorage.delete('factor_save');
                 window.location.reload();
               }
             }}>Begin anew</button>
           </div>
         </div>
+      )}
+
+      {exportPanel && (
+        <ExportModal
+          title={exportPanel.title}
+          content={exportPanel.content}
+          filename={exportPanel.filename}
+          onClose={() => setExportPanel(null)}
+        />
       )}
     </div>
   );

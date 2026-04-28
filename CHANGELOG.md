@@ -4,6 +4,20 @@ The Factor's Charter — a chronological log of what's shipped. Newest first.
 
 ---
 
+## Session 6 — fix the export crash
+
+### Fixed
+- **Header menu downloads no longer tear down the artifact.** The "Download manuscript" / "Download AI log" buttons used `Blob` + `URL.createObjectURL` + `a.click()`, which on mobile inside the artifact iframe can navigate the iframe to the blob URL — indistinguishable from a crash to the player. Same root cause for the marginalia's "Download manuscript" / "Copy to clipboard" pair.
+- **Marginalia exports no longer crash.** Replaced for the same reason.
+
+### Changed
+- New shared **`ExportModal`** component renders a fixed-position overlay containing the JSON in a select-on-focus textarea, attempts an automatic clipboard copy on open, and offers an explicit "Copy to clipboard" button with a long-press-to-copy fallback when clipboard is refused. Pure DOM, no navigation, safe inside any iframe.
+- Header menu: "Download manuscript (JSON)" → **"Show manuscript (JSON)"**, "Download AI log" → **"Show AI log"**. Removed the standalone "Copy to clipboard" entry — the modal now handles copy itself.
+- Marginalia: "Download manuscript" → **"Show manuscript"**. Removed the standalone "Copy to clipboard" — same reason.
+- Begin-anew confirmation copy updated to reflect the new "show + copy" workflow.
+
+---
+
 ## Session 5 — schema expansion, AI log, robust saves
 
 ### Added

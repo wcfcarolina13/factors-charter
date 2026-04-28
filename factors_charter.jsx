@@ -1432,14 +1432,14 @@ const Loading = ({ msg }) => {
 
 // ─────────── TITLE SCREEN ───────────
 
-function TitleScreen({ savedData, onNewGame, onContinue, onRestore }) {
+function TitleScreen({ saves, onNewGame, onContinue, onRestore, onDeleteSlot }) {
   const [name, setName] = useState('Jonathan Wexley');
   const [showRestore, setShowRestore] = useState(false);
   const [restoreText, setRestoreText] = useState('');
   const [flash, setFlash] = useState('');
-  const [confirmingNew, setConfirmingNew] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(null); // slot id
 
-  const hasSave = !!(savedData && savedData.gs);
+  const hasSaves = Array.isArray(saves) && saves.length > 0;
 
   const showFlash = (msg) => {
     setFlash(msg);
@@ -1459,20 +1459,21 @@ function TitleScreen({ savedData, onNewGame, onContinue, onRestore }) {
     }
   };
 
-  // window.confirm is suppressed inside the artifact iframe and silently
-  // returns undefined, so the click was being swallowed. Use an inline
-  // confirmation panel instead — large enough to be unmissable.
   const handleNewGame = () => {
-    if (hasSave) {
-      setConfirmingNew(true);
-      return;
-    }
     onNewGame(name || 'Jonathan Wexley');
   };
 
-  const confirmNewGame = () => {
-    setConfirmingNew(false);
-    onNewGame(name || 'Jonathan Wexley');
+  // Period-light "X ago" — keep it short for the roster row.
+  const fmtAgo = (ts) => {
+    if (!ts) return '';
+    const ms = Date.now() - ts;
+    const m = Math.floor(ms / 60000);
+    const h = Math.floor(m / 60);
+    const d = Math.floor(h / 24);
+    if (d > 0) return `saved ${d}d ago`;
+    if (h > 0) return `saved ${h}h ago`;
+    if (m > 0) return `saved ${m}m ago`;
+    return 'saved just now';
   };
 
   return (
@@ -1499,60 +1500,91 @@ function TitleScreen({ savedData, onNewGame, onContinue, onRestore }) {
       </p>
       <Fleuron char="❧" />
 
-      {/* CONTINUE existing save */}
-      {hasSave && (
-        <div className="parchment" style={{
-          padding: '1rem 1.2rem', marginTop: '1.5rem', marginBottom: '1.5rem',
-          background: 'rgba(255,253,245,0.55)', textAlign: 'center',
-        }}>
-          <div className="display" style={{ fontSize: '0.85em', color: '#6b4423', letterSpacing: '0.1em', marginBottom: '0.3rem' }}>
-            ⁂ A CHARTER IN PROGRESS
+      {/* ROSTER of charters in progress */}
+      {hasSaves && (
+        <div style={{ marginTop: '1.5rem', textAlign: 'left' }}>
+          <div className="display" style={{ fontSize: '0.85em', color: '#6b4423', letterSpacing: '0.1em', marginBottom: '0.5rem', textAlign: 'center' }}>
+            ⁂ CHARTERS IN PROGRESS
           </div>
-          <div style={{ fontStyle: 'italic', color: '#4a3220', marginBottom: '0.7rem' }}>
-            {savedData.gs.player.name}, Factor at {savedData.gs.location} &middot; Day {savedData.gs.day} of {savedData.gs.day + savedData.gs.daysRemaining}
-          </div>
-          <button className="wax-button" onClick={onContinue}>Resume Your Charter</button>
+          {saves.map(s => {
+            const totalDays = (s.day || 0) + (s.daysRemaining || 0);
+            const isConfirming = confirmingDelete === s.id;
+            return (
+              <div key={s.id} className="parchment" style={{
+                padding: '0.8rem 1rem', marginBottom: '0.5rem',
+                background: 'rgba(255,253,245,0.55)',
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <div style={{ flex: 1, minWidth: '12rem' }}>
+                    <div style={{ fontStyle: 'italic', color: '#4a3220' }}>
+                      {s.name}, Factor at {s.location || 'Bayan-Kor'}
+                    </div>
+                    <div style={{ fontSize: '0.82em', color: '#6b4423', letterSpacing: '0.04em' }}>
+                      Day {s.day}{totalDays ? ` of ${totalDays}` : ''} &middot; {fmtAgo(s.lastSavedAt)}
+                    </div>
+                  </div>
+                  {!isConfirming && (
+                    <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                      <button className="wax-button" onClick={() => onContinue(s.id)} style={{ padding: '0.35rem 0.7rem', fontSize: '0.88em' }}>
+                        Resume
+                      </button>
+                      <button
+                        className="ghost-button-sm"
+                        onClick={() => setConfirmingDelete(s.id)}
+                        aria-label="Strike out this charter"
+                        title="Strike out this charter"
+                        style={{ color: '#6b4423', padding: '0.2rem 0.5rem' }}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  )}
+                </div>
+                {isConfirming && (
+                  <div className="ink-fade-in" style={{ marginTop: '0.6rem', paddingTop: '0.5rem', borderTop: '1px dashed rgba(92,26,8,0.3)' }}>
+                    <div style={{ fontStyle: 'italic', color: '#5c1a08', fontSize: '0.9em', marginBottom: '0.5rem' }}>
+                      Strike {s.name}&rsquo;s charter from the rolls? This cannot be undone.
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                      <button
+                        className="ghost-button-sm"
+                        onClick={() => { onDeleteSlot(s.id); setConfirmingDelete(null); }}
+                        style={{ color: '#8b1a1a', borderColor: '#8b1a1a' }}
+                      >
+                        Yes, strike it out
+                      </button>
+                      <button className="ghost-button-sm" onClick={() => setConfirmingDelete(null)}>
+                        Keep
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
-      {/* NEW GAME — or confirmation panel when overwriting a save */}
-      {confirmingNew ? (
-        <div className="parchment" style={{
-          marginTop: '1.5rem', padding: '1.2rem 1rem',
-          background: 'rgba(92,26,8,0.06)', borderLeft: '3px solid #5c1a08', textAlign: 'left',
-        }}>
-          <div className="display" style={{ fontSize: '0.95em', color: '#5c1a08', letterSpacing: '0.08em', marginBottom: '0.4rem' }}>
-            ⁂ STRIKE OUT THE OLD CHARTER?
-          </div>
-          <p style={{ fontStyle: 'italic', color: '#4a3220', margin: '0 0 0.9rem 0' }}>
-            This will overwrite {savedData?.gs?.player?.name ?? 'the present Factor'}&rsquo;s charter at Day {savedData?.gs?.day ?? '?'}. The save cannot be recovered unless you have already shown and copied the manuscript.
-          </p>
-          <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
-            <button className="wax-button" onClick={confirmNewGame}>Yes, begin anew</button>
-            <button className="ghost-button" onClick={() => setConfirmingNew(false)}>Return to the title</button>
-          </div>
+      {/* NEW CHARTER */}
+      <div style={{ marginTop: '1.5rem' }}>
+        <div className="display" style={{ fontSize: '0.85em', color: '#6b4423', marginBottom: '0.5rem' }}>
+          {hasSaves ? 'BEGIN A NEW CHARTER' : 'INSCRIBE THY NAME'}
         </div>
-      ) : (
-        <div style={{ marginTop: '1.5rem' }}>
-          <div className="display" style={{ fontSize: '0.85em', color: '#6b4423', marginBottom: '0.5rem' }}>
-            {hasSave ? 'OR BEGIN ANEW' : 'INSCRIBE THY NAME'}
-          </div>
-          <div>
-            <input
-              className="parchment-input text-center"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              maxLength={32}
-              style={{ width: '18rem', maxWidth: '100%' }}
-            />
-          </div>
-          <div style={{ marginTop: '1rem' }}>
-            <button className={hasSave ? 'ghost-button' : 'wax-button'} onClick={handleNewGame}>
-              {hasSave ? 'Begin a New Charter' : 'Open the Charter'}
-            </button>
-          </div>
+        <div>
+          <input
+            className="parchment-input text-center"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            maxLength={32}
+            style={{ width: '18rem', maxWidth: '100%' }}
+          />
         </div>
-      )}
+        <div style={{ marginTop: '1rem' }}>
+          <button className={hasSaves ? 'ghost-button' : 'wax-button'} onClick={handleNewGame}>
+            {hasSaves ? 'Begin a New Charter' : 'Open the Charter'}
+          </button>
+        </div>
+      </div>
 
       {/* RESTORE */}
       <div style={{ marginTop: '2rem' }}>
@@ -3657,7 +3689,6 @@ function ProvisionsDrawer({ gs, setGs, requestNewLetter, lastSavedAt }) {
   const [importText, setImportText] = useState('');
   const [importMode, setImportMode] = useState(false);
   const [flash, setFlash] = useState('');
-  const [confirmingNew, setConfirmingNew] = useState(false);
   const [exportPanel, setExportPanel] = useState(null);
 
   const showFlash = (msg) => {
@@ -3755,30 +3786,10 @@ function ProvisionsDrawer({ gs, setGs, requestNewLetter, lastSavedAt }) {
           <div className="display" style={{ fontSize: '0.85em', color: '#6b4423', marginTop: '1.2rem', marginBottom: '0.5rem' }}>OTHER</div>
           <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
             <button className="ghost-button-sm" onClick={requestNewLetter}>Conjure a letter</button>
-            <button className="ghost-button-sm" onClick={() => setConfirmingNew(true)}>Begin anew</button>
           </div>
-
-          {confirmingNew && (
-            <div className="parchment ink-fade-in" style={{
-              marginTop: '0.7rem', padding: '0.9rem 1rem',
-              background: 'rgba(92,26,8,0.06)', borderLeft: '3px solid #5c1a08',
-            }}>
-              <div className="display" style={{ fontSize: '0.9em', color: '#5c1a08', letterSpacing: '0.06em', marginBottom: '0.3rem' }}>
-                ⁂ STRIKE OUT THE PRESENT CHARTER?
-              </div>
-              <p style={{ fontStyle: 'italic', color: '#4a3220', margin: '0 0 0.8rem 0', fontSize: '0.92em' }}>
-                The current charter will be erased. The save cannot be recovered unless you have already shown and copied the manuscript.
-              </p>
-              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                <button className="wax-button" onClick={async () => {
-                  setConfirmingNew(false);
-                  await safeStorage.delete('factor_save');
-                  if (typeof window !== 'undefined' && window.location) window.location.reload();
-                }}>Yes, begin anew</button>
-                <button className="ghost-button" onClick={() => setConfirmingNew(false)}>Return</button>
-              </div>
-            </div>
-          )}
+          <div style={{ fontStyle: 'italic', color: '#6b4423', fontSize: '0.82em', marginTop: '0.6rem' }}>
+            To begin a fresh charter, return to the title from the menu &mdash; this charter will be kept on the rolls.
+          </div>
         </div>
       )}
 
@@ -3836,63 +3847,134 @@ const safeStorage = {
   },
 };
 
+// ─────────── SAVE SLOTS ───────────
+// Multi-save model: each charter lives at `factor_save_<id>` with a JSON
+// blob of `{ gs, phase, savedAt }`. A separate `factor_saves_index` lists
+// the slots with summary metadata for the title-screen roster. Legacy single
+// `factor_save` is migrated into a slot on first load.
+
+const SAVES_INDEX_KEY = 'factor_saves_index';
+const slotKey = (id) => `factor_save_${id}`;
+const newSlotId = () => `${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+
+const summariseSlot = (id, gs, savedAt) => ({
+  id,
+  name: gs.player?.name || 'Unknown Factor',
+  day: gs.day,
+  daysRemaining: gs.daysRemaining,
+  location: gs.location,
+  lastSavedAt: savedAt,
+});
+
+async function loadSavesIndex() {
+  const raw = await safeStorage.get(SAVES_INDEX_KEY);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) { return []; }
+}
+
+async function persistSavesIndex(index) {
+  await safeStorage.set(SAVES_INDEX_KEY, JSON.stringify(index));
+}
+
+// One-shot migration: if there is no index but a legacy single save exists,
+// promote it into a slot so the player keeps their charter. The legacy key
+// is removed after the slot is written so it can't resurrect if the player
+// later deletes the migrated slot.
+async function migrateLegacyIfNeeded(index) {
+  if (index.length > 0) return index;
+  const legacy = await safeStorage.get('factor_save');
+  if (!legacy) return index;
+  try {
+    const parsed = JSON.parse(legacy);
+    if (!parsed.gs || !parsed.gs.player) return index;
+    const id = `legacy-${Date.now()}`;
+    const ok = await safeStorage.set(slotKey(id), legacy);
+    if (!ok) return index;
+    const entry = summariseSlot(id, parsed.gs, parsed.savedAt || Date.now());
+    const next = [entry];
+    await persistSavesIndex(next);
+    await safeStorage.delete('factor_save');
+    return next;
+  } catch (e) { return index; }
+}
+
 export default function FactorsCharter() {
   const [phase, setPhase] = useState('loading');
   const [gs, setGs] = useState(null);
-  const [savedData, setSavedData] = useState(null);
+  const [savesIndex, setSavesIndex] = useState([]);
+  const [activeSaveId, setActiveSaveId] = useState(null);
   const [lastSavedAt, setLastSavedAt] = useState(null);
 
-  // Load saved state — but DO NOT auto-resume; always start at title screen.
+  // Mount: load index, run legacy migration, land on title.
   useEffect(() => {
     (async () => {
-      const value = await safeStorage.get('factor_save');
-      if (value) {
-        try {
-          const parsed = JSON.parse(value);
-          if (parsed.gs && parsed.gs.player) {
-            setSavedData(parsed);
-            setLastSavedAt(parsed.savedAt || Date.now());
-          }
-        } catch (e) { /* corrupted save, ignore */ }
-      }
+      let index = await loadSavesIndex();
+      index = await migrateLegacyIfNeeded(index);
+      setSavesIndex(index);
       setPhase('title');
     })();
   }, []);
 
-  // Persist whenever the in-game state changes
+  // Persist whenever the in-game state changes — into the active slot only.
   useEffect(() => {
-    if (!gs || phase === 'loading' || phase === 'title') return;
+    if (!gs || !activeSaveId || phase === 'loading' || phase === 'title') return;
+    let cancelled = false;
     (async () => {
       const savedAt = Date.now();
-      const ok = await safeStorage.set('factor_save', JSON.stringify({ gs, phase, savedAt }));
-      if (ok) {
-        setLastSavedAt(savedAt);
-        setSavedData({ gs, phase, savedAt });
-      }
+      const ok = await safeStorage.set(slotKey(activeSaveId), JSON.stringify({ gs, phase, savedAt }));
+      if (!ok || cancelled) return;
+      setLastSavedAt(savedAt);
+      const entry = summariseSlot(activeSaveId, gs, savedAt);
+      setSavesIndex(prev => {
+        const filtered = prev.filter(s => s.id !== activeSaveId);
+        const next = [entry, ...filtered];
+        persistSavesIndex(next);
+        return next;
+      });
     })();
-  }, [gs, phase]);
+    return () => { cancelled = true; };
+  }, [gs, phase, activeSaveId]);
 
-  const handleNewGame = async (name) => {
-    await safeStorage.delete('factor_save');
-    setSavedData(null);
-    setLastSavedAt(null);
+  const handleNewGame = (name) => {
+    const id = newSlotId();
+    setActiveSaveId(id);
     setGs(makeInitialState(name));
     setPhase('opening');
   };
 
-  const handleContinue = () => {
-    if (savedData && savedData.gs) {
-      setGs(ensureShape(savedData.gs));
-      setPhase(savedData.phase || 'game');
-    }
+  const handleContinue = async (slotId) => {
+    const raw = await safeStorage.get(slotKey(slotId));
+    if (!raw) return;
+    try {
+      const parsed = JSON.parse(raw);
+      if (!parsed.gs) return;
+      setActiveSaveId(slotId);
+      setGs(ensureShape(parsed.gs));
+      setLastSavedAt(parsed.savedAt || Date.now());
+      setPhase(parsed.phase || 'game');
+    } catch (e) { /* corrupted slot; ignore */ }
   };
 
   const handleRestore = (restoredGs) => {
+    const id = newSlotId();
+    setActiveSaveId(id);
     setGs(ensureShape(restoredGs));
     setPhase('game');
   };
 
+  const handleDeleteSlot = async (slotId) => {
+    await safeStorage.delete(slotKey(slotId));
+    const next = savesIndex.filter(s => s.id !== slotId);
+    await persistSavesIndex(next);
+    setSavesIndex(next);
+    if (activeSaveId === slotId) setActiveSaveId(null);
+  };
+
   const handleReturnToTitle = () => {
+    setActiveSaveId(null);
     setPhase('title');
   };
 
@@ -3904,10 +3986,11 @@ export default function FactorsCharter() {
     return (
       <Page>
         <TitleScreen
-          savedData={savedData}
+          saves={savesIndex}
           onNewGame={handleNewGame}
           onContinue={handleContinue}
           onRestore={handleRestore}
+          onDeleteSlot={handleDeleteSlot}
         />
       </Page>
     );

@@ -77,6 +77,24 @@ Cross-reference with the LORE registry in `factors_charter.jsx`.
 - **In code:** `PORTS['Tanjung Cermin']`, `LORE` entry keyed
   `tanjung-cermin`.
 
+### VOC private trade passes → Dutch trade pass
+
+- **Inspiration:** the VOC was protectionist on paper but their factors at
+  Asian outposts privately granted "passes of free trade" to selected
+  English Company servants in exchange for tribute, errands, or discretion.
+  These were not transacted in the open ledger. They halved (or eliminated)
+  the duty levied at Dutch ports for the holder.
+- **Transposition:** a one-time letter from Mynheer Hendrik Boom, Junior
+  Factor at Port St. Eustace, after the player has put into Eustace and
+  Dutch standing is ≥ −10. Three responses: pay £250 tribute, take a
+  sealed Dutch packet to deliver east (small Brotherhood cost, plants a
+  hook), or decline. Holding the pass halves the Dutch duty regardless of
+  standing — standing is now the fine-tuning layer on top of pass/no-pass.
+- **In code:** `makeDutchPassLetter` + trigger in `tickDays`,
+  `portTaxRate` halves when `gs.flags.dutchTradePass` is set, the duty
+  banner in PortView surfaces "Yr. writ of free trade is honoured here."
+  when held.
+
 ---
 
 ## INSPIRATIONS PENDING
@@ -117,10 +135,12 @@ might pull on. Update when a hook gets resolved or a new one emerges.
 
 Things we've discussed but haven't built yet.
 
-- **Dutch trade pass** — period mechanism for reducing duty beyond just
-  standing. Quest chain via a Dutch factor (errand, bribe, or arrangement),
-  one-time flag halves duty regardless of standing. Standing then fine-
-  tunes on top of pass/no-pass.
+- **The Dutch packet** — if the player took option 2 from Boom's letter
+  (`carryingDutchPacket: true`), the recipient and consequence are still
+  pending. Likely fires on a voyage east (toward the Pelican's Nest or
+  Tanjung Cermin) — an encounter where a Bugis or Brotherhood figure
+  asks after "the Dutchman's papers" and the player decides what to do
+  with the packet's contents.
 - **Port arrival encounters** — interactive moment at the wharf on some
   arrivals (alongside the existing first-visit vignettes). Could be a
   touch point for mail delivery too.

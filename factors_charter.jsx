@@ -213,8 +213,10 @@ const priceFor = (portKey, commodity, day) => {
 };
 
 // Port duty (Dutch tax at Port St. Eustace) — proportion of transaction value.
-// Standing with the local faction shifts the rate: cordial -25%, warm -10%,
-// cool +25%, hostile +60%. Returns 0 for ports without a taxBase.
+// Standing fine-tunes (cordial -25%, warm -10%, cool +25%, hostile +60%);
+// holding a Dutch trade pass (gs.flags.dutchTradePass) halves the rate
+// outright, on top of the standing modifier — that's the load-bearing lever
+// above standing. Returns 0 for ports without a taxBase.
 const portTaxRate = (gs, portKey) => {
   const port = PORTS[portKey];
   const base = port?.taxBase || 0;
@@ -226,6 +228,10 @@ const portTaxRate = (gs, portKey) => {
   else if (rep >= -5) mult = 1.0;
   else if (rep >= -20) mult = 1.25;
   else mult = 1.6;
+  // The pass is a Dutch instrument; only honoured at Dutch ports.
+  if (port.faction === 'dutch' && gs.flags?.dutchTradePass) {
+    mult *= 0.5;
+  }
   return base * mult;
 };
 
@@ -718,6 +724,72 @@ function makeQuarterlyNagLetter(s) {
   };
 }
 
+// ─────────── DUTCH TRADE PASS ───────────
+// Period mechanism: VOC factors at Asian outposts privately granted "passes
+// of free trade" to selected English Company servants in exchange for
+// favours, discretion, or a tribute. Held quietly in a strongbox; halved
+// the port duty in practice. The flag gs.flags.dutchTradePass enables the
+// reduction in portTaxRate. Granted via this letter from a junior Dutch
+// Factor — fired once after the Factor has put into Port St. Eustace and
+// established at least minimal standing with the Dutch.
+
+function makeDutchPassLetter(s) {
+  return {
+    id: 4000000 + s.day,
+    from: 'Mynheer Hendrik Boom, Junior Factor at Port St. Eustace',
+    subject: 'A writ of free trade',
+    body: `Sir, — I write upon the matter of yr. recent calls at this port. The Senior Factor has noted yr. business and finds it neither offensive nor of present consequence. There is, however, a writ of free trade which yr. countrymen of the Honourable Company sometimes obtain from this House at a personal arrangement, by which the duty falls to half what is otherwise levied.
+
+The arrangement is not transacted in the open ledger.
+
+I shd. be pleased to discuss the matter when next you put in. The terms admit of three forms: a sum laid at my discretion; a small office discreetly performed for the Dutch interest; or yr. silence and a continuance of the present rate.
+
+I am, sir, yr. obedt. servant in commercial matters,
+Hendrik Boom`,
+    responses: [
+      {
+        label: 'Pay the tribute and take the pass',
+        seed: 'cash bought; pass granted',
+        fixedOutcome: {
+          prose: 'A draft for two hundred and fifty pounds is laid in Boom’s hand at his counting-room behind the Dutch quay. He produces a folded writ on stiff paper, his name and a seal at the foot, and slides it across without further word. The duty falls to half from this hour.',
+          changes: {
+            money: -250,
+            reputation: { dutch: 3 },
+            flags: { dutchTradePass: true },
+            journal: 'Paid £250 to Mynheer Boom for a writ of free trade at Port St. Eustace. The duty is halved.',
+          },
+        },
+      },
+      {
+        label: 'Take the packet, ask no questions',
+        seed: 'discreet errand for the Dutch; pass granted; pirate cost',
+        fixedOutcome: {
+          prose: 'Boom hands over a small sealed packet, bound in Dutch wax, addressed to no name. It is to find a particular hand on yr. next leg east. He produces the writ in the same motion. You do not ask whose hand; the prudent do not ask.',
+          changes: {
+            reputation: { dutch: 3, pirates: -5 },
+            flags: { dutchTradePass: true, carryingDutchPacket: true },
+            journal: 'Took a sealed packet from Mynheer Boom for delivery on the next eastern leg. The writ of free trade is in the strongbox.',
+            hook: 'The packet for Boom — its recipient and its consequence yet to be felt.',
+          },
+        },
+      },
+      {
+        label: 'Decline; the price is too dear',
+        seed: 'a refusal noted',
+        fixedOutcome: {
+          prose: 'You return Boom’s clerk with a courteous note professing satisfaction with the present arrangement. The clerk\'s expression does not move. The matter is closed; the duty stands at the published rate.',
+          changes: {
+            reputation: { dutch: -1 },
+            flags: { dutchPassDeclined: true },
+            journal: 'Declined Mynheer Boom\'s offer of a writ of free trade. The Dutch duty stands at the open rate.',
+          },
+        },
+      },
+    ],
+    read: false,
+  };
+}
+
 // ─────────── AUTO LETTER SENDERS ───────────
 // Senders gated by reputation / flags so the post reflects the Factor's
 // standing. The Director and the Vizier have dedicated cadences elsewhere
@@ -1044,6 +1116,24 @@ function tickDays(gs, days) {
       s.flags = { ...(s.flags || {}), teakLetterSent: true };
       s.lettersGenerated = (s.lettersGenerated || 0) + 1;
       s.awayLog.push({ day: s.day, type: 'letter', text: 'A formal letter came down from the palace, the Vizier’s seal upon it.' });
+    }
+
+    // ── Dutch trade pass: Mynheer Boom writes once the Factor has put into
+    // Port St. Eustace and the Dutch are not openly hostile. Holding the
+    // pass halves the port duty regardless of standing.
+    if (
+      !s.flags?.dutchPassLetterSent &&
+      !s.flags?.dutchTradePass &&
+      !s.flags?.dutchPassDeclined &&
+      s.day >= 90 &&
+      (s.reputation?.dutch || 0) >= -10 &&
+      (s.visited || []).includes('Port St. Eustace')
+    ) {
+      const letter = makeDutchPassLetter(s);
+      s.letters = [...s.letters, letter];
+      s.flags = { ...(s.flags || {}), dutchPassLetterSent: true };
+      s.lettersGenerated = (s.lettersGenerated || 0) + 1;
+      s.awayLog.push({ day: s.day, type: 'letter', text: 'A discreet packet from the Dutch House at Eustace — Mynheer Boom’s hand.' });
     }
 
     // ── Raid: opportunists at the godown. Stockade halves the chance, the
@@ -4089,6 +4179,9 @@ function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab, lodg
         {taxRate > 0 && (
           <div style={{ marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px dashed rgba(74,44,20,0.25)', fontSize: '0.85em', color: '#8b1a1a', fontStyle: 'italic' }}>
             The Dutch port levies a duty of {Math.round(taxRate * 100)}% on every transaction.
+            {gs.flags?.dutchTradePass && (
+              <span style={{ color: '#3a5c2a' }}> Yr. writ of free trade is honoured here.</span>
+            )}
           </div>
         )}
       </div>

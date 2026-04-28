@@ -859,6 +859,133 @@ J. Pyke`,
   };
 }
 
+// ─────────── THE BROTHERHOOD COMPACT ───────────
+// The Brotherhood faction one-off, parallels Vizier/Boom/Pyke. Capt. Gerrit
+// Maas — a Bugis-Dutch renegado, formerly VOC — writes after the Factor has
+// put into the Pelican's Nest with at least minimal standing. He proposes
+// a private compact: a small annual tribute, in return for which the
+// Brotherhood will not molest the Factor's ships in the strait. Mechanical
+// effect: gs.flags.brotherhoodCompact halves the voyage encounter chance
+// (60% → 40%) — the Brotherhood's word holds.
+
+function makeBrotherhoodLetter(s) {
+  return {
+    id: 7000000 + s.day,
+    from: 'Capt. Gerrit Maas, of the Brotherhood',
+    subject: 'A private arrangement, in plain words',
+    body: `Sir, — I write upon paper that has not crossed the Dutch House at Eustace and shall not. We have remarked yr. business at the Nest and find it neither timid nor stupid; the latter being the more useful in a Factor.
+
+There is an arrangement we offer to those whose dealings have been straight. A sum laid down once, by yr. discretion, and yr. ships are remarked but not molested in this strait or the next. The arrangement is not in writing beyond this letter, which I shall ask you to burn after reading. The names of the captains who took it in earlier years prosper.
+
+Yr. obedt. servant in the trade we both keep,
+Gerrit Maas`,
+    responses: [
+      {
+        label: 'Accept the compact; pay the tribute',
+        seed: 'compact in force; safe passage; standing shifts felt by all parties',
+        fixedOutcome: {
+          prose: 'You disburse two hundred pounds to a Bugis pilot at the head of the strait, in coin and a bolt of fine calico, and the matter is done. Yr. master tells you within the week that a Bugis prahu lay to windward for two hours and made off without closing — the first time of many. The compact holds.',
+          changes: {
+            money: -200,
+            reputation: { pirates: 20, crown: -10, dutch: -5 },
+            flags: { brotherhoodCompact: true, brotherhoodLetterSent: true },
+            journal: 'Paid £200 to enter into Capt. Maas\'s compact. The Brotherhood will not molest yr. ships in the strait. The Crown is not to know.',
+            hook: 'The Brotherhood compact — its protection is real, its discovery would be grave.',
+          },
+        },
+      },
+      {
+        label: 'Decline, but courteously',
+        seed: 'no compact; small standing nudge with the Brotherhood',
+        fixedOutcome: {
+          prose: 'You return Maas\'s clerk with a brief note professing satisfaction with the present state of affairs. The clerk takes it without comment. The matter is closed; yr. ships continue to keep their watch in the strait.',
+          changes: {
+            reputation: { pirates: -3 },
+            flags: { brotherhoodLetterSent: true, brotherhoodDeclined: true },
+            journal: 'Declined Capt. Maas\'s compact, civilly. The strait remains the strait it was.',
+          },
+        },
+      },
+      {
+        label: 'Refuse plainly; the Director would have my skin',
+        seed: 'open refusal; cost with the Brotherhood; small Crown gain',
+        fixedOutcome: {
+          prose: 'You write the refusal in plain terms and add a sentence on the obligations of yr. office. Maas does not reply. Within the month, a small English brig out of Madras is taken in the strait and her cargo never accounted for — perhaps related, perhaps not. The strait is a colder place from this hour.',
+          changes: {
+            reputation: { pirates: -10, crown: 5 },
+            flags: { brotherhoodLetterSent: true, brotherhoodRefused: true },
+            journal: 'Refused Capt. Maas\'s compact in plain terms. The strait is, by the next news of it, a meaner one.',
+            hook: 'The Brotherhood remembers a refusal. Yr. ships in the strait should keep a sharper watch.',
+          },
+        },
+      },
+    ],
+    read: false,
+  };
+}
+
+// ─────────── THE CROWN: HMS ADVENTURE ───────────
+// Captain Whitcombe of the Royal Navy calls at Bayan-Kor on a patrol of
+// the strait. The Crown faction's one-off — period-plausible, since RN
+// frigates did call at Company stations for refits and intelligence in
+// the 1720s. He asks the Factor for one of three things.
+
+function makeCrownLetter(s) {
+  return {
+    id: 8000000 + s.day,
+    from: 'Capt. Edward Whitcombe, HMS Adventure',
+    subject: 'Compliments from the Royal Navy',
+    body: `Sir, — HMS Adventure is putting into Bayan-Kor next week for a fortnight\'s refit. I have the honour to write in advance with a request, that you may consider in due time.
+
+The Adventure is here on a patrol of the strait under standing orders to remark Brotherhood movements and to extend the King\'s peace where the Company\'s flag does not. There are particulars on which a Factor of yr. station might lend assistance: intelligence of the strait, a small advance against the Bombay credit, or such other service as occurs to you.
+
+The Crown is not without memory in these matters. I am, sir, yr. obedt. servant,
+Edward Whitcombe, Captain.`,
+    responses: [
+      {
+        label: 'Pass on what I know of the Brotherhood',
+        seed: 'intelligence given; Crown gains; pirates lose',
+        fixedOutcome: {
+          prose: 'You compose a careful letter naming what you have heard at the Pelican\'s Nest and what was said in the Vizier\'s clerk\'s presence at Bayan-Kor. Whitcombe receives it with proper thanks and a token of cinnamon for yr. trouble. The Adventure sails three days later. The Brotherhood\'s ear in the strait is not nothing; somewhere yr. words are remarked.',
+          changes: {
+            reputation: { crown: 15, pirates: -10, company: 3 },
+            flags: { crownLetterSent: true, gaveCrownIntelligence: true },
+            journal: 'Gave Capt. Whitcombe a written account of the Brotherhood\'s movements as I have heard them. The Crown notes it.',
+            hook: 'Yr. intelligence to the Crown — the Brotherhood will hear of it in time.',
+          },
+        },
+      },
+      {
+        label: 'Advance the £100 against Bombay',
+        seed: 'cash given; Crown credit; modest standing gain',
+        fixedOutcome: {
+          prose: 'You hand Whitcombe a draft for one hundred pounds, drawn upon yr. London agent and countersigned for collection at Bombay. He gives in turn a Crown receipt that will reach Bombay before the Adventure does. He is grateful in the manner of a captain who has been short of stores for six weeks.',
+          changes: {
+            money: -100,
+            reputation: { crown: 8 },
+            flags: { crownLetterSent: true, advancedCrownCredit: true },
+            journal: 'Advanced £100 to Capt. Whitcombe of HMS Adventure against the Bombay credit. The Crown\'s receipt is in the strongbox.',
+            hook: 'A Crown receipt for £100 stands at Bombay, redeemable when the books admit it.',
+          },
+        },
+      },
+      {
+        label: 'Plead present trade and decline',
+        seed: 'no service; Crown is not pleased',
+        fixedOutcome: {
+          prose: 'You write a courteous declination citing the present pressure of trade and yr. obligations to the Court. Whitcombe receives it without remark; the Adventure sails on schedule. He is not the kind of man who returns to a refusal, but he is also not the kind of man who forgets one.',
+          changes: {
+            reputation: { crown: -5 },
+            flags: { crownLetterSent: true, declinedCrownService: true },
+            journal: 'Declined Capt. Whitcombe\'s requests, civilly. The Crown\'s memory is long.',
+          },
+        },
+      },
+    ],
+    read: false,
+  };
+}
+
 // ─────────── AUTO LETTER SENDERS ───────────
 // Senders gated by reputation / flags so the post reflects the Factor's
 // standing. The Director and the Vizier have dedicated cadences elsewhere
@@ -1299,6 +1426,38 @@ function tickDays(gs, days) {
       s.lettersGenerated = (s.lettersGenerated || 0) + 1;
       s.flags = { ...(s.flags || {}), pykeLetterSent: true };
       s.awayLog.push({ day: s.day, type: 'letter', text: 'A note from the Mission, in the Reverend’s small upright hand.' });
+    }
+
+    // ── The Brotherhood compact: Capt. Maas writes once after the Factor
+    // has put into the Pelican's Nest with at least minimal standing.
+    if (
+      !s.charterClosed &&
+      !s.flags?.brotherhoodLetterSent &&
+      s.day >= 75 &&
+      (s.reputation?.pirates || 0) >= 5 &&
+      (s.visited || []).includes('The Pelican’s Nest')
+    ) {
+      const letter = makeBrotherhoodLetter(s);
+      s.letters = [...s.letters, letter];
+      s.lettersGenerated = (s.lettersGenerated || 0) + 1;
+      s.flags = { ...(s.flags || {}), brotherhoodLetterSent: true };
+      s.awayLog.push({ day: s.day, type: 'letter', text: 'A letter on un-watermarked paper, in a hand the clerk does not know.' });
+    }
+
+    // ── HMS Adventure: Capt. Whitcombe writes once in the early-mid charter,
+    // requesting one of three services. Period-plausible — RN frigates did
+    // call at Company stations on patrol.
+    if (
+      !s.charterClosed &&
+      !s.flags?.crownLetterSent &&
+      s.day >= 120 &&
+      (s.visited || []).length >= 2  // has put into at least one foreign port
+    ) {
+      const letter = makeCrownLetter(s);
+      s.letters = [...s.letters, letter];
+      s.lettersGenerated = (s.lettersGenerated || 0) + 1;
+      s.flags = { ...(s.flags || {}), crownLetterSent: true };
+      s.awayLog.push({ day: s.day, type: 'letter', text: 'A King’s letter under a Royal Navy seal — Capt. Whitcombe of HMS Adventure.' });
     }
 
     // ── Raid: opportunists at the godown. Stockade halves the chance, the
@@ -3003,7 +3162,11 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
     }
     setPending(true);
     setPendingMsg('Stowing the cargo, hoisting sail');
-    const haveEncounter = Math.random() < 0.6;
+    // The Brotherhood compact halves the chance of a voyage encounter — a
+    // real mechanical effect of the flag. The Brotherhood's word is
+    // approximate, not absolute, so encounters still happen sometimes.
+    const encChance = gs.flags?.brotherhoodCompact ? 0.4 : 0.6;
+    const haveEncounter = Math.random() < encChance;
 
     if (haveEncounter) {
       const { result: enc, log } = await genVoyageEncounter(gs, gs.location, portKey);

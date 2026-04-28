@@ -95,6 +95,44 @@ Cross-reference with the LORE registry in `factors_charter.jsx`.
   banner in PortView surfaces "Yr. writ of free trade is honoured here."
   when held.
 
+### Brotherhood pirate compacts → Capt. Maas's compact
+
+- **Inspiration:** in the 1720s East Indies, private compacts between
+  Asian pirate confederations and individual European Company servants
+  were not unusual — a small annual sum (or a tribute paid once), and
+  the captain's ships were "remarked but not molested." The Royal
+  Pirates of the Caribbean ran similar arrangements with West Indian
+  factors. These compacts were illegal under English law and grounds
+  for recall and ruin if discovered.
+- **Transposition:** Capt. Gerrit Maas, a Bugis-Dutch renegado formerly
+  of the VOC, writes after the Factor has put into the Pelican's Nest
+  with pirates standing ≥ +5. Three responses: pay £200 tribute (Pirates
+  +20, Crown −10, Dutch −5, flag `brotherhoodCompact: true`); decline
+  civilly (Pirates −3); refuse plainly (Pirates −10, Crown +5, hook —
+  the Brotherhood remembers).
+- **Mechanical effect:** holding the compact halves the voyage encounter
+  chance (60% → 40%) at sea — the Brotherhood's word holds. A real
+  mechanical lever, not just a flag.
+- **In code:** `makeBrotherhoodLetter` + trigger in `tickDays` (visited
+  Pelican's Nest, day ≥ 75, pirates ≥ +5). `sailTo` reads the flag.
+
+### RN frigates calling at Company stations → Capt. Whitcombe of HMS Adventure
+
+- **Inspiration:** Royal Navy frigates patrolled the Indian Ocean and
+  East Indies in the 1720s, calling at Company stations for refits,
+  fresh water, and intelligence. They had standing orders to disrupt
+  Brotherhood-type pirate confederations and would routinely ask
+  Company servants for what they knew. The Crown's memory was long.
+- **Transposition:** HMS Adventure puts into Bayan-Kor for a fortnight's
+  refit; Capt. Edward Whitcombe writes ahead requesting a service.
+  Three responses: pass on what you know of the Brotherhood (Crown +15,
+  Pirates −10, Company +3, plants a hook — the Brotherhood will hear);
+  advance £100 against Bombay credit (Crown +8, hook — receipt at
+  Bombay); plead trade and decline (Crown −5, "the Crown's memory is
+  long").
+- **In code:** `makeCrownLetter` + trigger in `tickDays` (day ≥ 120,
+  has visited at least one foreign port). One-off via `crownLetterSent`.
+
 ### Mission schools in 1720s factor towns → Reverend Pyke's school
 
 - **Inspiration:** Anglican mission stations across the East Indies routinely

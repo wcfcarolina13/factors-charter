@@ -4,6 +4,29 @@ The Factor's Charter — a chronological log of what's shipped. Newest first.
 
 ---
 
+## Session 3 — scarcity pass
+
+### Added
+- **Ship as a first-class object** (`gs.ship`): `name`, `type` (pinnace), `holdCwt: 60`, `hull` and `sails` (0–100), `guns: 0`. `SHIP_TYPES` constant scaffolds future hulls.
+- **Hold capacity / cargo weight.** Each commodity has a `weight` in cwt-equivalents. `cargoWeight(goods)` and `cargoCap(gs)` enforce a stowage cap on every purchase. "Buy max" replaces the old fixed Buy 10.
+- **Finite port stocks.** Each port has `stockMax` and `restock` per commodity it sells. `gs.portStocks[port][commodity]` depletes on buy and replenishes daily via `tickDays`. Stock is shown on the Map and at the Wharf; exhausted stock disables Buy.
+- **Voyage wear.** `applyVoyageWear(ship, days)` chips 1–3 hull and 1–3 sails per voyage day. Below `MIN_HULL_COND` / `MIN_SAIL_COND` (25), the master refuses to put to sea.
+- **Slipway refit at Bayan-Kor.** New "THE SLIPWAY" panel on the In Port view. £2/point without the Shipwright's Yard, £1/point with it. Restores hull and sails to 100 instantly.
+- **Ship readout in the Ledger.** New "THE PINNACE" card at the top of `LedgerView` with hold gauge and hull/sails bars.
+- **Hold gauge in the Header second line** alongside money and days remaining.
+- **Save migration via `ensureShape(gs)`** — older saves missing `ship` or `portStocks` get defaults on Continue / Restore so they don't crash. New shape still favors a clean Begin Anew for the full experience.
+
+### Changed
+- `tickDays` now clones and replenishes `portStocks` for every port each day.
+- Map view's "they sell" row shows current stock and tags it "low" or "none" where relevant.
+- Map view disables `Sail Here` and shows a red note when the ship is too damaged to sail.
+- In Port view's Buy buttons respect money, hold remaining, and port stock simultaneously.
+
+### Notes
+- The AI outcome schema is unchanged this pass. Schema-expansion (so Sonnet can plant NPCs / damage / cargo events) is the planned second pass.
+
+---
+
 ## Session 2 — late session
 
 ### Added

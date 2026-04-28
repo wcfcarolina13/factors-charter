@@ -8,24 +8,31 @@ import React, { useState, useEffect, useRef } from 'react';
 
 // ─────────── DATA ───────────
 
+// `weight` is stowage in cwt-equivalents — what a unit of this commodity
+// occupies in the hold. Pepper sets the scale at 1.0.
 const COMMODITIES = {
-  pepper:     { name: 'Pepper',     unit: 'cwt',    basePrice: 12 },
-  cinnamon:   { name: 'Cinnamon',   unit: 'cwt',    basePrice: 18 },
-  calico:     { name: 'Calico',     unit: 'bolt',   basePrice: 8  },
-  silver:     { name: 'Silver',     unit: 'oz',     basePrice: 25 },
-  sandalwood: { name: 'Sandalwood', unit: 'log',    basePrice: 6  },
-  opium:      { name: 'Opium',      unit: 'chest',  basePrice: 45 },
-  rice:       { name: 'Rice',       unit: 'sack',   basePrice: 3  },
-  rum:        { name: 'Rum',        unit: 'barrel', basePrice: 7  },
-  saltpetre:  { name: 'Saltpetre',  unit: 'cask',   basePrice: 22 },
+  pepper:     { name: 'Pepper',     unit: 'cwt',    basePrice: 12, weight: 1.0  },
+  cinnamon:   { name: 'Cinnamon',   unit: 'cwt',    basePrice: 18, weight: 1.0  },
+  calico:     { name: 'Calico',     unit: 'bolt',   basePrice: 8,  weight: 0.4  },
+  silver:     { name: 'Silver',     unit: 'oz',     basePrice: 25, weight: 0.02 },
+  sandalwood: { name: 'Sandalwood', unit: 'log',    basePrice: 6,  weight: 1.5  },
+  opium:      { name: 'Opium',      unit: 'chest',  basePrice: 45, weight: 0.6  },
+  rice:       { name: 'Rice',       unit: 'sack',   basePrice: 3,  weight: 1.0  },
+  rum:        { name: 'Rum',        unit: 'barrel', basePrice: 7,  weight: 2.0  },
+  saltpetre:  { name: 'Saltpetre',  unit: 'cask',   basePrice: 22, weight: 1.2  },
 };
 
+// Each port has finite stocks of what it sells, replenishing over time.
+// `stockMax` is the warehouse cap; `restock` is the per-day replenishment rate
+// (fractional, accumulated). Buying depletes; tickDays restores up to the cap.
 const PORTS = {
   'Bayan-Kor': {
     name: 'Bayan-Kor',
     blurb: 'Your station. A thatched godown, a leaky dock, and the Rajah\u2019s palace on the hill.',
     daysFromHome: 0, isHome: true,
     sells: { rice: 0.85, sandalwood: 0.75 },
+    stockMax: { rice: 40, sandalwood: 18 },
+    restock:  { rice: 0.5, sandalwood: 0.2 },
     buys:  { calico: 1.3, rum: 1.4, silver: 1.2 },
     faction: 'rajah',
   },
@@ -34,6 +41,8 @@ const PORTS = {
     blurb: 'A pepper port up the strait. The Sultan tolerates Europeans, and taxes them.',
     daysFromHome: 3,
     sells: { pepper: 0.7, cinnamon: 0.85, sandalwood: 0.9 },
+    stockMax: { pepper: 80, cinnamon: 30, sandalwood: 22 },
+    restock:  { pepper: 0.7, cinnamon: 0.3, sandalwood: 0.2 },
     buys:  { calico: 1.4, opium: 1.5, silver: 1.1, rum: 1.2 },
     faction: 'rajah',
   },
@@ -42,6 +51,8 @@ const PORTS = {
     blurb: 'A Dutch harbor, whitewashed and orderly. Their factor watches you closely.',
     daysFromHome: 5,
     sells: { calico: 0.75, opium: 0.85, saltpetre: 0.8 },
+    stockMax: { calico: 60, opium: 14, saltpetre: 24 },
+    restock:  { calico: 0.5, opium: 0.15, saltpetre: 0.3 },
     buys:  { pepper: 1.4, cinnamon: 1.5, sandalwood: 1.2, silver: 1.05 },
     faction: 'dutch', rivalRisk: true,
   },
@@ -50,10 +61,25 @@ const PORTS = {
     blurb: 'A hidden cove east of the chart. The Brotherhood holds court here. No flag flies.',
     daysFromHome: 7, requiresRep: { pirates: 10 },
     sells: { silver: 0.65, opium: 0.7, saltpetre: 0.6 },
+    stockMax: { silver: 200, opium: 18, saltpetre: 28 },
+    restock:  { silver: 1.5, opium: 0.2, saltpetre: 0.3 },
     buys:  { rum: 1.7, calico: 1.3, rice: 1.5 },
     faction: 'pirates',
   },
 };
+
+// \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 SHIPS \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+// Hull and sails are 0\u2013100 condition. Voyages chip both. Below MIN_SAIL_COND
+// the master refuses to put to sea \u2014 repair at the home wharf.
+const SHIP_TYPES = {
+  pinnace: {
+    name: 'Pinnace',
+    holdCwt: 60,
+    blurb: 'A modest single-masted vessel. Quick on a fair wind, fragile in a foul one.',
+  },
+};
+const MIN_SAIL_COND = 25;
+const MIN_HULL_COND = 25;
 
 const FACTIONS = {
   company: { name: 'The Honourable Company', short: 'Company' },
@@ -131,6 +157,67 @@ const repTone = (n) => {
   return 'inimical';
 };
 
+// ─────────── CARGO & SHIP HELPERS ───────────
+
+const cargoWeight = (goods) => {
+  let total = 0;
+  for (const [k, v] of Object.entries(goods || {})) {
+    if (!v) continue;
+    const w = COMMODITIES[k]?.weight ?? 1;
+    total += v * w;
+  }
+  return total;
+};
+
+const cargoCap = (gs) => gs.ship?.holdCwt ?? 60;
+
+const fmtCwt = (n) => {
+  // Tidy display: integer if it rounds, otherwise one decimal.
+  if (Math.abs(n - Math.round(n)) < 0.05) return String(Math.round(n));
+  return n.toFixed(1);
+};
+
+// Wear applied per voyage day. Random within a small range so a long leg
+// adds up. Returns a new ship object — does not mutate.
+const applyVoyageWear = (ship, days) => {
+  let hull = ship.hull;
+  let sails = ship.sails;
+  for (let i = 0; i < days; i++) {
+    hull  -= 1 + Math.random() * 2;   // 1–3 per day
+    sails -= 1 + Math.random() * 2;
+  }
+  return {
+    ...ship,
+    hull:  Math.max(0, Math.round(hull)),
+    sails: Math.max(0, Math.round(sails)),
+  };
+};
+
+// Cost to refit the ship to full at the home wharf. Halved with shipwright.
+const refitCost = (gs) => {
+  const ship = gs.ship || { hull: 100, sails: 100 };
+  const missing = (100 - ship.hull) + (100 - ship.sails);
+  const hasYard = !!gs.outpost?.buildings?.shipwright?.built;
+  const rate = hasYard ? 1 : 2;
+  return Math.round(missing * rate);
+};
+
+// Lazily seed any fields a save may be missing — keeps older manuscripts
+// loadable without forcing a Begin Anew. Pure: returns a new state.
+const ensureShape = (gs) => {
+  const next = { ...gs };
+  if (!next.ship) {
+    next.ship = { name: 'The Pinnace', type: 'pinnace', holdCwt: SHIP_TYPES.pinnace.holdCwt, hull: 100, sails: 100, guns: 0 };
+  }
+  if (!next.portStocks) {
+    next.portStocks = {};
+    for (const [k, p] of Object.entries(PORTS)) {
+      next.portStocks[k] = { ...(p.stockMax || {}) };
+    }
+  }
+  return next;
+};
+
 // ─────────── INITIAL STATE ───────────
 
 const makeInitialState = (name) => {
@@ -180,12 +267,26 @@ Mr. W. died this morning at half past four. The Reverend will not come down from
     read: false,
   };
 
+  const initialPortStocks = {};
+  for (const [k, p] of Object.entries(PORTS)) {
+    initialPortStocks[k] = { ...(p.stockMax || {}) };
+  }
+
   return {
   day: 1,
   location: 'Bayan-Kor',
   player: { name, title: 'Factor' },
   money: 500,
   goods: { rum: 5, rice: 8 },
+  ship: {
+    name: 'The Pinnace',
+    type: 'pinnace',
+    holdCwt: SHIP_TYPES.pinnace.holdCwt,
+    hull: 100,
+    sails: 100,
+    guns: 0,
+  },
+  portStocks: initialPortStocks,
   reputation: { company: 0, crown: 0, rajah: 0, pirates: 0, mission: 0, dutch: 0 },
   crew: [
     { name: 'Mr. Hodge', role: 'Clerk', trait: 'drunkard' },
@@ -241,6 +342,7 @@ function tickDays(gs, days) {
     reputation: { ...gs.reputation },
     goods: { ...gs.goods },
     awayLog: [...gs.awayLog],
+    portStocks: JSON.parse(JSON.stringify(gs.portStocks || {})),
   };
   const hasStockade = !!s.outpost.buildings.stockade?.built;
   const hasBarracks = !!s.outpost.buildings.barracks?.built;
@@ -249,6 +351,17 @@ function tickDays(gs, days) {
   for (let i = 0; i < days; i++) {
     s.day += 1;
     s.daysRemaining = Math.max(0, s.daysRemaining - 1);
+
+    // ── port stocks replenish toward their cap
+    for (const [pk, p] of Object.entries(PORTS)) {
+      if (!p.restock) continue;
+      if (!s.portStocks[pk]) s.portStocks[pk] = { ...(p.stockMax || {}) };
+      for (const [c, rate] of Object.entries(p.restock)) {
+        const cap = p.stockMax?.[c] ?? 0;
+        const cur = s.portStocks[pk][c] ?? cap;
+        s.portStocks[pk][c] = Math.min(cap, cur + rate);
+      }
+    }
 
     // ── construction progress
     if (s.outpost.queue.length > 0) {
@@ -1260,6 +1373,10 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
   const sailTo = async (portKey) => {
     const port = PORTS[portKey];
     const hasShipwright = !!gs.outpost.buildings.shipwright?.built;
+    // Master refuses to put to sea if the ship is too far gone.
+    if ((gs.ship?.hull ?? 100) < MIN_HULL_COND || (gs.ship?.sails ?? 100) < MIN_SAIL_COND) {
+      return;
+    }
     setPending(true);
     setPendingMsg('Stowing the cargo, hoisting sail');
     const haveEncounter = Math.random() < 0.6;
@@ -1276,6 +1393,7 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
       let newGs = tickDays(gs, baseDays);
       newGs = {
         ...newGs,
+        ship: applyVoyageWear(newGs.ship, baseDays),
         location: portKey,
         visited: newGs.visited.includes(portKey) ? newGs.visited : [...newGs.visited, portKey],
         journal: [...newGs.journal, { day: newGs.day, entry: `Made landfall at ${portKey} after ${baseDays} days at sea, without incident worthy of record.` }],
@@ -1305,9 +1423,10 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
       let newGs = applyOutcomeChangesPure(gs, outcome.changes);
       // Tick the voyage days (advances day, runs home sim)
       newGs = tickDays(newGs, totalDays);
-      // Land
+      // Land — apply voyage wear to the ship
       newGs = {
         ...newGs,
+        ship: applyVoyageWear(newGs.ship, totalDays),
         location: dest,
         visited: newGs.visited.includes(dest) ? newGs.visited : [...newGs.visited, dest],
         journal: [...newGs.journal, { day: newGs.day, entry: `Made landfall at ${dest} after ${totalDays} days at sea.` }],
@@ -1386,10 +1505,25 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
   const buyGood = (commodity, qty, price) => {
     const cost = qty * price;
     if (gs.money < cost) return;
+    // Hold cap: total stowage of current goods plus this purchase must fit.
+    const w = COMMODITIES[commodity].weight;
+    const projected = cargoWeight(gs.goods) + qty * w;
+    if (projected > cargoCap(gs)) return;
+    // Port stock: cannot buy more than the wharf has on hand.
+    const stockHere = gs.portStocks?.[gs.location] || {};
+    const available = Math.floor(stockHere[commodity] ?? Infinity);
+    if (qty > available) return;
     setGs(prev => ({
       ...prev,
       money: prev.money - cost,
       goods: { ...prev.goods, [commodity]: (prev.goods[commodity] || 0) + qty },
+      portStocks: {
+        ...prev.portStocks,
+        [prev.location]: {
+          ...(prev.portStocks?.[prev.location] || {}),
+          [commodity]: Math.max(0, (prev.portStocks?.[prev.location]?.[commodity] ?? 0) - qty),
+        },
+      },
       journal: [...prev.journal, { day: prev.day, entry: `Bought ${qty} ${COMMODITIES[commodity].unit} of ${COMMODITIES[commodity].name} at ${gs.location} for £${cost}.` }],
     }));
   };
@@ -1410,6 +1544,19 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
       }
       return next;
     });
+  };
+
+  const refitShip = () => {
+    if (gs.location !== 'Bayan-Kor') return;
+    const cost = refitCost(gs);
+    if (cost <= 0) return;
+    if (gs.money < cost) return;
+    setGs(prev => ({
+      ...prev,
+      money: prev.money - cost,
+      ship: { ...prev.ship, hull: 100, sails: 100 },
+      journal: [...prev.journal, { day: prev.day, entry: `Paid £${cost} to refit the ${prev.ship.name} at the slipway. Hull and sails sound.` }],
+    }));
   };
 
   // ─────── RENDER ───────
@@ -1484,7 +1631,7 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
           {tab === 'journal' && <JournalView gs={gs} arrivalProse={arrivalProse} setTab={setTab} openLetterById={openLetterById} />}
           {tab === 'ledger' && <LedgerView gs={gs} />}
           {tab === 'map' && <MapView gs={gs} sailTo={sailTo} />}
-          {tab === 'port' && <PortView gs={gs} buyGood={buyGood} sellGood={sellGood} arrivalProse={arrivalProse} setTab={setTab} />}
+          {tab === 'port' && <PortView gs={gs} buyGood={buyGood} sellGood={sellGood} refitShip={refitShip} arrivalProse={arrivalProse} setTab={setTab} />}
           {tab === 'outpost' && atHome && <OutpostView gs={gs} startBuild={startBuild} />}
           {tab === 'letters' && <LettersView gs={gs} setGs={setGs} onRespond={handleLetterResponse} onRequestNew={requestNewLetter} openLetterId={openLetterId} setOpenLetterId={setOpenLetterId} />}
         </div>
@@ -1542,7 +1689,7 @@ function Header({ gs, onReturnToTitle }) {
             {gs.player.name}, Factor at {gs.location}
           </h1>
           <div className="display" style={{ fontSize: '0.85em', color: '#6b4423', letterSpacing: '0.1em', marginTop: '0.3rem' }}>
-            DAY {gs.day} · £{gs.money} · {gs.daysRemaining} DAYS REMAIN
+            DAY {gs.day} · £{gs.money} · HOLD {fmtCwt(cargoWeight(gs.goods))}/{cargoCap(gs)} · {gs.daysRemaining} DAYS REMAIN
           </div>
         </div>
         <button
@@ -1727,6 +1874,9 @@ function JournalView({ gs, arrivalProse, setTab, openLetterById }) {
 
 function LedgerView({ gs }) {
   const goodsList = Object.entries(gs.goods).filter(([,v]) => v > 0);
+  const ship = gs.ship || { name: 'The Pinnace', type: 'pinnace', holdCwt: 60, hull: 100, sails: 100 };
+  const used = cargoWeight(gs.goods);
+  const cap = cargoCap(gs);
 
   const stateBar = (label, value, color = '#5c1a08') => (
     <div style={{ marginBottom: '0.35rem' }}>
@@ -1742,6 +1892,29 @@ function LedgerView({ gs }) {
   return (
     <div>
       <h2 className="display" style={{ fontSize: '1.4em', color: '#5c1a08', marginTop: 0 }}>The Ledger</h2>
+
+      <div className="parchment" style={{ padding: '0.9rem 1rem', marginBottom: '1.5rem', background: 'rgba(255,255,255,0.3)' }}>
+        <div className="display" style={{ fontSize: '0.9em', color: '#6b4423', marginBottom: '0.4rem', letterSpacing: '0.06em' }}>THE {ship.name.toUpperCase()}</div>
+        <div style={{ fontSize: '0.88em', color: '#4a3220', fontStyle: 'italic', marginBottom: '0.5rem' }}>
+          {SHIP_TYPES[ship.type]?.blurb || ''}
+        </div>
+        <div style={{ marginBottom: '0.35rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85em', color: '#4a3220' }}>
+            <span>Cargo</span><span className="display" style={{ fontSize: '0.85em' }}>{fmtCwt(used)} / {cap} cwt</span>
+          </div>
+          <div style={{ height: '4px', background: 'rgba(74,44,20,0.15)', borderRadius: '2px', marginTop: '2px' }}>
+            <div style={{ width: `${Math.min(100, (used / cap) * 100)}%`, height: '100%', background: used >= cap ? '#8b1a1a' : '#5c1a08', borderRadius: '2px' }} />
+          </div>
+        </div>
+        {stateBar('Hull',  ship.hull,  ship.hull  < MIN_HULL_COND ? '#8b1a1a' : '#5c1a08')}
+        {stateBar('Sails', ship.sails, ship.sails < MIN_SAIL_COND ? '#8b1a1a' : '#5c1a08')}
+        {(ship.hull < MIN_HULL_COND || ship.sails < MIN_SAIL_COND) && (
+          <div style={{ fontSize: '0.82em', color: '#8b1a1a', fontStyle: 'italic', marginTop: '0.3rem' }}>
+            Unfit for sea. Refit at the slipway in Bayan-Kor.
+          </div>
+        )}
+      </div>
+
       <div className="cols-2">
         <div>
           <div className="display" style={{ fontSize: '0.9em', color: '#6b4423', marginBottom: '0.5rem' }}>STORES</div>
@@ -1818,6 +1991,8 @@ function LedgerView({ gs }) {
 
 function MapView({ gs, sailTo }) {
   const ports = Object.entries(PORTS).filter(([k]) => k !== gs.location);
+  const ship = gs.ship || { hull: 100, sails: 100 };
+  const tooDamaged = ship.hull < MIN_HULL_COND || ship.sails < MIN_SAIL_COND;
 
   // Helpers to label relative advantage from the static port multipliers
   const advantageTag = (mult, kind) => {
@@ -1840,6 +2015,13 @@ function MapView({ gs, sailTo }) {
       <p className="italic" style={{ color: '#4a3220', marginBottom: '1.5rem' }}>
         You are at <strong>{gs.location}</strong>. Where shall the pinnace lie next?
       </p>
+      {tooDamaged && (
+        <div style={{ padding: '0.7rem 0.9rem', background: 'rgba(139,26,26,0.08)', borderLeft: '3px solid #8b1a1a', marginBottom: '1.2rem' }}>
+          <p className="italic" style={{ margin: 0, color: '#8b1a1a', fontSize: '0.92em' }}>
+            The {ship.name || 'pinnace'} is in no state to put to sea. Refit at the slipway in Bayan-Kor before sailing further.
+          </p>
+        </div>
+      )}
       <div>
         {ports.map(([k, p]) => {
           const blocked = p.requiresRep && Object.entries(p.requiresRep).some(([f, n]) => gs.reputation[f] < n);
@@ -1860,10 +2042,10 @@ function MapView({ gs, sailTo }) {
                 </div>
                 <button
                   className="wax-button"
-                  disabled={blocked}
+                  disabled={blocked || tooDamaged}
                   onClick={() => sailTo(k)}
                 >
-                  {blocked ? 'Not Welcome' : 'Sail Here'}
+                  {blocked ? 'Not Welcome' : tooDamaged ? 'Ship Unfit' : 'Sail Here'}
                 </button>
               </div>
               {blocked && (
@@ -1884,10 +2066,14 @@ function MapView({ gs, sailTo }) {
                         {sells.map(([c, mult]) => {
                           const tag = advantageTag(mult, 'sell');
                           const price = priceFor(k, c, gs.day);
+                          const stock = Math.floor(gs.portStocks?.[k]?.[c] ?? 0);
+                          const cap = p.stockMax?.[c] ?? 0;
+                          const stockLabel = stock === 0 ? 'none' : stock < cap * 0.25 ? `${stock} (low)` : `${stock}`;
                           return (
                             <div key={c} style={{ marginBottom: '0.15rem' }}>
                               {COMMODITIES[c].name} <span style={{ color: '#6b4423' }}>£{price}</span>{' '}
-                              <span style={{ color: tag.color, fontStyle: 'italic', fontSize: '0.85em' }}>({tag.label})</span>
+                              <span style={{ color: tag.color, fontStyle: 'italic', fontSize: '0.85em' }}>({tag.label})</span>{' '}
+                              <span style={{ color: stock === 0 ? '#8b1a1a' : '#6b4423', fontSize: '0.85em' }}>· stock {stockLabel}</span>
                             </div>
                           );
                         })}
@@ -1929,10 +2115,30 @@ function MapView({ gs, sailTo }) {
 
 // ─────────── PORT VIEW ───────────
 
-function PortView({ gs, buyGood, sellGood, arrivalProse, setTab }) {
+function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab }) {
   const port = PORTS[gs.location];
   const sells = Object.keys(port.sells || {});
   const buys = Object.keys(port.buys || {});
+  const stocks = gs.portStocks?.[gs.location] || {};
+  const cap = cargoCap(gs);
+  const used = cargoWeight(gs.goods);
+  const remaining = Math.max(0, cap - used);
+  const ship = gs.ship || { name: 'The Pinnace', hull: 100, sails: 100 };
+
+  // Compute the largest qty the player can buy of a commodity, given money,
+  // hold capacity, and port stock. Used to decide when to disable Buy buttons.
+  const maxBuyable = (c, price) => {
+    const w = COMMODITIES[c].weight;
+    const byMoney = Math.floor(gs.money / price);
+    const byHold  = w > 0 ? Math.floor(remaining / w) : Infinity;
+    const byStock = Math.floor(stocks[c] ?? Infinity);
+    return Math.max(0, Math.min(byMoney, byHold, byStock));
+  };
+
+  const atHome = gs.location === 'Bayan-Kor';
+  const refit = refitCost(gs);
+  const hasYard = !!gs.outpost?.buildings?.shipwright?.built;
+
   return (
     <div>
       <h2 className="display" style={{ fontSize: '1.4em', color: '#5c1a08', marginTop: 0 }}>{port.name} &mdash; The Wharf</h2>
@@ -1943,21 +2149,46 @@ function PortView({ gs, buyGood, sellGood, arrivalProse, setTab }) {
         </div>
       )}
 
+      {/* Cargo gauge — always visible at any port. */}
+      <div style={{ marginBottom: '1.2rem', padding: '0.7rem 0.9rem', background: 'rgba(255,255,255,0.25)', border: '1px solid rgba(74,44,20,0.2)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85em', color: '#4a3220' }}>
+          <span className="display" style={{ fontSize: '0.9em', color: '#6b4423', letterSpacing: '0.06em' }}>{ship.name.toUpperCase()} — HOLD</span>
+          <span className="display" style={{ fontSize: '0.9em' }}>{fmtCwt(used)} / {cap} cwt</span>
+        </div>
+        <div style={{ height: '6px', background: 'rgba(74,44,20,0.15)', borderRadius: '2px', marginTop: '4px' }}>
+          <div style={{ width: `${Math.min(100, (used / cap) * 100)}%`, height: '100%', background: used >= cap ? '#8b1a1a' : '#5c1a08', borderRadius: '2px' }} />
+        </div>
+        <div style={{ display: 'flex', gap: '1rem', fontSize: '0.78em', color: '#6b4423', marginTop: '0.4rem', flexWrap: 'wrap' }}>
+          <span>Hull {ship.hull}/100</span>
+          <span>Sails {ship.sails}/100</span>
+          {(ship.hull < MIN_HULL_COND || ship.sails < MIN_SAIL_COND) && (
+            <span style={{ color: '#8b1a1a', fontStyle: 'italic' }}>— too damaged to put to sea</span>
+          )}
+        </div>
+      </div>
+
       <div className="cols-2">
         <div>
           <div className="display" style={{ fontSize: '0.9em', color: '#6b4423', marginBottom: '0.5rem' }}>FOR SALE BY THE PORT</div>
           {sells.length === 0 ? <p className="italic">Nothing to be had here.</p> : sells.map(c => {
             const price = priceFor(gs.location, c, gs.day);
+            const onHand = Math.floor(stocks[c] ?? 0);
+            const max = maxBuyable(c, price);
             return (
               <div key={c} className="trade-row">
                 <div>
                   <div>{COMMODITIES[c].name}</div>
-                  <div style={{ fontSize: '0.85em', color: '#6b4423' }}>£{price} per {COMMODITIES[c].unit}</div>
+                  <div style={{ fontSize: '0.85em', color: '#6b4423' }}>
+                    £{price} per {COMMODITIES[c].unit} · {COMMODITIES[c].weight} cwt ea ·{' '}
+                    <span style={{ color: onHand === 0 ? '#8b1a1a' : '#6b4423' }}>
+                      {onHand === 0 ? 'none on hand' : `${onHand} on hand`}
+                    </span>
+                  </div>
                 </div>
                 <div className="actions">
-                  <button className="ghost-button-sm" disabled={gs.money < price} onClick={() => buyGood(c, 1, price)}>Buy 1</button>
-                  <button className="ghost-button-sm" disabled={gs.money < price * 5} onClick={() => buyGood(c, 5, price)}>Buy 5</button>
-                  <button className="ghost-button-sm" disabled={gs.money < price * 10} onClick={() => buyGood(c, 10, price)}>Buy 10</button>
+                  <button className="ghost-button-sm" disabled={max < 1}  onClick={() => buyGood(c, 1, price)}>Buy 1</button>
+                  <button className="ghost-button-sm" disabled={max < 5}  onClick={() => buyGood(c, 5, price)}>Buy 5</button>
+                  <button className="ghost-button-sm" disabled={max < 1}  onClick={() => buyGood(c, max, price)}>Buy max ({max})</button>
                 </div>
               </div>
             );
@@ -1984,6 +2215,20 @@ function PortView({ gs, buyGood, sellGood, arrivalProse, setTab }) {
           })}
         </div>
       </div>
+
+      {atHome && refit > 0 && (
+        <div style={{ marginTop: '1.5rem', padding: '0.9rem 1rem', background: 'rgba(255,255,255,0.3)', borderLeft: '3px solid #5c1a08' }}>
+          <div className="display" style={{ fontSize: '0.9em', color: '#5c1a08', marginBottom: '0.3rem' }}>THE SLIPWAY</div>
+          <p className="italic" style={{ margin: '0 0 0.5rem 0', color: '#4a3220', fontSize: '0.92em' }}>
+            {hasYard
+              ? `The shipwright's apprentices can have the ${ship.name} sound by the morning tide. £${refit} to put her right.`
+              : `Without a proper yard, refit is dear: £${refit} for the work, and most of it bodged. (Build the Shipwright's Yard for the proper rate.)`}
+          </p>
+          <button className="wax-button" disabled={gs.money < refit} onClick={refitShip}>
+            Refit the {ship.name} — £{refit}
+          </button>
+        </div>
+      )}
 
       <Fleuron char="❧" />
       <div style={{ textAlign: 'center', marginTop: '1rem' }}>
@@ -2491,13 +2736,13 @@ export default function FactorsCharter() {
 
   const handleContinue = () => {
     if (savedData && savedData.gs) {
-      setGs(savedData.gs);
+      setGs(ensureShape(savedData.gs));
       setPhase(savedData.phase || 'game');
     }
   };
 
   const handleRestore = (restoredGs) => {
-    setGs(restoredGs);
+    setGs(ensureShape(restoredGs));
     setPhase('game');
   };
 

@@ -1818,7 +1818,11 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
       setPendingMsg('Surveying what passed in your absence');
       const { result: digestProse, log } = await genAwayDigest(newGs, newGs.awayLog);
       setPending(false);
-      setAwayDigest({ log: newGs.awayLog, prose: digestProse });
+      // The most recent raid (if any) is surfaced as an interactive choice
+      // in the digest screen — what does the Factor do about it?
+      const raids = newGs.awayLog.filter(e => e.type === 'raid');
+      const unresolvedRaid = raids.length > 0 ? raids[raids.length - 1] : null;
+      setAwayDigest({ log: newGs.awayLog, prose: digestProse, unresolvedRaid });
       // Clear the awayLog now that it's shown; persist the AI exchange.
       setGs({
         ...newGs,
@@ -1975,6 +1979,21 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
     setTab('journal');
   };
 
+  // Resolve a raid surfaced in the away-digest. Calls the AI for prose +
+  // changes, applies them instantly (no time advance), and returns the
+  // result so the digest screen can render the prose in place of the
+  // choice card.
+  const handleResolveRaid = async (raid, choice) => {
+    const encounterProse = `On returning to Bayan-Kor, the Factor was met with this report: "${raid.text}"`;
+    const { result, log } = await genOutcome(gs, encounterProse, choice, {});
+    const safeChanges = { ...result.changes, days: 0 };
+    setGs(prev => {
+      const next = applyOutcomeChangesPure(prev, safeChanges, {});
+      return { ...next, aiLog: log ? pushAiLog(next.aiLog, log) : next.aiLog };
+    });
+    return result;
+  };
+
   const buyGood = (commodity, qty, price) => {
     const cost = qty * price;
     if (gs.money < cost) return;
@@ -2129,7 +2148,7 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
   // ─────── RENDER ───────
 
   if (awayDigest) {
-    return <AwayDigestScreen digest={awayDigest} onContinue={handleDigestContinue} />;
+    return <AwayDigestScreen digest={awayDigest} onContinue={handleDigestContinue} onResolveRaid={handleResolveRaid} />;
   }
 
   if (encounter && pending) {
@@ -3522,7 +3541,39 @@ function OutpostView({ gs, startBuild, expediteBuild }) {
 
 // ─────────── AWAY DIGEST SCREEN ───────────
 
-function AwayDigestScreen({ digest, onContinue }) {
+function AwayDigestScreen({ digest, onContinue, onResolveRaid }) {
+  const [raidPending, setRaidPending] = useState(false);
+  const [raidResolved, setRaidResolved] = useState(null); // { label, prose }
+  const raid = digest.unresolvedRaid;
+
+  const RAID_CHOICES = [
+    {
+      label: 'Pursue the brigands inland — Dass insists',
+      seed: 'Sgt. Dass leads a sortie inland; risk of skirmish or ambush, fair chance to recover some of what was carried off; a small standing cost with the Rajah if the Sergeant draws blood on his land',
+    },
+    {
+      label: 'Send word to the Vizier and let his men handle it',
+      seed: 'Diplomatic recourse; the Vizier may bring back something via local justice or use the favour as a hook; rajah standing moves slightly either way; takes a few days to play out',
+    },
+    {
+      label: 'Let the matter pass — the rains will conceal the trail',
+      seed: 'No pursuit. The household notes the silence. Dass is quietly displeased; no rep change, no recovery, but no further trouble either',
+    },
+  ];
+
+  const handleChoice = async (choice) => {
+    if (raidPending || !onResolveRaid || !raid) return;
+    setRaidPending(true);
+    try {
+      const result = await onResolveRaid(raid, choice);
+      setRaidResolved({ label: choice.label, prose: result?.prose || '' });
+    } catch (e) {
+      setRaidResolved({ label: choice.label, prose: 'The matter resolves itself, after a fashion.' });
+    } finally {
+      setRaidPending(false);
+    }
+  };
+
   return (
     <Page>
       <div className="ink-fade-in" style={{ maxWidth: '42rem', margin: '0 auto', padding: '3.0rem 1.5rem', width: '100%' }}>
@@ -3548,8 +3599,53 @@ function AwayDigestScreen({ digest, onContinue }) {
             </div>
           ))}
         </div>
+
+        {raid && !raidResolved && (
+          <div className="parchment ink-fade-in" style={{
+            padding: '1rem 1.1rem', marginBottom: '1.2rem',
+            background: 'rgba(92,26,8,0.06)', borderLeft: '3px solid #5c1a08',
+          }}>
+            <div className="display" style={{ fontSize: '0.9em', color: '#5c1a08', letterSpacing: '0.06em', marginBottom: '0.4rem' }}>
+              ⁂ THE MATTER OF THE GODOWN
+            </div>
+            <p className="italic" style={{ color: '#4a3220', margin: '0 0 0.8rem 0' }}>
+              {raid.text} How will you proceed?
+            </p>
+            {raidPending ? (
+              <div className="italic" style={{ color: '#6b4423' }}>The household awaits your word…</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                {RAID_CHOICES.map((c, i) => (
+                  <button
+                    key={i}
+                    className="ghost-button"
+                    style={{ textAlign: 'left' }}
+                    onClick={() => handleChoice(c)}
+                  >
+                    {c.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {raidResolved && (
+          <div className="parchment ink-fade-in" style={{
+            padding: '1rem 1.1rem', marginBottom: '1.2rem',
+            background: 'rgba(255,253,245,0.55)',
+          }}>
+            <div className="display" style={{ fontSize: '0.85em', color: '#6b4423', letterSpacing: '0.06em', marginBottom: '0.3rem' }}>
+              YOU CHOSE: <span style={{ fontStyle: 'italic', textTransform: 'none', letterSpacing: 0 }}>{raidResolved.label}</span>
+            </div>
+            <p style={{ margin: 0, fontSize: '1em' }}>{raidResolved.prose}</p>
+          </div>
+        )}
+
         <div className="text-center">
-          <button className="wax-button" onClick={onContinue}>Take Up the Work</button>
+          <button className="wax-button" onClick={onContinue} disabled={raidPending}>
+            Take Up the Work
+          </button>
         </div>
       </div>
     </Page>

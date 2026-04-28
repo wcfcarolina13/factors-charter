@@ -1931,6 +1931,262 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
   );
 }
 
+// ─────────── GITHUB BACKUP ───────────
+// Mobile makes file downloads and clipboard copy unreliable. The GitHub
+// Contents API supports CORS, so we can PUT files directly from the artifact.
+// Configure once with a fine-grained PAT scoped to a single repo
+// (contents:write); each "Save" button uploads a timestamped JSON file.
+// The PAT is kept in its own localStorage key so it never lands in a
+// manuscript export.
+
+const GH_CONFIG_KEY = 'factor_github_config';
+
+const loadGithubConfig = async () => {
+  const raw = await safeStorage.get(GH_CONFIG_KEY);
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch (e) { return null; }
+};
+
+const saveGithubConfig = async (cfg) => {
+  await safeStorage.set(GH_CONFIG_KEY, JSON.stringify(cfg));
+};
+
+const clearGithubConfig = async () => {
+  await safeStorage.delete(GH_CONFIG_KEY);
+};
+
+// btoa over UTF-8 — GitHub's Contents API expects base64 of the raw bytes.
+const utf8ToBase64 = (s) => {
+  if (typeof TextEncoder !== 'undefined') {
+    const bytes = new TextEncoder().encode(s);
+    let bin = '';
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin);
+  }
+  // Older fallback — okay for ASCII-heavy JSON.
+  return btoa(unescape(encodeURIComponent(s)));
+};
+
+async function pushFileToGitHub({ token, owner, repo, branch }, path, content, message) {
+  if (!token || !owner || !repo) {
+    return { ok: false, error: 'GitHub backup is not configured.' };
+  }
+  const url = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${path.split('/').map(encodeURIComponent).join('/')}`;
+  const body = { message, content: utf8ToBase64(content) };
+  if (branch) body.branch = branch;
+  try {
+    const res = await fetch(url, {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/vnd.github+json',
+        'Content-Type': 'application/json',
+        'X-GitHub-Api-Version': '2022-11-28',
+      },
+      body: JSON.stringify(body),
+    });
+    let data = null;
+    try { data = await res.json(); } catch (e) { /* non-JSON error */ }
+    if (!res.ok) {
+      return { ok: false, status: res.status, error: data?.message || `HTTP ${res.status}` };
+    }
+    return {
+      ok: true,
+      htmlUrl: data?.content?.html_url,
+      path: data?.content?.path,
+    };
+  } catch (e) {
+    return { ok: false, error: e.message || String(e) };
+  }
+}
+
+function GithubBackupModal({ gs, initialConfig, onClose }) {
+  const [cfg, setCfg] = useState(initialConfig || { token: '', owner: '', repo: '', branch: 'main', path: 'factors-charter' });
+  const [editing, setEditing] = useState(!initialConfig);
+  const [busy, setBusy] = useState(false);
+  const [flash, setFlash] = useState(null); // { tone: 'ok'|'err', text, url? }
+
+  const showFlash = (f) => { setFlash(f); };
+
+  const persist = async (next) => {
+    await saveGithubConfig(next);
+    setCfg(next);
+    setEditing(false);
+    showFlash({ tone: 'ok', text: 'Configuration saved on this device.' });
+  };
+
+  const wipe = async () => {
+    if (!window.confirm('Forget the GitHub configuration on this device? The PAT will be deleted from local storage.')) return;
+    await clearGithubConfig();
+    setCfg({ token: '', owner: '', repo: '', branch: 'main', path: 'factors-charter' });
+    setEditing(true);
+    showFlash({ tone: 'ok', text: 'Configuration cleared.' });
+  };
+
+  const trimmedPath = (cfg.path || '').replace(/^\/+|\/+$/g, '');
+
+  const upload = async (kind) => {
+    setBusy(true);
+    setFlash(null);
+    const ts = Date.now();
+    let payload, subdir, slug;
+    if (kind === 'manuscript') {
+      payload = JSON.stringify({ gs, phase: 'game', exportedAt: ts }, null, 2);
+      subdir = 'manuscripts';
+      slug = `factors-charter-day${gs.day}-${ts}.json`;
+    } else if (kind === 'aiLog') {
+      const log = gs.aiLog || [];
+      payload = JSON.stringify({ player: gs.player.name, day: gs.day, count: log.length, aiLog: log }, null, 2);
+      subdir = 'ai-log';
+      slug = `factors-charter-ai-log-day${gs.day}-${ts}.json`;
+    }
+    const path = [trimmedPath, subdir, slug].filter(Boolean).join('/');
+    const message = `${kind === 'aiLog' ? 'AI log' : 'Manuscript'} backup — ${gs.player.name}, day ${gs.day}`;
+    const res = await pushFileToGitHub(cfg, path, payload, message);
+    setBusy(false);
+    if (res.ok) {
+      showFlash({ tone: 'ok', text: `Pushed ${path}.`, url: res.htmlUrl });
+    } else {
+      const hint = res.status === 401 ? ' (token rejected — check the PAT scopes)'
+        : res.status === 404 ? ' (repo not found — check owner/repo or token scope)'
+        : res.status === 422 ? ' (a file by that path already exists this same millisecond, retry)'
+        : '';
+      showFlash({ tone: 'err', text: `Failed: ${res.error}${hint}` });
+    }
+  };
+
+  const set = (key) => (e) => setCfg({ ...cfg, [key]: e.target.value });
+  const configured = cfg.token && cfg.owner && cfg.repo;
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 100,
+        background: 'rgba(20,12,4,0.55)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '1rem',
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="parchment"
+        style={{
+          background: '#f0e3c4',
+          maxWidth: '36rem', width: '100%', maxHeight: '92vh', overflowY: 'auto',
+          padding: '1rem',
+          boxShadow: '0 4px 16px rgba(20,12,4,0.5)',
+          border: '1px solid rgba(74,44,20,0.4)',
+        }}
+      >
+        <div className="display" style={{ fontSize: '1em', color: '#5c1a08', marginBottom: '0.4rem' }}>GitHub Backup</div>
+
+        {editing ? (
+          <>
+            <p style={{ fontSize: '0.85em', color: '#4a3220', fontStyle: 'italic', margin: '0 0 0.7rem 0' }}>
+              Use a <strong>fine-grained PAT</strong> scoped to one repository, with the <em>Contents: Read &amp; write</em> permission.
+              The token is kept on this device only; it is never written into a manuscript export.
+            </p>
+            <div style={{ display: 'grid', gap: '0.5rem' }}>
+              {[
+                { key: 'token',  label: 'Personal access token (fine-grained)', type: 'password', placeholder: 'github_pat_...' },
+                { key: 'owner',  label: 'Owner (user or org)', placeholder: 'wcfcarolina13' },
+                { key: 'repo',   label: 'Repository', placeholder: 'hello-world' },
+                { key: 'branch', label: 'Branch', placeholder: 'main' },
+                { key: 'path',   label: 'Path prefix (folder under repo root)', placeholder: 'factors-charter' },
+              ].map(f => (
+                <label key={f.key} style={{ display: 'block', fontSize: '0.85em', color: '#6b4423' }}>
+                  {f.label}
+                  <input
+                    type={f.type || 'text'}
+                    value={cfg[f.key] || ''}
+                    onChange={set(f.key)}
+                    placeholder={f.placeholder}
+                    autoComplete={f.key === 'token' ? 'off' : undefined}
+                    spellCheck={false}
+                    style={{
+                      width: '100%', padding: '0.5rem', marginTop: '0.2rem',
+                      fontFamily: f.key === 'token' ? 'monospace' : 'inherit',
+                      fontSize: '0.9em',
+                      background: 'rgba(255,255,255,0.5)',
+                      border: '1px solid rgba(74,44,20,0.3)',
+                      color: '#2a1a0a',
+                    }}
+                  />
+                </label>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.8rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+              {initialConfig && (
+                <button className="ghost-button" onClick={() => { setCfg(initialConfig); setEditing(false); }}>Cancel</button>
+              )}
+              <button
+                className="wax-button"
+                disabled={!cfg.token || !cfg.owner || !cfg.repo}
+                onClick={() => persist(cfg)}
+              >
+                Save configuration
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{ fontSize: '0.88em', color: '#4a3220', marginBottom: '0.5rem' }}>
+              Configured: <strong>{cfg.owner}/{cfg.repo}</strong> on <strong>{cfg.branch || 'default'}</strong>
+              {trimmedPath ? <> · path <code style={{ fontFamily: 'monospace' }}>{trimmedPath}</code></> : null}
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <button className="wax-button" disabled={busy} onClick={() => upload('manuscript')}>
+                ↑ Push manuscript
+              </button>
+              <button
+                className="wax-button"
+                disabled={busy || !gs.aiLog || gs.aiLog.length === 0}
+                onClick={() => upload('aiLog')}
+              >
+                ↑ Push AI log ({(gs.aiLog || []).length})
+              </button>
+            </div>
+            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.8rem' }}>
+              <button className="ghost-button" onClick={() => setEditing(true)}>Edit configuration</button>
+              <button className="ghost-button" onClick={wipe}>Forget token</button>
+            </div>
+          </>
+        )}
+
+        {busy && (
+          <div className="ink-fade-in" style={{ marginTop: '0.7rem', fontSize: '0.88em', color: '#6b4423', fontStyle: 'italic' }}>
+            Pushing to GitHub…
+          </div>
+        )}
+        {flash && !busy && (
+          <div
+            className="ink-fade-in"
+            style={{
+              marginTop: '0.7rem', padding: '0.5rem 0.7rem',
+              borderLeft: `3px solid ${flash.tone === 'err' ? '#8b1a1a' : '#5c1a08'}`,
+              background: flash.tone === 'err' ? 'rgba(139,26,26,0.08)' : 'rgba(92,26,8,0.08)',
+              fontSize: '0.88em', color: flash.tone === 'err' ? '#8b1a1a' : '#5c1a08',
+              wordBreak: 'break-all',
+            }}
+          >
+            {flash.text}
+            {flash.url && (
+              <div style={{ marginTop: '0.3rem' }}>
+                <a href={flash.url} target="_blank" rel="noopener noreferrer" style={{ color: '#5c1a08' }}>{flash.url}</a>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div style={{ marginTop: '0.9rem', textAlign: 'right' }}>
+          <button className="ghost-button" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─────────── EXPORT MODAL ───────────
 // Programmatic blob downloads (a.click() on a Blob URL) navigate the artifact
 // iframe away on mobile and tear down the React tree. This modal replaces them
@@ -2043,6 +2299,19 @@ function Header({ gs, onReturnToTitle }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [flash, setFlash] = useState('');
   const [exportPanel, setExportPanel] = useState(null); // { title, content, filename }
+  const [githubOpen, setGithubOpen] = useState(false);
+  const [githubConfig, setGithubConfig] = useState(null);
+
+  // Load GitHub config (if any) once on mount. The modal also re-reads it,
+  // so this is just for menu-label hinting.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const cfg = await loadGithubConfig();
+      if (!cancelled) setGithubConfig(cfg);
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const showFlash = (msg) => {
     setFlash(msg);
@@ -2123,11 +2392,18 @@ function Header({ gs, onReturnToTitle }) {
           </button>
           <button
             className="ghost-button"
-            style={{ width: '100%', textAlign: 'left', marginBottom: '0.6rem' }}
+            style={{ width: '100%', textAlign: 'left', marginBottom: '0.3rem' }}
             onClick={showAiLog}
             disabled={!gs.aiLog || gs.aiLog.length === 0}
           >
             ⎘ Show AI log ({(gs.aiLog || []).length})
+          </button>
+          <button
+            className="ghost-button"
+            style={{ width: '100%', textAlign: 'left', marginBottom: '0.6rem' }}
+            onClick={() => { setGithubOpen(true); setMenuOpen(false); }}
+          >
+            ↑ GitHub backup{githubConfig ? ` — ${githubConfig.owner}/${githubConfig.repo}` : ' (configure)'}
           </button>
 
           <div className="display" style={{ fontSize: '0.75em', color: '#6b4423', letterSpacing: '0.08em', padding: '0 0.3rem', marginBottom: '0.4rem' }}>
@@ -2152,6 +2428,19 @@ function Header({ gs, onReturnToTitle }) {
           content={exportPanel.content}
           filename={exportPanel.filename}
           onClose={() => setExportPanel(null)}
+        />
+      )}
+
+      {githubOpen && (
+        <GithubBackupModal
+          gs={gs}
+          initialConfig={githubConfig}
+          onClose={async () => {
+            setGithubOpen(false);
+            // Reload from storage in case the modal saved a new config.
+            const cfg = await loadGithubConfig();
+            setGithubConfig(cfg);
+          }}
         />
       )}
     </div>

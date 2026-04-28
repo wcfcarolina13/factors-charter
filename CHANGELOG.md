@@ -4,6 +4,25 @@ The Factor's Charter — a chronological log of what's shipped. Newest first.
 
 ---
 
+## Session 7 — GitHub backup
+
+### Added
+- **Direct push to GitHub** for manuscript and AI log, replacing the mobile-hostile copy/paste workflow.
+  - Uses the GitHub Contents API (`PUT /repos/{owner}/{repo}/contents/{path}`), which supports CORS, so it works straight from the artifact iframe.
+  - **`GithubBackupModal`** handles first-time setup (PAT, owner, repo, branch, path prefix) and per-save uploads.
+  - PAT stored in its own `localStorage` key (`factor_github_config`) — never written into a manuscript export, so a manuscript can be safely pasted around without leaking credentials.
+  - Manuscripts go to `{path}/manuscripts/factors-charter-day{day}-{ts}.json`. AI logs go to `{path}/ai-log/factors-charter-ai-log-day{day}-{ts}.json`. Each push uses a unique timestamp filename so no `sha` is needed and pushes never conflict with prior backups.
+  - Status panel reports the URL of the pushed file on success and a hint for common failure modes (401 → token; 404 → repo/scope; 422 → name collision).
+- **Header menu entry "↑ GitHub backup"** opens the modal. Label shows `owner/repo` once configured, otherwise `(configure)`.
+
+### Why
+Bradley's mobile setup makes copy-paste from textareas unreliable (Android often hides the copy menu) and blob downloads either silently navigate the iframe or do nothing useful. Pushing directly to a repo over HTTPS removes the local file step entirely.
+
+### Token guidance
+Use a **fine-grained personal access token** scoped to one repository, with **Contents: Read & write** permission. Don't reuse a classic token with broad scopes.
+
+---
+
 ## Session 6 — fix the export crash
 
 ### Fixed

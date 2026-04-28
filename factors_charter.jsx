@@ -784,7 +784,19 @@ const stateContext = (gs) => {
     ? flagEntries.map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`).join(', ')
     : 'none';
   const ship = gs.ship ? `Ship: ${gs.ship.name}, hull ${gs.ship.hull}/100, sails ${gs.ship.sails}/100` : '';
-  return `Day ${gs.day}. Location: ${gs.location}. ${ship}. Crew: ${gs.crew.map(c=>`${c.name} (${c.trait} ${c.role})`).join(', ')}. Reputation: ${reps}. Recent: ${recentJournal}. Open threads: ${hooks}. Acquaintances: ${acquaintances}. Flags: ${flags}.`;
+  // Quota / godown context — lets the model reference the Factor's reckoning
+  // (e.g. an encounter that mentions a godown half-full of pepper, or a
+  // letter that nods to how close the next Indiaman is).
+  const peppShipped = Math.floor(gs.quotas?.pepper?.have   || 0);
+  const cinnShipped = Math.floor(gs.quotas?.cinnamon?.have || 0);
+  const peppLodged  = Math.floor(gs.outpost?.warehouse?.pepper   || 0);
+  const cinnLodged  = Math.floor(gs.outpost?.warehouse?.cinnamon || 0);
+  const reckoning = `Reckoning: pepper ${peppShipped}/${gs.quotas?.pepper?.needed ?? 400} shipped (+${peppLodged} in godown); cinnamon ${cinnShipped}/${gs.quotas?.cinnamon?.needed ?? 200} shipped (+${cinnLodged} in godown)`;
+  const i = gs.indiaman || {};
+  const indiamanLine = i.nextDay
+    ? `Next Indiaman due in ${Math.max(0, i.nextDay - gs.day)} days (${(i.visits || 0)}/${INDIAMAN_TOTAL} calls made)`
+    : 'Indiaman schedule not yet known';
+  return `Day ${gs.day}. Location: ${gs.location}. ${ship}. Crew: ${gs.crew.map(c=>`${c.name} (${c.trait} ${c.role})`).join(', ')}. Reputation: ${reps}. ${reckoning}. ${indiamanLine}. Days remaining on charter: ${gs.daysRemaining}. Recent: ${recentJournal}. Open threads: ${hooks}. Acquaintances: ${acquaintances}. Flags: ${flags}.`;
 };
 
 async function genVoyageEncounter(gs, fromPort, toPort) {

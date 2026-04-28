@@ -82,6 +82,18 @@ const SHIP_TYPES = {
     name: 'Pinnace',
     holdCwt: 60,
     blurb: 'A modest single-masted vessel. Quick on a fair wind, fragile in a foul one.',
+    wearMin: 1.0,
+    wearMax: 3.0,
+    voyageBonus: 0,
+  },
+  brigantine: {
+    name: 'Brigantine',
+    holdCwt: 180,
+    blurb: 'A two-masted country brigantine, square-rigged forward and fore-and-aft on the main. Built of Pegu teak, which the worm cannot find a tooth in.',
+    wearMin: 0.6,
+    wearMax: 1.5,
+    // -1 day on any voyage of 4+ days. Stacks with the Shipwright's Yard.
+    voyageBonus: 1,
   },
 };
 const MIN_SAIL_COND = 25;
@@ -223,20 +235,34 @@ const fmtCwt = (n) => {
   return n.toFixed(1);
 };
 
-// Wear applied per voyage day. Random within a small range so a long leg
-// adds up. Returns a new ship object — does not mutate.
+// Wear applied per voyage day. Random within the ship type's range so a long
+// leg adds up. Returns a new ship object — does not mutate. Teak-hulled
+// brigantines wear noticeably slower than the pinnace.
 const applyVoyageWear = (ship, days) => {
+  const t = SHIP_TYPES[ship?.type] || SHIP_TYPES.pinnace;
+  const span = (t.wearMax - t.wearMin);
   let hull = ship.hull;
   let sails = ship.sails;
   for (let i = 0; i < days; i++) {
-    hull  -= 1 + Math.random() * 2;   // 1–3 per day
-    sails -= 1 + Math.random() * 2;
+    hull  -= t.wearMin + Math.random() * span;
+    sails -= t.wearMin + Math.random() * span;
   }
   return {
     ...ship,
     hull:  Math.max(0, Math.round(hull)),
     sails: Math.max(0, Math.round(sails)),
   };
+};
+
+// Days at sea for a given destination, factoring in the Shipwright's Yard
+// (which trims one day off every voyage) and the ship type's voyageBonus
+// (the brigantine, on legs of 4+ days). Always returns at least 1.
+const voyageDays = (gs, port) => {
+  const base = port?.daysFromHome || 1;
+  const hasShipwright = !!gs.outpost?.buildings?.shipwright?.built;
+  const t = SHIP_TYPES[gs.ship?.type] || SHIP_TYPES.pinnace;
+  const shipBonus = (t.voyageBonus && base >= 4) ? t.voyageBonus : 0;
+  return Math.max(1, base - (hasShipwright ? 1 : 0) - shipBonus);
 };
 
 // Yard available to the player at their current port. Home upgrades from
@@ -308,6 +334,18 @@ const ensureShape = (gs) => {
     next.outpost = { buildings: {}, queue: [], warehouse: {} };
   } else if (!next.outpost.warehouse || typeof next.outpost.warehouse !== 'object') {
     next.outpost = { ...next.outpost, warehouse: {} };
+  }
+  if (!next.indiaman || typeof next.indiaman !== 'object') {
+    // Returning saves: schedule the next visit from today, with a 30-day grace
+    // so the Factor has time to lodge stock before the first call.
+    const visits = Math.floor((next.day || 1) / 180);
+    const nextDay = Math.max(180, (next.day || 1) + 30);
+    next.indiaman = { lastVisit: 0, nextDay, visits, lastQuarterly: 0 };
+  } else if (next.indiaman.lastQuarterly === undefined) {
+    next.indiaman = { ...next.indiaman, lastQuarterly: next.indiaman.lastVisit || 0 };
+  }
+  if (next.shipCommission === undefined) {
+    next.shipCommission = null;
   }
   return next;
 };
@@ -455,6 +493,8 @@ Mr. W. died this morning at half past four. The Reverend will not come down from
   awayLog: [],          // events accrued while away from Bayan-Kor; cleared on digest
   quotas: { pepper: { needed: 400, have: 0 }, cinnamon: { needed: 200, have: 0 } },
   daysRemaining: 1095,
+  indiaman: { lastVisit: 0, nextDay: 180, visits: 0, lastQuarterly: 0 },
+  shipCommission: null, // { type, name, daysLeft, paid, tradeIn } when laying down a new vessel
   journal: [],
   letters: [directorLetter, wilbrahamPapers],
   hooks: ['The inland teak concession \u2014 ter Borch wants it.'],
@@ -467,6 +507,170 @@ Mr. W. died this morning at half past four. The Reverend will not come down from
   firstLetterPresented: false,
   };
 };
+
+// ─────────── INDIAMAN ARRIVAL ───────────
+// Every ~180 days the Honourable Company sends an Indiaman to lift the
+// godown's pepper and cinnamon back to London. Cumulative shipments live in
+// gs.quotas[k].have. The Director writes by the same packet, with a tone
+// modulated by how the Factor's reckoning compares to the expected pace.
+
+const INDIAMAN_NAMES = [
+  'the Astrea', 'the Marlborough', 'the Halifax', 'the Sutherland',
+  'the Devonshire', 'the Egmont', 'the Houghton',
+];
+const INDIAMAN_INTERVAL = 180;
+const QUARTERLY_INTERVAL = 90;
+const INDIAMAN_TOTAL = 6;
+
+function makeIndiamanLetter(s, peppLifted, cinnLifted, shipName) {
+  const totalPepper = (s.quotas?.pepper?.have || 0) + peppLifted;
+  const totalCinn   = (s.quotas?.cinnamon?.have || 0) + cinnLifted;
+  const visits      = (s.indiaman?.visits || 0) + 1;
+  const expectedPep = Math.round((400 * visits) / INDIAMAN_TOTAL);
+  const expectedCin = Math.round((200 * visits) / INDIAMAN_TOTAL);
+  const onTrack     = totalPepper >= expectedPep * 0.85 && totalCinn >= expectedCin * 0.85;
+  const empty       = peppLifted === 0 && cinnLifted === 0;
+  const ShipName    = shipName.replace('the ', '').replace(/^./, c => c.toUpperCase());
+
+  let subject, body;
+  if (empty) {
+    subject = `Yr. Returns by ${ShipName}`;
+    body = `Sir, — ${shipName} is returned this week with not one cwt of pepper nor of cinnamon out of yr. station. The Court will not pretend at patience much longer. We are told the climate is unkind; we are told the politics are intricate. We were told the same by the late Mr. Wilbraham, and his bones are now in the chapel-yard. Apply yourself, sir.\n\nYr. servants, the Court of Directors, in London, &c.`;
+  } else if (!onTrack) {
+    subject = `A Light Return by ${ShipName}`;
+    body = `Sir, — ${shipName} is unloaded; ${peppLifted} cwt of pepper and ${cinnLifted} cwt of cinnamon are upon the wharf at Blackwall. We had hoped for more by this hand. The cumulative reckoning stands at ${totalPepper} of 400 pepper and ${totalCinn} of 200 cinnamon. We do not yet despair of yr. station, but the third year is closer than you suppose.\n\nYr. servants, the Court of Directors.`;
+  } else {
+    subject = `Yr. Returns by ${ShipName}`;
+    body = `Sir, — ${shipName} is paid off, ${peppLifted} cwt of pepper and ${cinnLifted} cwt of cinnamon delivered into the House. The reckoning stands at ${totalPepper} of 400 pepper and ${totalCinn} of 200 cinnamon, which the Court is content to call adequate. The Bayan-Kor account is proving itself. Press on.\n\nYr. obedient servants, the Court of Directors.`;
+  }
+  return {
+    id: 1000000 + s.day * 10 + visits,
+    from: 'The Court of Directors, London',
+    subject,
+    body,
+    responses: [
+      { label: 'Acknowledge with formal compliance', seed: 'company satisfied, no surprises' },
+      { label: 'Reply with a measured account of the difficulties', seed: 'company notes the case' },
+      { label: 'Set the letter aside, return to the work', seed: 'no rep change' },
+    ],
+    read: false,
+  };
+}
+
+// ─────────── TEAK CONCESSION ───────────
+// The hook seeded by Wilbraham's papers and held open by the Vizier's clerk
+// turns into a one-time formal letter from the palace. Player chooses what
+// happens to the concession; the result modifies later ship-building costs.
+// Each response carries a fixedOutcome so handleLetterResponse can apply
+// it deterministically (no AI call) — the consequences are mechanical.
+
+function makeTeakConcessionLetter(s) {
+  return {
+    id: 2000000 + s.day,
+    from: 'The Rajah’s Vizier',
+    subject: 'On the matter of the inland teak',
+    body: `Sir, — His Highness the Rajah, considering yr. station and the late Mr Wilbraham’s papers, is mindful of the inland teak concession which has lately stood in suspense. The wood is of the kind they call ironwood in the tongue of the inland people, fit for the keel of a country ship and not subject to the worm.
+
+The Hollander Mynheer ter Borch has these five years pressed for the concession at a tenant’s rent. We need not pretend to think well of him; he has been patient.
+
+His Highness wd. hear yr. counsel in the matter. The grant lies in his gift, the price in yr. negotiation, the consequence — that wd. be felt — entirely yrs.
+
+Yr. obedt. servant,
+The Vizier`,
+    responses: [
+      {
+        label: 'Take the concession for the Company, with a tribute',
+        seed: 'tribute paid; concession secured for the Company',
+        fixedOutcome: {
+          prose: 'You attend the palace next Friday with a chest of forty rupees and a bolt of crimson calico. The Vizier accepts both with the smallest motion of his head, has the document drawn in three languages, and signs in his own hand. Hodge presents you a fair copy by the evening. The teak is yours — to fell, to season, to keel a ship under.',
+          changes: {
+            money: -120,
+            reputation: { rajah: 5, dutch: -10 },
+            flags: { teakConcession: 'self' },
+            journal: 'The teak concession was granted to the Company for a tribute of forty rupees and a bolt of calico. Ter Borch will hear of it.',
+            hook: 'ter Borch has been deprived of the teak; some answer is to be expected.',
+          },
+        },
+      },
+      {
+        label: 'Sell the concession on to ter Borch, take the cash',
+        seed: 'concession passes to the Dutch; cash now',
+        fixedOutcome: {
+          prose: 'Mynheer ter Borch is at yr. dock by Tuesday with a lacquered case and a draft on the Dutch factor at Eustace. Two hundred pounds, the formalities at the palace done by the Vizier himself for a small consideration. Hodge counts the silver three times.',
+          changes: {
+            money: 200,
+            reputation: { dutch: 15, rajah: -5 },
+            flags: { teakConcession: 'dutch' },
+            journal: 'Sold the teak concession on to ter Borch for £200. The Vizier conducted the palace formalities. The Rajah has not commented.',
+            hook: 'The teak concession is in Dutch hands; future ships built at home must pay for imported timber.',
+          },
+        },
+      },
+      {
+        label: 'Decline to act in the matter for the present',
+        seed: 'the matter rests',
+        fixedOutcome: {
+          prose: 'You return the Vizier’s clerk with a note professing further reflection. The clerk’s face does not move. The matter is, then, in suspense — though the Vizier is not a man who repeats an offer.',
+          changes: {
+            reputation: { rajah: -2 },
+            flags: { teakConcession: 'declined' },
+            journal: 'Declined to act on the teak concession for the present. The matter rests.',
+          },
+        },
+      },
+    ],
+    read: false,
+  };
+}
+
+// ─────────── QUARTERLY DIRECTOR NAGS ───────────
+// Between Indiaman calls, the Court writes anyway. Templated tone based on
+// cumulative progress: pleased / reminding / pointed / dismayed. Fires every
+// QUARTERLY_INTERVAL days, offset to fall halfway between Indiaman visits
+// (lastVisit + 90).
+
+function makeQuarterlyNagLetter(s) {
+  const visits      = s.indiaman?.visits || 0;
+  const totalPepper = (s.quotas?.pepper?.have   || 0);
+  const totalCinn   = (s.quotas?.cinnamon?.have || 0);
+  const lodgedPep   = Math.floor(s.outpost?.warehouse?.pepper   || 0);
+  const lodgedCinn  = Math.floor(s.outpost?.warehouse?.cinnamon || 0);
+  const expectedPep = Math.round((400 * visits) / INDIAMAN_TOTAL);
+  const expectedCin = Math.round((200 * visits) / INDIAMAN_TOTAL);
+  const onTrack     = (totalPepper + lodgedPep) >= expectedPep * 0.85
+                   && (totalCinn   + lodgedCinn) >= expectedCin * 0.85;
+  const finalStretch = (s.daysRemaining || 0) < 365;
+  const nothingYet   = visits === 0 && totalPepper === 0 && totalCinn === 0
+                     && lodgedPep === 0 && lodgedCinn === 0;
+  const reckoning    = `${totalPepper} of 400 pepper and ${totalCinn} of 200 cinnamon shipped, with ${lodgedPep} and ${lodgedCinn}cwt respectively in yr. godown awaiting the next call.`;
+
+  let subject, body;
+  if (nothingYet) {
+    subject = 'A First Quarterly Note';
+    body = `Sir, — We open yr. file at the Court for the present charter. The first Indiaman is despatched in due course; we shall expect a return at her holds. We pray you have laid the ground.\n\nWe are mindful of the climate, the politics, and the price of plank. We are mindful also that the late Mr. Wilbraham held the post for two years on similar excuses.\n\nYr. obedt. servants, the Court of Directors.`;
+  } else if (finalStretch && !onTrack) {
+    subject = 'A Pointed Word';
+    body = `Sir, — A reckoning at this hand: ${reckoning} The third year is upon us, and the figures are not what we are owed. The Court has the names of two replacements before it. We trust you take our meaning.\n\nYr. servants, the Court of Directors.`;
+  } else if (onTrack) {
+    subject = 'Yr. Progress Noted';
+    body = `Sir, — Returns reckon ${reckoning} The Court is content with the present pace. Press on.\n\nYr. obedt. servants, the Court of Directors.`;
+  } else {
+    subject = 'A Quarterly Reminder';
+    body = `Sir, — We have to remind you that the present hand finds the books at ${reckoning} The next Indiaman comes round in due course, and we shall watch what she brings.\n\nYr. servants, the Court of Directors.`;
+  }
+  return {
+    id: 3000000 + s.day,
+    from: 'The Court of Directors, London',
+    subject,
+    body,
+    responses: [
+      { label: 'Acknowledge with formal compliance', seed: 'no surprises; perhaps a small standing nudge' },
+      { label: 'Reply with a measured account of difficulties', seed: 'company notes the case' },
+      { label: 'Set the letter aside, return to the work', seed: 'no rep change' },
+    ],
+    read: false,
+  };
+}
 
 // ─────────── HOME SIMULATION ───────────
 // Each day the Factor is away (or any day passes), the colony lives.
@@ -482,6 +686,11 @@ function tickDays(gs, days) {
     goods: { ...gs.goods },
     awayLog: [...gs.awayLog],
     portStocks: JSON.parse(JSON.stringify(gs.portStocks || {})),
+    letters: [...(gs.letters || [])],
+    quotas: JSON.parse(JSON.stringify(gs.quotas || {})),
+    indiaman: { ...(gs.indiaman || { lastVisit: 0, nextDay: 180, visits: 0, lastQuarterly: 0 }) },
+    shipCommission: gs.shipCommission ? { ...gs.shipCommission } : null,
+    ship: gs.ship ? { ...gs.ship } : null,
   };
   const hasStockade = !!s.outpost.buildings.stockade?.built;
   const hasBarracks = !!s.outpost.buildings.barracks?.built;
@@ -526,6 +735,40 @@ function tickDays(gs, days) {
         }
       }
       s.outpost.queue = newQueue;
+    }
+
+    // ── ship commission progress. Like construction, slowed by Hodge's sobriety.
+    // On completion, the new ship replaces the old one (cargo, hull, sails reset
+    // to a fresh hundredweight on the slipway). The pinnace is sold off for the
+    // pre-quoted trade-in credit.
+    if (s.shipCommission && s.shipCommission.daysLeft > 0) {
+      const cspeed = s.npcs.hodge.sobriety > 40 ? 1 : (Math.random() < 0.6 ? 1 : 0);
+      const left = s.shipCommission.daysLeft - cspeed;
+      if (left <= 0) {
+        const t = SHIP_TYPES[s.shipCommission.type] || SHIP_TYPES.brigantine;
+        const oldShip = s.ship;
+        const newShip = {
+          name: s.shipCommission.name || `The ${t.name}`,
+          type: s.shipCommission.type,
+          holdCwt: t.holdCwt,
+          hull: 100,
+          sails: 100,
+          guns: s.shipCommission.type === 'brigantine' ? 6 : (oldShip?.guns || 0),
+        };
+        // Cargo carries over; the brigantine has more hold than the pinnace, so
+        // nothing in the old hold can fail to fit.
+        s.ship = newShip;
+        const credit = s.shipCommission.tradeIn || 0;
+        if (credit > 0) s.money = (s.money || 0) + credit;
+        s.awayLog.push({
+          day: s.day,
+          type: 'shipyard',
+          text: `${newShip.name} was launched at the slipway, two-masted and teak-built. The old ${oldShip?.name || 'pinnace'} went away with a Bugis trader for £${credit}.`,
+        });
+        s.shipCommission = null;
+      } else {
+        s.shipCommission = { ...s.shipCommission, daysLeft: left };
+      }
     }
 
     // ── plantation harvest every 30 days after built. Pepper is lodged in the
@@ -598,6 +841,81 @@ function tickDays(gs, days) {
         'A Dutch sloop stood off the bar for an afternoon, then made away.',
       ];
       s.awayLog.push({ day: s.day, type: 'incident', text: lines[Math.floor(Math.random() * lines.length)] });
+    }
+
+    // ── Indiaman call: every INDIAMAN_INTERVAL days, the Company sends a
+    // ship to lift pepper and cinnamon from the godown back to London. The
+    // Director writes by the same packet.
+    if (s.day >= (s.indiaman?.nextDay ?? Infinity) && (s.indiaman?.visits ?? 0) < INDIAMAN_TOTAL) {
+      const peppLifted = Math.floor(s.outpost.warehouse?.pepper || 0);
+      const cinnLifted = Math.floor(s.outpost.warehouse?.cinnamon || 0);
+      const idx = Math.min(s.indiaman.visits, INDIAMAN_NAMES.length - 1);
+      const shipName = INDIAMAN_NAMES[idx];
+
+      if (peppLifted > 0 || cinnLifted > 0) {
+        s.outpost.warehouse = { ...s.outpost.warehouse };
+        if (peppLifted > 0) s.outpost.warehouse.pepper = (s.outpost.warehouse.pepper || 0) - peppLifted;
+        if (cinnLifted > 0) s.outpost.warehouse.cinnamon = (s.outpost.warehouse.cinnamon || 0) - cinnLifted;
+      }
+      const letter = makeIndiamanLetter(s, peppLifted, cinnLifted, shipName);
+      // Numbers reflect the *post-shipment* reckoning the Court will see.
+      const newTotalPepper = (s.quotas?.pepper?.have   || 0) + peppLifted;
+      const newTotalCinn   = (s.quotas?.cinnamon?.have || 0) + cinnLifted;
+      const newVisits      = (s.indiaman?.visits || 0) + 1;
+      const expPep         = Math.round((400 * newVisits) / INDIAMAN_TOTAL);
+      const expCin         = Math.round((200 * newVisits) / INDIAMAN_TOTAL);
+      letter.aiUpgrade = {
+        peppLifted, cinnLifted, shipName,
+        totalPepper: newTotalPepper, totalCinn: newTotalCinn,
+        visits: newVisits,
+        empty:   peppLifted === 0 && cinnLifted === 0,
+        onTrack: newTotalPepper >= expPep * 0.85 && newTotalCinn >= expCin * 0.85,
+      };
+      s.quotas = {
+        ...s.quotas,
+        pepper:   { ...(s.quotas?.pepper   || { needed: 400, have: 0 }), have: newTotalPepper },
+        cinnamon: { ...(s.quotas?.cinnamon || { needed: 200, have: 0 }), have: newTotalCinn },
+      };
+      s.letters = [...s.letters, letter];
+      s.lettersGenerated = (s.lettersGenerated || 0) + 1;
+      const ShipName = shipName.replace('the ', '').replace(/^./, c => c.toUpperCase());
+      const tail = (peppLifted === 0 && cinnLifted === 0)
+        ? 'The hold went away empty, by the harbourmaster’s account.'
+        : `${peppLifted} cwt pepper and ${cinnLifted} cwt cinnamon lifted from the godown.`;
+      s.awayLog.push({ day: s.day, type: 'indiaman', text: `${ShipName}, of the Company, called for the returns. ${tail} A letter from the Court came by the same packet.` });
+      s.indiaman = { lastVisit: s.day, nextDay: s.day + INDIAMAN_INTERVAL, visits: (s.indiaman.visits || 0) + 1, lastQuarterly: s.day };
+    }
+
+    // ── Quarterly nag from the Court — fires halfway between Indiaman calls.
+    // Doesn't fire on a day that already saw an Indiaman visit (above sets
+    // lastQuarterly = lastVisit, blocking same-day double letters).
+    if (
+      (s.indiaman?.visits || 0) < INDIAMAN_TOTAL &&
+      (s.daysRemaining || 0) > 0 &&
+      s.day >= (s.indiaman?.lastVisit || 0) + QUARTERLY_INTERVAL &&
+      (s.indiaman?.lastQuarterly || 0) < (s.indiaman?.lastVisit || 0) + QUARTERLY_INTERVAL
+    ) {
+      const letter = makeQuarterlyNagLetter(s);
+      s.letters = [...s.letters, letter];
+      s.lettersGenerated = (s.lettersGenerated || 0) + 1;
+      s.indiaman = { ...s.indiaman, lastQuarterly: s.day };
+      s.awayLog.push({ day: s.day, type: 'letter', text: 'A packet from London — the Court desires word of yr. progress.' });
+    }
+
+    // ── Teak concession: once the Factor has earned a measure of standing
+    // with the Rajah, the Vizier writes to lay the long-suspended concession
+    // before him. One-off; the flag prevents re-firing.
+    if (
+      !s.flags?.teakLetterSent &&
+      !s.flags?.teakConcession &&
+      s.day >= 60 &&
+      (s.reputation?.rajah || 0) >= 5
+    ) {
+      const letter = makeTeakConcessionLetter(s);
+      s.letters = [...s.letters, letter];
+      s.flags = { ...(s.flags || {}), teakLetterSent: true };
+      s.lettersGenerated = (s.lettersGenerated || 0) + 1;
+      s.awayLog.push({ day: s.day, type: 'letter', text: 'A formal letter came down from the palace, the Vizier’s seal upon it.' });
     }
 
     // ── Raid: opportunists at the godown. Stockade halves the chance, the
@@ -695,7 +1013,19 @@ const stateContext = (gs) => {
     ? flagEntries.map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`).join(', ')
     : 'none';
   const ship = gs.ship ? `Ship: ${gs.ship.name}, hull ${gs.ship.hull}/100, sails ${gs.ship.sails}/100` : '';
-  return `Day ${gs.day}. Location: ${gs.location}. ${ship}. Crew: ${gs.crew.map(c=>`${c.name} (${c.trait} ${c.role})`).join(', ')}. Reputation: ${reps}. Recent: ${recentJournal}. Open threads: ${hooks}. Acquaintances: ${acquaintances}. Flags: ${flags}.`;
+  // Quota / godown context — lets the model reference the Factor's reckoning
+  // (e.g. an encounter that mentions a godown half-full of pepper, or a
+  // letter that nods to how close the next Indiaman is).
+  const peppShipped = Math.floor(gs.quotas?.pepper?.have   || 0);
+  const cinnShipped = Math.floor(gs.quotas?.cinnamon?.have || 0);
+  const peppLodged  = Math.floor(gs.outpost?.warehouse?.pepper   || 0);
+  const cinnLodged  = Math.floor(gs.outpost?.warehouse?.cinnamon || 0);
+  const reckoning = `Reckoning: pepper ${peppShipped}/${gs.quotas?.pepper?.needed ?? 400} shipped (+${peppLodged} in godown); cinnamon ${cinnShipped}/${gs.quotas?.cinnamon?.needed ?? 200} shipped (+${cinnLodged} in godown)`;
+  const i = gs.indiaman || {};
+  const indiamanLine = i.nextDay
+    ? `Next Indiaman due in ${Math.max(0, i.nextDay - gs.day)} days (${(i.visits || 0)}/${INDIAMAN_TOTAL} calls made)`
+    : 'Indiaman schedule not yet known';
+  return `Day ${gs.day}. Location: ${gs.location}. ${ship}. Crew: ${gs.crew.map(c=>`${c.name} (${c.trait} ${c.role})`).join(', ')}. Reputation: ${reps}. ${reckoning}. ${indiamanLine}. Days remaining on charter: ${gs.daysRemaining}. Recent: ${recentJournal}. Open threads: ${hooks}. Acquaintances: ${acquaintances}. Flags: ${flags}.`;
 };
 
 async function genVoyageEncounter(gs, fromPort, toPort) {
@@ -840,6 +1170,49 @@ Return JSON:
     meta: { senderFrom: sender.from, senderFaction: sender.faction },
   };
   return { result, log };
+}
+
+// Replaces the deterministic Indiaman letter body with AI prose seeded by
+// the actual return. Returns { subject, body, log } or null if the call
+// fails or the parsed result is unusable. Caller decides whether to apply.
+async function genIndiamanLetterPayload(gs, ctx) {
+  const tone = ctx.empty ? 'cold and displeased; the hold went away empty' :
+               ctx.onTrack ? 'satisfied with the present pace' :
+               'concerned that the returns are light';
+  const prompt = `Generate the body of a letter from the Honourable Company's Court of Directors in London, sent by the same packet as the Indiaman ${ctx.shipName}, which has just lifted ${ctx.peppLifted} cwt of pepper and ${ctx.cinnLifted} cwt of cinnamon from the Factor's godown at Bayan-Kor.
+
+${stateContext(gs)}
+
+Cumulative reckoning: ${ctx.totalPepper} of 400 pepper and ${ctx.totalCinn} of 200 cinnamon shipped to London. Visit ${ctx.visits} of ${INDIAMAN_TOTAL}. Charter days remaining: ${gs.daysRemaining}.
+
+VOICE: 1720s formal mercantile English, terse, NO anachronism. The Court speaks plurally ("we"), addresses "Sir, —", signs "Yr. obedt. servants, the Court of Directors". Reference the specific lifted amounts and the cumulative reckoning. The tone is: ${tone}. 3–6 sentences. May, sparingly, mention the late Mr. Wilbraham, the Dutch, the climate, or the Factor's standing — but only if it sharpens the point. Do NOT invent persons or events; do NOT introduce home-station characters in this letter.
+
+Return JSON:
+{
+  "subject": "5-9 word subject, may reference the ship",
+  "body": "the letter body, with salutation and signoff"
+}`;
+  const call = await callClaude(prompt);
+  if (!call.parsed || typeof call.parsed.body !== 'string' || !call.parsed.body.trim()) {
+    return null;
+  }
+  return {
+    subject: typeof call.parsed.subject === 'string' && call.parsed.subject.trim() ? call.parsed.subject : null,
+    body: call.parsed.body,
+    log: {
+      type: 'indiaman_letter',
+      day: gs.day,
+      location: gs.location,
+      prompt: call.prompt,
+      raw: call.raw,
+      parsed: call.parsed,
+      fallback: false,
+      error: call.error,
+      startedAt: call.startedAt,
+      endedAt: call.endedAt,
+      meta: { ...ctx },
+    },
+  };
 }
 
 async function genArrivalVignette(gs, port) {
@@ -1343,13 +1716,14 @@ const Loading = ({ msg }) => {
 
 // ─────────── TITLE SCREEN ───────────
 
-function TitleScreen({ savedData, onNewGame, onContinue, onRestore }) {
+function TitleScreen({ saves, onNewGame, onContinue, onRestore, onDeleteSlot }) {
   const [name, setName] = useState('Jonathan Wexley');
   const [showRestore, setShowRestore] = useState(false);
   const [restoreText, setRestoreText] = useState('');
   const [flash, setFlash] = useState('');
+  const [confirmingDelete, setConfirmingDelete] = useState(null); // slot id
 
-  const hasSave = !!(savedData && savedData.gs);
+  const hasSaves = Array.isArray(saves) && saves.length > 0;
 
   const showFlash = (msg) => {
     setFlash(msg);
@@ -1370,11 +1744,20 @@ function TitleScreen({ savedData, onNewGame, onContinue, onRestore }) {
   };
 
   const handleNewGame = () => {
-    if (hasSave) {
-      const ok = window.confirm('Beginning a new charter will overwrite your charter in progress. Continue?');
-      if (!ok) return;
-    }
     onNewGame(name || 'Jonathan Wexley');
+  };
+
+  // Period-light "X ago" — keep it short for the roster row.
+  const fmtAgo = (ts) => {
+    if (!ts) return '';
+    const ms = Date.now() - ts;
+    const m = Math.floor(ms / 60000);
+    const h = Math.floor(m / 60);
+    const d = Math.floor(h / 24);
+    if (d > 0) return `saved ${d}d ago`;
+    if (h > 0) return `saved ${h}h ago`;
+    if (m > 0) return `saved ${m}m ago`;
+    return 'saved just now';
   };
 
   return (
@@ -1401,26 +1784,75 @@ function TitleScreen({ savedData, onNewGame, onContinue, onRestore }) {
       </p>
       <Fleuron char="❧" />
 
-      {/* CONTINUE existing save */}
-      {hasSave && (
-        <div className="parchment" style={{
-          padding: '1rem 1.2rem', marginTop: '1.5rem', marginBottom: '1.5rem',
-          background: 'rgba(255,253,245,0.55)', textAlign: 'center',
-        }}>
-          <div className="display" style={{ fontSize: '0.85em', color: '#6b4423', letterSpacing: '0.1em', marginBottom: '0.3rem' }}>
-            ⁂ A CHARTER IN PROGRESS
+      {/* ROSTER of charters in progress */}
+      {hasSaves && (
+        <div style={{ marginTop: '1.5rem', textAlign: 'left' }}>
+          <div className="display" style={{ fontSize: '0.85em', color: '#6b4423', letterSpacing: '0.1em', marginBottom: '0.5rem', textAlign: 'center' }}>
+            ⁂ CHARTERS IN PROGRESS
           </div>
-          <div style={{ fontStyle: 'italic', color: '#4a3220', marginBottom: '0.7rem' }}>
-            {savedData.gs.player.name}, Factor at {savedData.gs.location} &middot; Day {savedData.gs.day} of {savedData.gs.day + savedData.gs.daysRemaining}
-          </div>
-          <button className="wax-button" onClick={onContinue}>Resume Your Charter</button>
+          {saves.map(s => {
+            const totalDays = (s.day || 0) + (s.daysRemaining || 0);
+            const isConfirming = confirmingDelete === s.id;
+            return (
+              <div key={s.id} className="parchment" style={{
+                padding: '0.8rem 1rem', marginBottom: '0.5rem',
+                background: 'rgba(255,253,245,0.55)',
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <div style={{ flex: 1, minWidth: '12rem' }}>
+                    <div style={{ fontStyle: 'italic', color: '#4a3220' }}>
+                      {s.name}, Factor at {s.location || 'Bayan-Kor'}
+                    </div>
+                    <div style={{ fontSize: '0.82em', color: '#6b4423', letterSpacing: '0.04em' }}>
+                      Day {s.day}{totalDays ? ` of ${totalDays}` : ''} &middot; {fmtAgo(s.lastSavedAt)}
+                    </div>
+                  </div>
+                  {!isConfirming && (
+                    <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                      <button className="wax-button" onClick={() => onContinue(s.id)} style={{ padding: '0.35rem 0.7rem', fontSize: '0.88em' }}>
+                        Resume
+                      </button>
+                      <button
+                        className="ghost-button-sm"
+                        onClick={() => setConfirmingDelete(s.id)}
+                        aria-label="Strike out this charter"
+                        title="Strike out this charter"
+                        style={{ color: '#6b4423', padding: '0.2rem 0.5rem' }}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  )}
+                </div>
+                {isConfirming && (
+                  <div className="ink-fade-in" style={{ marginTop: '0.6rem', paddingTop: '0.5rem', borderTop: '1px dashed rgba(92,26,8,0.3)' }}>
+                    <div style={{ fontStyle: 'italic', color: '#5c1a08', fontSize: '0.9em', marginBottom: '0.5rem' }}>
+                      Strike {s.name}&rsquo;s charter from the rolls? This cannot be undone.
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                      <button
+                        className="ghost-button-sm"
+                        onClick={() => { onDeleteSlot(s.id); setConfirmingDelete(null); }}
+                        style={{ color: '#8b1a1a', borderColor: '#8b1a1a' }}
+                      >
+                        Yes, strike it out
+                      </button>
+                      <button className="ghost-button-sm" onClick={() => setConfirmingDelete(null)}>
+                        Keep
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
-      {/* NEW GAME */}
+      {/* NEW CHARTER */}
       <div style={{ marginTop: '1.5rem' }}>
         <div className="display" style={{ fontSize: '0.85em', color: '#6b4423', marginBottom: '0.5rem' }}>
-          {hasSave ? 'OR BEGIN ANEW' : 'INSCRIBE THY NAME'}
+          {hasSaves ? 'BEGIN A NEW CHARTER' : 'INSCRIBE THY NAME'}
         </div>
         <div>
           <input
@@ -1432,8 +1864,8 @@ function TitleScreen({ savedData, onNewGame, onContinue, onRestore }) {
           />
         </div>
         <div style={{ marginTop: '1rem' }}>
-          <button className={hasSave ? 'ghost-button' : 'wax-button'} onClick={handleNewGame}>
-            {hasSave ? 'Begin a New Charter' : 'Open the Charter'}
+          <button className={hasSaves ? 'ghost-button' : 'wax-button'} onClick={handleNewGame}>
+            {hasSaves ? 'Begin a New Charter' : 'Open the Charter'}
           </button>
         </div>
       </div>
@@ -1587,6 +2019,47 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
     }
   }, []);
 
+  // Indiaman letters are emitted with a deterministic body and an aiUpgrade
+  // marker. Drain the queue one at a time, replacing the body with AI prose
+  // seeded by the actual return. The deterministic text remains as fallback
+  // if the API call fails. A ref guards against concurrent upgrades.
+  const upgradingLetterRef = useRef(false);
+  useEffect(() => {
+    if (upgradingLetterRef.current) return;
+    const target = (gs.letters || []).find(l => l.aiUpgrade && !l.aiUpgraded);
+    if (!target) return;
+    upgradingLetterRef.current = true;
+    let cancelled = false;
+    (async () => {
+      try {
+        const result = await genIndiamanLetterPayload(gs, target.aiUpgrade);
+        if (cancelled) return;
+        if (!result) {
+          // Mark attempted so we don't retry indefinitely on persistent failure.
+          setGs(prev => ({
+            ...prev,
+            letters: prev.letters.map(l => l.id === target.id ? { ...l, aiUpgrade: null, aiUpgraded: true } : l),
+          }));
+          return;
+        }
+        setGs(prev => ({
+          ...prev,
+          letters: prev.letters.map(l => l.id === target.id ? {
+            ...l,
+            subject: result.subject || l.subject,
+            body: result.body,
+            aiUpgrade: null,
+            aiUpgraded: true,
+          } : l),
+          aiLog: result.log ? pushAiLog(prev.aiLog, result.log) : prev.aiLog,
+        }));
+      } finally {
+        upgradingLetterRef.current = false;
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [gs.letters]);
+
   // Open a specific letter from anywhere (e.g. the Journal "Read" card).
   const openLetterById = (id) => {
     setTab('letters');
@@ -1658,7 +2131,11 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
       setPendingMsg('Surveying what passed in your absence');
       const { result: digestProse, log } = await genAwayDigest(newGs, newGs.awayLog);
       setPending(false);
-      setAwayDigest({ log: newGs.awayLog, prose: digestProse });
+      // The most recent raid (if any) is surfaced as an interactive choice
+      // in the digest screen — what does the Factor do about it?
+      const raids = newGs.awayLog.filter(e => e.type === 'raid');
+      const unresolvedRaid = raids.length > 0 ? raids[raids.length - 1] : null;
+      setAwayDigest({ log: newGs.awayLog, prose: digestProse, unresolvedRaid });
       // Clear the awayLog now that it's shown; persist the AI exchange.
       setGs({
         ...newGs,
@@ -1681,7 +2158,6 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
 
   const sailTo = async (portKey) => {
     const port = PORTS[portKey];
-    const hasShipwright = !!gs.outpost.buildings.shipwright?.built;
     // Master refuses to put to sea if the ship is too far gone.
     if ((gs.ship?.hull ?? 100) < MIN_HULL_COND || (gs.ship?.sails ?? 100) < MIN_SAIL_COND) {
       return;
@@ -1696,7 +2172,7 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
       if (log) setGs(prev => ({ ...prev, aiLog: pushAiLog(prev.aiLog, log) }));
       setEncounter({ ...enc, type: 'voyage', destination: portKey });
     } else {
-      const baseDays = Math.max(1, (port.daysFromHome || 1) - (hasShipwright ? 1 : 0));
+      const baseDays = voyageDays(gs, port);
       setPendingMsg('The voyage is uneventful');
       await new Promise(r => setTimeout(r, 600));
 
@@ -1726,8 +2202,7 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
     if (encounter.type === 'voyage') {
       const dest = encounter.destination;
       const port = PORTS[dest];
-      const hasShipwright = !!gs.outpost.buildings.shipwright?.built;
-      const baseDays = Math.max(1, (port.daysFromHome || 1) - (hasShipwright ? 1 : 0));
+      const baseDays = voyageDays(gs, port);
       const totalDays = baseDays + (outcome.changes.days || 0);
 
       // Apply outcome changes (no time) — schema supports shipDamage at sea.
@@ -1763,6 +2238,27 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
       choices: [],
       letter,
     });
+    // Some letter responses carry a fixedOutcome — deterministic events
+    // whose mechanical consequences must not be left to the model. Skip the
+    // AI call and apply the prose + changes directly.
+    if (response.fixedOutcome) {
+      setPending(true);
+      setPendingMsg('Sealing the letter');
+      // Brief pause so the loading vignette registers; matches the AI path.
+      await new Promise(r => setTimeout(r, 400));
+      setPending(false);
+      setGs(prev => ({
+        ...prev,
+        letters: prev.letters.map(l => l.id === letter.id ? { ...l, replied: true, replyLabel: response.label } : l),
+      }));
+      const safeChanges = { ...(response.fixedOutcome.changes || {}), days: 0 };
+      setOutcome({
+        prose: response.fixedOutcome.prose,
+        changes: safeChanges,
+        encounter: { type: 'letter' },
+      });
+      return;
+    }
     setPending(true);
     setPendingMsg('Sealing the letter');
     const { result, log } = await genOutcome(gs, `Letter from ${letter.from}: ${letter.body}`, response, { isLetter: true });
@@ -1792,6 +2288,32 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
     setTab('letters');
   };
 
+  // Commission a brigantine at the Bayan-Kor slipway. Pays up front; pinnace
+  // remains in service until the new ship is launched, at which point a
+  // pre-quoted credit is paid for the pinnace.
+  const commissionBrigantine = (proposedName) => {
+    if (gs.location !== 'Bayan-Kor') return;
+    if (gs.shipCommission) return;
+    if (!gs.outpost?.buildings?.shipwright?.built) return;
+    if (gs.ship?.type !== 'pinnace') return;
+    const ownTeak = gs.flags?.teakConcession === 'self';
+    const COST = ownTeak ? 600 : 900;
+    const TRADE_IN = 100;
+    const DAYS = 60;
+    if (gs.money < COST) return;
+    const cleanName = (proposedName || 'The Astrolabe').trim() || 'The Astrolabe';
+    const name = cleanName.startsWith('The ') ? cleanName : `The ${cleanName}`;
+    const teakLine = ownTeak
+      ? ` The timber is from yr. own concession inland; the saving on imported plank is conspicuous.`
+      : '';
+    setGs(prev => ({
+      ...prev,
+      money: prev.money - COST,
+      shipCommission: { type: 'brigantine', name, daysLeft: DAYS, paid: COST, tradeIn: TRADE_IN },
+      journal: [...prev.journal, { day: prev.day, entry: `Laid the order with the master shipwright at Bayan-Kor for a teak brigantine, ${name}. £${COST} disbursed; the keel will be laid this week.${teakLine}` }],
+    }));
+  };
+
   const startBuild = (key) => {
     const b = BUILDINGS[key];
     if (gs.money < b.cost) return;
@@ -1813,6 +2335,21 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
   const handleDigestContinue = () => {
     setAwayDigest(null);
     setTab('journal');
+  };
+
+  // Resolve a raid surfaced in the away-digest. Calls the AI for prose +
+  // changes, applies them instantly (no time advance), and returns the
+  // result so the digest screen can render the prose in place of the
+  // choice card.
+  const handleResolveRaid = async (raid, choice) => {
+    const encounterProse = `On returning to Bayan-Kor, the Factor was met with this report: "${raid.text}"`;
+    const { result, log } = await genOutcome(gs, encounterProse, choice, {});
+    const safeChanges = { ...result.changes, days: 0 };
+    setGs(prev => {
+      const next = applyOutcomeChangesPure(prev, safeChanges, {});
+      return { ...next, aiLog: log ? pushAiLog(next.aiLog, log) : next.aiLog };
+    });
+    return result;
   };
 
   const buyGood = (commodity, qty, price) => {
@@ -1969,7 +2506,7 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
   // ─────── RENDER ───────
 
   if (awayDigest) {
-    return <AwayDigestScreen digest={awayDigest} onContinue={handleDigestContinue} />;
+    return <AwayDigestScreen digest={awayDigest} onContinue={handleDigestContinue} onResolveRaid={handleResolveRaid} />;
   }
 
   if (encounter && pending) {
@@ -2038,7 +2575,7 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
           {tab === 'journal' && <JournalView gs={gs} arrivalProse={arrivalProse} setTab={setTab} openLetterById={openLetterById} />}
           {tab === 'ledger' && <LedgerView gs={gs} />}
           {tab === 'map' && <MapView gs={gs} sailTo={sailTo} />}
-          {tab === 'port' && <PortView gs={gs} buyGood={buyGood} sellGood={sellGood} refitShip={refitShip} arrivalProse={arrivalProse} setTab={setTab} lodgeGoods={lodgeGoods} withdrawGoods={withdrawGoods} />}
+          {tab === 'port' && <PortView gs={gs} buyGood={buyGood} sellGood={sellGood} refitShip={refitShip} arrivalProse={arrivalProse} setTab={setTab} lodgeGoods={lodgeGoods} withdrawGoods={withdrawGoods} commissionBrigantine={commissionBrigantine} />}
           {tab === 'outpost' && atHome && <OutpostView gs={gs} startBuild={startBuild} expediteBuild={expediteBuild} />}
           {tab === 'letters' && <LettersView gs={gs} setGs={setGs} onRespond={handleLetterResponse} onRequestNew={requestNewLetter} openLetterId={openLetterId} setOpenLetterId={setOpenLetterId} />}
         </div>
@@ -2466,6 +3003,9 @@ function Header({ gs, onReturnToTitle }) {
           <div className="display" style={{ fontSize: '0.85em', color: '#6b4423', letterSpacing: '0.1em', marginTop: '0.3rem' }}>
             DAY {gs.day} · £{gs.money} · HOLD {fmtCwt(cargoWeight(gs.goods))}/{cargoCap(gs)} · {gs.daysRemaining} DAYS REMAIN
           </div>
+          <div className="display" style={{ fontSize: '0.78em', color: '#8a6a3f', letterSpacing: '0.08em', marginTop: '0.2rem' }}>
+            GODOWN {fmtCwt(warehouseUsed(gs))}/{warehouseCap(gs)} · LONDON: PEPPER {Math.floor(gs.quotas?.pepper?.have || 0)}/{gs.quotas?.pepper?.needed ?? 400} · CINNAMON {Math.floor(gs.quotas?.cinnamon?.have || 0)}/{gs.quotas?.cinnamon?.needed ?? 200}
+          </div>
         </div>
         <button
           onClick={() => setMenuOpen(!menuOpen)}
@@ -2768,14 +3308,41 @@ function LedgerView({ gs }) {
           <table style={{ width: '100%', fontSize: '0.95em' }}>
             <tbody>
               {Object.entries(gs.quotas).map(([k, q]) => {
-                const lodged = Math.floor(gs.outpost?.warehouse?.[k] || 0);
-                const have = Math.min(q.needed, lodged);
+                const shipped = Math.floor(q.have || 0);
+                const lodged  = Math.floor(gs.outpost?.warehouse?.[k] || 0);
                 return (
-                  <tr key={k}><td>{COMMODITIES[k].name}</td><td style={{ textAlign: 'right' }}>{have} / {q.needed} {COMMODITIES[k].unit}</td></tr>
+                  <tr key={k}>
+                    <td>{COMMODITIES[k].name}</td>
+                    <td style={{ textAlign: 'right' }}>
+                      {shipped} / {q.needed} {COMMODITIES[k].unit}
+                      {lodged > 0 && (
+                        <span style={{ fontSize: '0.82em', color: '#6b4423', fontStyle: 'italic' }}>
+                          {' · '}{lodged} awaiting
+                        </span>
+                      )}
+                    </td>
+                  </tr>
                 );
               })}
             </tbody>
           </table>
+          {(() => {
+            const i = gs.indiaman || {};
+            const visitsLeft = INDIAMAN_TOTAL - (i.visits || 0);
+            if (visitsLeft <= 0) {
+              return (
+                <div style={{ fontSize: '0.82em', color: '#6b4423', fontStyle: 'italic', marginTop: '0.4rem' }}>
+                  No further calls expected. The reckoning is closed.
+                </div>
+              );
+            }
+            const dueIn = Math.max(0, (i.nextDay || 0) - gs.day);
+            return (
+              <div style={{ fontSize: '0.82em', color: '#6b4423', fontStyle: 'italic', marginTop: '0.4rem' }}>
+                Next Indiaman expected in {dueIn} day{dueIn !== 1 ? 's' : ''}. {visitsLeft} call{visitsLeft !== 1 ? 's' : ''} remain.
+              </div>
+            );
+          })()}
         </div>
         <div>
           <div className="display" style={{ fontSize: '0.9em', color: '#6b4423', marginBottom: '0.5rem' }}>STANDING WITH POWERS</div>
@@ -2984,7 +3551,7 @@ function MapView({ gs, sailTo }) {
 
 // ─────────── PORT VIEW ───────────
 
-function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab, lodgeGoods, withdrawGoods }) {
+function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab, lodgeGoods, withdrawGoods, commissionBrigantine }) {
   const port = PORTS[gs.location];
   const sells = Object.keys(port.sells || {});
   const buys = Object.keys(port.buys || {});
@@ -3127,6 +3694,10 @@ function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab, lodg
         </div>
       )}
 
+      {atHome && commissionBrigantine && (
+        <CommissionPanel gs={gs} commissionBrigantine={commissionBrigantine} />
+      )}
+
       <Fleuron char="❧" />
       <div style={{ textAlign: 'center', marginTop: '1rem' }}>
         <p className="italic" style={{ color: '#6b4423', fontSize: '0.9em', marginBottom: '0.7rem' }}>
@@ -3194,7 +3765,7 @@ function GodownPanel({ gs, lodgeGoods, withdrawGoods }) {
                 {COMMODITIES[c].name}
                 {isQuota && (
                   <span style={{ fontSize: '0.78em', color: '#6b4423', fontStyle: 'italic', marginLeft: '0.4rem' }}>
-                    — {Math.min(gs.quotas[c].needed, inGodown)} / {gs.quotas[c].needed} {COMMODITIES[c].unit} for London
+                    — {Math.floor(gs.quotas[c].have || 0)} / {gs.quotas[c].needed} {COMMODITIES[c].unit} shipped to London{inGodown > 0 ? `; ${inGodown} awaiting` : ''}
                   </span>
                 )}
               </div>
@@ -3216,6 +3787,98 @@ function GodownPanel({ gs, lodgeGoods, withdrawGoods }) {
 }
 
 // ─────────── OUTPOST VIEW ───────────
+
+// ─────────── COMMISSION PANEL ───────────
+// Shown at the Wharf at home. Three states: gated (no Shipwright's Yard /
+// already on a brigantine), in-progress (build counting down), or available.
+
+function CommissionPanel({ gs, commissionBrigantine }) {
+  const [proposedName, setProposedName] = useState('Astrolabe');
+  const ownTeak = gs.flags?.teakConcession === 'self';
+  const COST = ownTeak ? 600 : 900;
+  const TRADE_IN = 100;
+  const DAYS = 60;
+  const t = SHIP_TYPES.brigantine;
+  const hasYard = !!gs.outpost?.buildings?.shipwright?.built;
+  const inProgress = gs.shipCommission && gs.shipCommission.daysLeft > 0;
+  const alreadyBrig = gs.ship?.type === 'brigantine';
+  const canPay = gs.money >= COST;
+
+  if (alreadyBrig && !inProgress) return null;
+
+  if (inProgress) {
+    const c = gs.shipCommission;
+    const total = DAYS;
+    const pct = Math.max(0, Math.min(100, Math.round(((total - c.daysLeft) / total) * 100)));
+    return (
+      <div style={{ marginTop: '1.5rem', padding: '0.9rem 1rem', background: 'rgba(255,255,255,0.3)', borderLeft: '3px solid #5c1a08' }}>
+        <div className="display" style={{ fontSize: '0.9em', color: '#5c1a08', marginBottom: '0.3rem' }}>ON THE STOCKS — {c.name?.toUpperCase()}</div>
+        <p className="italic" style={{ margin: '0 0 0.6rem 0', color: '#4a3220', fontSize: '0.92em' }}>
+          The keel is laid; the planking goes on by the week. {c.daysLeft} day{c.daysLeft !== 1 ? 's' : ''} until launch. The {gs.ship?.name || 'pinnace'} remains in service until then.
+        </p>
+        <div style={{ height: '5px', background: 'rgba(74,44,20,0.15)', borderRadius: '2px' }}>
+          <div style={{ width: `${pct}%`, height: '100%', background: '#5c1a08', borderRadius: '2px' }} />
+        </div>
+      </div>
+    );
+  }
+
+  if (!hasYard) {
+    return (
+      <div style={{ marginTop: '1.5rem', padding: '0.9rem 1rem', background: 'rgba(255,255,255,0.2)', borderLeft: '3px dashed #6b4423' }}>
+        <div className="display" style={{ fontSize: '0.9em', color: '#6b4423', marginBottom: '0.3rem' }}>A LARGER VESSEL</div>
+        <p className="italic" style={{ margin: 0, color: '#4a3220', fontSize: '0.92em' }}>
+          A country brigantine could be laid down on the slipway, were there a proper Shipwright&rsquo;s Yard at Bayan-Kor.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ marginTop: '1.5rem', padding: '0.9rem 1rem', background: 'rgba(255,255,255,0.3)', borderLeft: '3px solid #5c1a08' }}>
+      <div className="display" style={{ fontSize: '0.9em', color: '#5c1a08', marginBottom: '0.3rem' }}>
+        COMMISSION A BRIGANTINE{ownTeak ? ' — INLAND TEAK' : ''}
+      </div>
+      <p className="italic" style={{ margin: '0 0 0.5rem 0', color: '#4a3220', fontSize: '0.92em' }}>
+        {t.blurb} Sixty days on the stocks; the pinnace will be sold off to the Bugis traders for £{TRADE_IN} on the day she is launched.
+        {ownTeak && ' The timber will come down from yr. own inland concession, which is no small saving.'}
+      </p>
+      <div style={{ fontSize: '0.85em', color: '#6b4423', marginBottom: '0.5rem' }}>
+        {ownTeak ? (
+          <>
+            <span style={{ textDecoration: 'line-through', color: '#a08560' }}>£900</span>{' '}
+            <span style={{ color: '#5c1a08', fontWeight: 'bold' }}>£{COST}</span>
+          </>
+        ) : (
+          <>£{COST}</>
+        )}
+        {' · '}{DAYS} days · hold {t.holdCwt} cwt · {t.wearMin}–{t.wearMax} wear/day · −1 day on long voyages
+      </div>
+      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
+        <label style={{ fontSize: '0.85em', color: '#6b4423' }}>Name her:</label>
+        <input
+          className="parchment-input"
+          value={proposedName}
+          onChange={(e) => setProposedName(e.target.value)}
+          maxLength={32}
+          style={{ flex: 1, minWidth: '10rem' }}
+        />
+      </div>
+      <button
+        className="wax-button"
+        disabled={!canPay}
+        onClick={() => commissionBrigantine(proposedName)}
+      >
+        Lay the keel — £{COST}
+      </button>
+      {!canPay && (
+        <div style={{ fontSize: '0.82em', color: '#8b1a1a', marginTop: '0.3rem', fontStyle: 'italic' }}>
+          The strongbox is short of the figure.
+        </div>
+      )}
+    </div>
+  );
+}
 
 function OutpostView({ gs, startBuild, expediteBuild }) {
   const built = Object.entries(gs.outpost.buildings).filter(([,v]) => v.built);
@@ -3332,7 +3995,39 @@ function OutpostView({ gs, startBuild, expediteBuild }) {
 
 // ─────────── AWAY DIGEST SCREEN ───────────
 
-function AwayDigestScreen({ digest, onContinue }) {
+function AwayDigestScreen({ digest, onContinue, onResolveRaid }) {
+  const [raidPending, setRaidPending] = useState(false);
+  const [raidResolved, setRaidResolved] = useState(null); // { label, prose }
+  const raid = digest.unresolvedRaid;
+
+  const RAID_CHOICES = [
+    {
+      label: 'Pursue the brigands inland — Dass insists',
+      seed: 'Sgt. Dass leads a sortie inland; risk of skirmish or ambush, fair chance to recover some of what was carried off; a small standing cost with the Rajah if the Sergeant draws blood on his land',
+    },
+    {
+      label: 'Send word to the Vizier and let his men handle it',
+      seed: 'Diplomatic recourse; the Vizier may bring back something via local justice or use the favour as a hook; rajah standing moves slightly either way; takes a few days to play out',
+    },
+    {
+      label: 'Let the matter pass — the rains will conceal the trail',
+      seed: 'No pursuit. The household notes the silence. Dass is quietly displeased; no rep change, no recovery, but no further trouble either',
+    },
+  ];
+
+  const handleChoice = async (choice) => {
+    if (raidPending || !onResolveRaid || !raid) return;
+    setRaidPending(true);
+    try {
+      const result = await onResolveRaid(raid, choice);
+      setRaidResolved({ label: choice.label, prose: result?.prose || '' });
+    } catch (e) {
+      setRaidResolved({ label: choice.label, prose: 'The matter resolves itself, after a fashion.' });
+    } finally {
+      setRaidPending(false);
+    }
+  };
+
   return (
     <Page>
       <div className="ink-fade-in" style={{ maxWidth: '42rem', margin: '0 auto', padding: '3.0rem 1.5rem', width: '100%' }}>
@@ -3358,8 +4053,53 @@ function AwayDigestScreen({ digest, onContinue }) {
             </div>
           ))}
         </div>
+
+        {raid && !raidResolved && (
+          <div className="parchment ink-fade-in" style={{
+            padding: '1rem 1.1rem', marginBottom: '1.2rem',
+            background: 'rgba(92,26,8,0.06)', borderLeft: '3px solid #5c1a08',
+          }}>
+            <div className="display" style={{ fontSize: '0.9em', color: '#5c1a08', letterSpacing: '0.06em', marginBottom: '0.4rem' }}>
+              ⁂ THE MATTER OF THE GODOWN
+            </div>
+            <p className="italic" style={{ color: '#4a3220', margin: '0 0 0.8rem 0' }}>
+              {raid.text} How will you proceed?
+            </p>
+            {raidPending ? (
+              <div className="italic" style={{ color: '#6b4423' }}>The household awaits your word…</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                {RAID_CHOICES.map((c, i) => (
+                  <button
+                    key={i}
+                    className="ghost-button"
+                    style={{ textAlign: 'left' }}
+                    onClick={() => handleChoice(c)}
+                  >
+                    {c.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {raidResolved && (
+          <div className="parchment ink-fade-in" style={{
+            padding: '1rem 1.1rem', marginBottom: '1.2rem',
+            background: 'rgba(255,253,245,0.55)',
+          }}>
+            <div className="display" style={{ fontSize: '0.85em', color: '#6b4423', letterSpacing: '0.06em', marginBottom: '0.3rem' }}>
+              YOU CHOSE: <span style={{ fontStyle: 'italic', textTransform: 'none', letterSpacing: 0 }}>{raidResolved.label}</span>
+            </div>
+            <p style={{ margin: 0, fontSize: '1em' }}>{raidResolved.prose}</p>
+          </div>
+        )}
+
         <div className="text-center">
-          <button className="wax-button" onClick={onContinue}>Take Up the Work</button>
+          <button className="wax-button" onClick={onContinue} disabled={raidPending}>
+            Take Up the Work
+          </button>
         </div>
       </div>
     </Page>
@@ -3608,12 +4348,9 @@ function ProvisionsDrawer({ gs, setGs, requestNewLetter, lastSavedAt }) {
           <div className="display" style={{ fontSize: '0.85em', color: '#6b4423', marginTop: '1.2rem', marginBottom: '0.5rem' }}>OTHER</div>
           <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
             <button className="ghost-button-sm" onClick={requestNewLetter}>Conjure a letter</button>
-            <button className="ghost-button-sm" onClick={async () => {
-              if (window.confirm('Begin a fresh charter? Current progress will be lost unless you have shown and copied the manuscript.')) {
-                await safeStorage.delete('factor_save');
-                window.location.reload();
-              }
-            }}>Begin anew</button>
+          </div>
+          <div style={{ fontStyle: 'italic', color: '#6b4423', fontSize: '0.82em', marginTop: '0.6rem' }}>
+            To begin a fresh charter, return to the title from the menu &mdash; this charter will be kept on the rolls.
           </div>
         </div>
       )}
@@ -3672,63 +4409,134 @@ const safeStorage = {
   },
 };
 
+// ─────────── SAVE SLOTS ───────────
+// Multi-save model: each charter lives at `factor_save_<id>` with a JSON
+// blob of `{ gs, phase, savedAt }`. A separate `factor_saves_index` lists
+// the slots with summary metadata for the title-screen roster. Legacy single
+// `factor_save` is migrated into a slot on first load.
+
+const SAVES_INDEX_KEY = 'factor_saves_index';
+const slotKey = (id) => `factor_save_${id}`;
+const newSlotId = () => `${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+
+const summariseSlot = (id, gs, savedAt) => ({
+  id,
+  name: gs.player?.name || 'Unknown Factor',
+  day: gs.day,
+  daysRemaining: gs.daysRemaining,
+  location: gs.location,
+  lastSavedAt: savedAt,
+});
+
+async function loadSavesIndex() {
+  const raw = await safeStorage.get(SAVES_INDEX_KEY);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) { return []; }
+}
+
+async function persistSavesIndex(index) {
+  await safeStorage.set(SAVES_INDEX_KEY, JSON.stringify(index));
+}
+
+// One-shot migration: if there is no index but a legacy single save exists,
+// promote it into a slot so the player keeps their charter. The legacy key
+// is removed after the slot is written so it can't resurrect if the player
+// later deletes the migrated slot.
+async function migrateLegacyIfNeeded(index) {
+  if (index.length > 0) return index;
+  const legacy = await safeStorage.get('factor_save');
+  if (!legacy) return index;
+  try {
+    const parsed = JSON.parse(legacy);
+    if (!parsed.gs || !parsed.gs.player) return index;
+    const id = `legacy-${Date.now()}`;
+    const ok = await safeStorage.set(slotKey(id), legacy);
+    if (!ok) return index;
+    const entry = summariseSlot(id, parsed.gs, parsed.savedAt || Date.now());
+    const next = [entry];
+    await persistSavesIndex(next);
+    await safeStorage.delete('factor_save');
+    return next;
+  } catch (e) { return index; }
+}
+
 export default function FactorsCharter() {
   const [phase, setPhase] = useState('loading');
   const [gs, setGs] = useState(null);
-  const [savedData, setSavedData] = useState(null);
+  const [savesIndex, setSavesIndex] = useState([]);
+  const [activeSaveId, setActiveSaveId] = useState(null);
   const [lastSavedAt, setLastSavedAt] = useState(null);
 
-  // Load saved state — but DO NOT auto-resume; always start at title screen.
+  // Mount: load index, run legacy migration, land on title.
   useEffect(() => {
     (async () => {
-      const value = await safeStorage.get('factor_save');
-      if (value) {
-        try {
-          const parsed = JSON.parse(value);
-          if (parsed.gs && parsed.gs.player) {
-            setSavedData(parsed);
-            setLastSavedAt(parsed.savedAt || Date.now());
-          }
-        } catch (e) { /* corrupted save, ignore */ }
-      }
+      let index = await loadSavesIndex();
+      index = await migrateLegacyIfNeeded(index);
+      setSavesIndex(index);
       setPhase('title');
     })();
   }, []);
 
-  // Persist whenever the in-game state changes
+  // Persist whenever the in-game state changes — into the active slot only.
   useEffect(() => {
-    if (!gs || phase === 'loading' || phase === 'title') return;
+    if (!gs || !activeSaveId || phase === 'loading' || phase === 'title') return;
+    let cancelled = false;
     (async () => {
       const savedAt = Date.now();
-      const ok = await safeStorage.set('factor_save', JSON.stringify({ gs, phase, savedAt }));
-      if (ok) {
-        setLastSavedAt(savedAt);
-        setSavedData({ gs, phase, savedAt });
-      }
+      const ok = await safeStorage.set(slotKey(activeSaveId), JSON.stringify({ gs, phase, savedAt }));
+      if (!ok || cancelled) return;
+      setLastSavedAt(savedAt);
+      const entry = summariseSlot(activeSaveId, gs, savedAt);
+      setSavesIndex(prev => {
+        const filtered = prev.filter(s => s.id !== activeSaveId);
+        const next = [entry, ...filtered];
+        persistSavesIndex(next);
+        return next;
+      });
     })();
-  }, [gs, phase]);
+    return () => { cancelled = true; };
+  }, [gs, phase, activeSaveId]);
 
-  const handleNewGame = async (name) => {
-    await safeStorage.delete('factor_save');
-    setSavedData(null);
-    setLastSavedAt(null);
+  const handleNewGame = (name) => {
+    const id = newSlotId();
+    setActiveSaveId(id);
     setGs(makeInitialState(name));
     setPhase('opening');
   };
 
-  const handleContinue = () => {
-    if (savedData && savedData.gs) {
-      setGs(ensureShape(savedData.gs));
-      setPhase(savedData.phase || 'game');
-    }
+  const handleContinue = async (slotId) => {
+    const raw = await safeStorage.get(slotKey(slotId));
+    if (!raw) return;
+    try {
+      const parsed = JSON.parse(raw);
+      if (!parsed.gs) return;
+      setActiveSaveId(slotId);
+      setGs(ensureShape(parsed.gs));
+      setLastSavedAt(parsed.savedAt || Date.now());
+      setPhase(parsed.phase || 'game');
+    } catch (e) { /* corrupted slot; ignore */ }
   };
 
   const handleRestore = (restoredGs) => {
+    const id = newSlotId();
+    setActiveSaveId(id);
     setGs(ensureShape(restoredGs));
     setPhase('game');
   };
 
+  const handleDeleteSlot = async (slotId) => {
+    await safeStorage.delete(slotKey(slotId));
+    const next = savesIndex.filter(s => s.id !== slotId);
+    await persistSavesIndex(next);
+    setSavesIndex(next);
+    if (activeSaveId === slotId) setActiveSaveId(null);
+  };
+
   const handleReturnToTitle = () => {
+    setActiveSaveId(null);
     setPhase('title');
   };
 
@@ -3740,10 +4548,11 @@ export default function FactorsCharter() {
     return (
       <Page>
         <TitleScreen
-          savedData={savedData}
+          saves={savesIndex}
           onNewGame={handleNewGame}
           onContinue={handleContinue}
           onRestore={handleRestore}
+          onDeleteSlot={handleDeleteSlot}
         />
       </Page>
     );

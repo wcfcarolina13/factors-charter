@@ -797,6 +797,68 @@ Hendrik Boom`,
   };
 }
 
+// ─────────── REVEREND PYKE: A MISSION SCHOOL ───────────
+// Parallels the Vizier's teak letter and Boom's Dutch pass — a third
+// faction (Mission) gets a one-off scripted hook with three deterministic
+// responses. The subscription lays the ground for a recurring child of the
+// school as a future minor character. Pyke's tone: pious Anglican, dry,
+// not unkind, capable of small reproach.
+
+function makePykeSchoolLetter(s) {
+  return {
+    id: 6000000 + s.day,
+    from: 'Reverend Pyke of the Mission at Bayan-Kor',
+    subject: 'A subscription for a small school',
+    body: `Sir, — The chapel stands, by yr. agency and the Rajah's permission, and I am sensible of the obligation. There is now in the village a number of children for whom letters and the catechism are alike out of reach. I propose to set up a small school in the south wing, with one of the Madras boys at fifty pounds the year as master, and the slates and primers found from London at no further charge to yrself.
+
+I shd. be obliged for yr. notice on the matter. The school will be of the size, dignity, and persistence yr. subscription will allow. I am, sir, &c.,
+
+J. Pyke`,
+    responses: [
+      {
+        label: 'Subscribe generously — let it be a proper school',
+        seed: 'large subscription; lasting credit with the Mission',
+        fixedOutcome: {
+          prose: 'You write a draft for one hundred pounds upon yr. London agent and add a note that primers are to be sent by the next outbound. The Reverend\'s reply is brief and not warm, but it is the warmth he is capable of. Within the month a Madras boy named Cornelius is engaged at the chapel; the village brings six children the first week, twelve the second.',
+          changes: {
+            money: -100,
+            reputation: { mission: 10, crown: 3 },
+            flags: { subscribedToSchool: 'generous', pykeLetterSent: true },
+            journal: 'Subscribed £100 to the Reverend\'s school at the Mission. A Madras boy named Cornelius engaged as master. Twelve children by the second week.',
+            hook: 'The Mission school — a Madras boy, twelve children at the start. Some among them may yet prove of consequence to the household.',
+          },
+        },
+      },
+      {
+        label: 'A modest subscription, in the present circumstances',
+        seed: 'small subscription; warm enough but no enthusiasm',
+        fixedOutcome: {
+          prose: 'You write a draft for thirty pounds with apologies framed in the language of trade. The Reverend\'s receipt is courteous and characteristically brief. The school opens in the south wing at half the proposed scale; six children attend. Pyke makes no comment beyond the formal acknowledgment.',
+          changes: {
+            money: -30,
+            reputation: { mission: 3 },
+            flags: { subscribedToSchool: 'modest', pykeLetterSent: true },
+            journal: 'Subscribed £30 to the Reverend\'s school. He noted it without comment.',
+          },
+        },
+      },
+      {
+        label: 'Decline; the strongbox cannot bear it at present',
+        seed: 'a refusal, civilly framed',
+        fixedOutcome: {
+          prose: 'You return the Reverend\'s clerk with a courteous declination, citing the present pressure of trade and a hope that the matter may be revisited in better times. The clerk inclines his head. The Reverend has, since Wilbraham\'s death, learned not to be surprised at much.',
+          changes: {
+            reputation: { mission: -3 },
+            flags: { pykeLetterSent: true, pykeSchoolDeclined: true },
+            journal: 'Declined the Reverend\'s subscription proposal for a Mission school.',
+          },
+        },
+      },
+    ],
+    read: false,
+  };
+}
+
 // ─────────── AUTO LETTER SENDERS ───────────
 // Senders gated by reputation / flags so the post reflects the Factor's
 // standing. The Director and the Vizier have dedicated cadences elsewhere
@@ -1219,6 +1281,24 @@ function tickDays(gs, days) {
       s.flags = { ...(s.flags || {}), dutchPassLetterSent: true };
       s.lettersGenerated = (s.lettersGenerated || 0) + 1;
       s.awayLog.push({ day: s.day, type: 'letter', text: 'A discreet packet from the Dutch House at Eustace — Mynheer Boom’s hand.' });
+    }
+
+    // ── Reverend Pyke: once the chapel is built and the Mission has noted
+    // the Factor with at least mild approval, Pyke writes asking for a
+    // subscription to a small school at the Mission. One-off; pykeLetterSent
+    // prevents re-firing.
+    if (
+      !s.charterClosed &&
+      !s.flags?.pykeLetterSent &&
+      s.outpost?.buildings?.chapel?.built &&
+      s.day >= 100 &&
+      (s.reputation?.mission || 0) >= 5
+    ) {
+      const letter = makePykeSchoolLetter(s);
+      s.letters = [...s.letters, letter];
+      s.lettersGenerated = (s.lettersGenerated || 0) + 1;
+      s.flags = { ...(s.flags || {}), pykeLetterSent: true };
+      s.awayLog.push({ day: s.day, type: 'letter', text: 'A note from the Mission, in the Reverend’s small upright hand.' });
     }
 
     // ── Raid: opportunists at the godown. Stockade halves the chance, the

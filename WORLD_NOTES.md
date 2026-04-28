@@ -95,6 +95,24 @@ Cross-reference with the LORE registry in `factors_charter.jsx`.
   banner in PortView surfaces "Yr. writ of free trade is honoured here."
   when held.
 
+### Mission schools in 1720s factor towns → Reverend Pyke's school
+
+- **Inspiration:** Anglican mission stations across the East Indies routinely
+  ran small schools alongside their chapels — a few children, a Madras or
+  Goan boy as master at modest stipend, primers shipped from London. The
+  Factor as Company servant was often the principal local subscriber.
+- **Transposition:** when the Mission Chapel building has been built (which
+  costs the player Rajah standing for the privilege), Pyke writes once
+  asking for a subscription to a small school in the south wing. Three
+  responses: subscribe £100 generously (Mission +10, Crown +3, named
+  Madras boy "Cornelius" engaged, twelve children, hook for future
+  appearance); subscribe £30 modestly (Mission +3, six children, no
+  comment); decline politely (Mission −3).
+- **In code:** `makePykeSchoolLetter` + trigger in `tickDays` (chapel
+  built + day ≥ 100 + Mission ≥ +5). Flag `subscribedToSchool` carries
+  one of 'generous'/'modest'/undefined; `pykeLetterSent` prevents
+  re-firing.
+
 ### The Dutch packet payoff (scripted arrival encounter)
 
 - **Setup:** option 2 from Boom's pass letter plants

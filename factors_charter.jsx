@@ -1437,6 +1437,7 @@ function TitleScreen({ savedData, onNewGame, onContinue, onRestore }) {
   const [showRestore, setShowRestore] = useState(false);
   const [restoreText, setRestoreText] = useState('');
   const [flash, setFlash] = useState('');
+  const [confirmingNew, setConfirmingNew] = useState(false);
 
   const hasSave = !!(savedData && savedData.gs);
 
@@ -1458,11 +1459,19 @@ function TitleScreen({ savedData, onNewGame, onContinue, onRestore }) {
     }
   };
 
+  // window.confirm is suppressed inside the artifact iframe and silently
+  // returns undefined, so the click was being swallowed. Use an inline
+  // confirmation panel instead — large enough to be unmissable.
   const handleNewGame = () => {
     if (hasSave) {
-      const ok = window.confirm('Beginning a new charter will overwrite your charter in progress. Continue?');
-      if (!ok) return;
+      setConfirmingNew(true);
+      return;
     }
+    onNewGame(name || 'Jonathan Wexley');
+  };
+
+  const confirmNewGame = () => {
+    setConfirmingNew(false);
     onNewGame(name || 'Jonathan Wexley');
   };
 
@@ -1506,26 +1515,44 @@ function TitleScreen({ savedData, onNewGame, onContinue, onRestore }) {
         </div>
       )}
 
-      {/* NEW GAME */}
-      <div style={{ marginTop: '1.5rem' }}>
-        <div className="display" style={{ fontSize: '0.85em', color: '#6b4423', marginBottom: '0.5rem' }}>
-          {hasSave ? 'OR BEGIN ANEW' : 'INSCRIBE THY NAME'}
+      {/* NEW GAME — or confirmation panel when overwriting a save */}
+      {confirmingNew ? (
+        <div className="parchment" style={{
+          marginTop: '1.5rem', padding: '1.2rem 1rem',
+          background: 'rgba(92,26,8,0.06)', borderLeft: '3px solid #5c1a08', textAlign: 'left',
+        }}>
+          <div className="display" style={{ fontSize: '0.95em', color: '#5c1a08', letterSpacing: '0.08em', marginBottom: '0.4rem' }}>
+            ⁂ STRIKE OUT THE OLD CHARTER?
+          </div>
+          <p style={{ fontStyle: 'italic', color: '#4a3220', margin: '0 0 0.9rem 0' }}>
+            This will overwrite {savedData?.gs?.player?.name ?? 'the present Factor'}&rsquo;s charter at Day {savedData?.gs?.day ?? '?'}. The save cannot be recovered unless you have already shown and copied the manuscript.
+          </p>
+          <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
+            <button className="wax-button" onClick={confirmNewGame}>Yes, begin anew</button>
+            <button className="ghost-button" onClick={() => setConfirmingNew(false)}>Return to the title</button>
+          </div>
         </div>
-        <div>
-          <input
-            className="parchment-input text-center"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            maxLength={32}
-            style={{ width: '18rem', maxWidth: '100%' }}
-          />
+      ) : (
+        <div style={{ marginTop: '1.5rem' }}>
+          <div className="display" style={{ fontSize: '0.85em', color: '#6b4423', marginBottom: '0.5rem' }}>
+            {hasSave ? 'OR BEGIN ANEW' : 'INSCRIBE THY NAME'}
+          </div>
+          <div>
+            <input
+              className="parchment-input text-center"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              maxLength={32}
+              style={{ width: '18rem', maxWidth: '100%' }}
+            />
+          </div>
+          <div style={{ marginTop: '1rem' }}>
+            <button className={hasSave ? 'ghost-button' : 'wax-button'} onClick={handleNewGame}>
+              {hasSave ? 'Begin a New Charter' : 'Open the Charter'}
+            </button>
+          </div>
         </div>
-        <div style={{ marginTop: '1rem' }}>
-          <button className={hasSave ? 'ghost-button' : 'wax-button'} onClick={handleNewGame}>
-            {hasSave ? 'Begin a New Charter' : 'Open the Charter'}
-          </button>
-        </div>
-      </div>
+      )}
 
       {/* RESTORE */}
       <div style={{ marginTop: '2rem' }}>
@@ -3630,6 +3657,7 @@ function ProvisionsDrawer({ gs, setGs, requestNewLetter, lastSavedAt }) {
   const [importText, setImportText] = useState('');
   const [importMode, setImportMode] = useState(false);
   const [flash, setFlash] = useState('');
+  const [confirmingNew, setConfirmingNew] = useState(false);
   const [exportPanel, setExportPanel] = useState(null);
 
   const showFlash = (msg) => {
@@ -3727,13 +3755,30 @@ function ProvisionsDrawer({ gs, setGs, requestNewLetter, lastSavedAt }) {
           <div className="display" style={{ fontSize: '0.85em', color: '#6b4423', marginTop: '1.2rem', marginBottom: '0.5rem' }}>OTHER</div>
           <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
             <button className="ghost-button-sm" onClick={requestNewLetter}>Conjure a letter</button>
-            <button className="ghost-button-sm" onClick={async () => {
-              if (window.confirm('Begin a fresh charter? Current progress will be lost unless you have shown and copied the manuscript.')) {
-                await safeStorage.delete('factor_save');
-                window.location.reload();
-              }
-            }}>Begin anew</button>
+            <button className="ghost-button-sm" onClick={() => setConfirmingNew(true)}>Begin anew</button>
           </div>
+
+          {confirmingNew && (
+            <div className="parchment ink-fade-in" style={{
+              marginTop: '0.7rem', padding: '0.9rem 1rem',
+              background: 'rgba(92,26,8,0.06)', borderLeft: '3px solid #5c1a08',
+            }}>
+              <div className="display" style={{ fontSize: '0.9em', color: '#5c1a08', letterSpacing: '0.06em', marginBottom: '0.3rem' }}>
+                ⁂ STRIKE OUT THE PRESENT CHARTER?
+              </div>
+              <p style={{ fontStyle: 'italic', color: '#4a3220', margin: '0 0 0.8rem 0', fontSize: '0.92em' }}>
+                The current charter will be erased. The save cannot be recovered unless you have already shown and copied the manuscript.
+              </p>
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                <button className="wax-button" onClick={async () => {
+                  setConfirmingNew(false);
+                  await safeStorage.delete('factor_save');
+                  if (typeof window !== 'undefined' && window.location) window.location.reload();
+                }}>Yes, begin anew</button>
+                <button className="ghost-button" onClick={() => setConfirmingNew(false)}>Return</button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

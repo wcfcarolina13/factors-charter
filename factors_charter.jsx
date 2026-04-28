@@ -387,6 +387,9 @@ const ensureShape = (gs) => {
   if (next.shipCommission === undefined) {
     next.shipCommission = null;
   }
+  if (next.charterClosed === undefined) {
+    next.charterClosed = null;
+  }
   if (!next.lettersAuto || typeof next.lettersAuto !== 'object') {
     // Returning saves: schedule the next letter ~30–55 days out from today.
     next.lettersAuto = { nextDay: (next.day || 1) + 30 + Math.floor(Math.random() * 25) };
@@ -540,6 +543,10 @@ Mr. W. died this morning at half past four. The Reverend will not come down from
   awayLog: [],          // events accrued while away from Bayan-Kor; cleared on digest
   quotas: { pepper: { needed: 400, have: 0 }, cinnamon: { needed: 200, have: 0 } },
   daysRemaining: 1095,
+  // The charter is for three years. When daysRemaining hits 0, the Court
+  // closes the file: a final letter lands, the day stops counting toward the
+  // quota, and the title roster slot is marked closed.
+  charterClosed: null, // null while running; { day, outcome } when closed
   indiaman: { lastVisit: 0, nextDay: 180, visits: 0, lastQuarterly: 0 },
   shipCommission: null, // { type, name, daysLeft, paid, tradeIn } when laying down a new vessel
   // Auto-delivered AI letters from the wider world (sister, captains, factions).
@@ -850,6 +857,67 @@ function pickAutoSender(s) {
   return eligible[eligible.length - 1];
 }
 
+// ─────────── CHARTER-END LETTER ───────────
+// At day 0 the Court closes the file. The letter the Director writes is
+// templated by completeness — three tonal variants. Returns both the
+// letter object and the outcome key for the closure record.
+
+function evalCharterOutcome(s) {
+  const pep = (s.quotas?.pepper?.have   || 0);
+  const cin = (s.quotas?.cinnamon?.have || 0);
+  const pepNeed = (s.quotas?.pepper?.needed   || 400);
+  const cinNeed = (s.quotas?.cinnamon?.needed || 200);
+  const ratio = (pep / pepNeed + cin / cinNeed) / 2;
+  if (pep >= pepNeed && cin >= cinNeed) return 'success';
+  if (ratio >= 0.65) return 'partial';
+  return 'failure';
+}
+
+function makeCharterEndLetter(s) {
+  const outcome   = evalCharterOutcome(s);
+  const totalPep  = Math.floor(s.quotas?.pepper?.have   || 0);
+  const totalCin  = Math.floor(s.quotas?.cinnamon?.have || 0);
+
+  let subject, body;
+  if (outcome === 'success') {
+    subject = 'Yr. Charter Honourably Concluded';
+    body = `Sir, — The third year is upon us, and the file at this House is closed in yr. favour. ${totalPep} cwt of pepper and ${totalCin} cwt of cinnamon stand to yr. account, the obligation discharged in full.
+
+The Court is well pleased. A second charter will be offered to you in the next packet, with terms more agreeable to a man who has shown what may be done at Bayan-Kor. Yr. tenth of net returns shall be lodged with yr. London agent by Lady Day.
+
+Yr. obedt. servants, the Court of Directors.`;
+  } else if (outcome === 'partial') {
+    subject = 'On the Closing of Yr. Charter';
+    body = `Sir, — The third year is up. The reckoning stands at ${totalPep}/400 pepper and ${totalCin}/200 cinnamon. The obligation is not discharged in full and we cannot pretend it is.
+
+We do not propose to despatch a successor at present. There are, in this latitude, harder posts than yours and easier; you are now of an age to know which is which. We expect a written account of the difficulties, of yr. own pen, by the next homeward Indiaman.
+
+Yr. servants, the Court of Directors.`;
+  } else {
+    subject = 'Yr. Recall, by the Next Packet';
+    body = `Sir, — The third year is closed. We have ${totalPep} cwt of pepper and ${totalCin} cwt of cinnamon out of yr. station against an obligation we set in plain terms three years gone. The Court will not pretend at further patience.
+
+A successor is despatched by the Indiaman next outbound. You will deliver yr. books, yr. keys, and yr. seals to him upon his landing, and take passage home in his place. The matter of yr. tenth is referred to the Standing Committee. Mr. Wilbraham's bones are in the chapel-yard at Bayan-Kor; you have at least the option of the next packet.
+
+Yr. servants, the Court of Directors.`;
+  }
+  return {
+    outcome,
+    letter: {
+      id: 5000000 + s.day,
+      from: 'The Court of Directors, London',
+      subject,
+      body,
+      responses: [
+        { label: 'Acknowledge in plain terms', seed: 'no rep change' },
+        { label: 'Reply with a measured account of difficulties', seed: 'company notes the case' },
+        { label: 'Set the letter aside, write nothing', seed: 'silence' },
+      ],
+      read: false,
+    },
+  };
+}
+
 // ─────────── HOME SIMULATION ───────────
 // Each day the Factor is away (or any day passes), the colony lives.
 // Construction progresses, NPCs act, small incidents accrue.
@@ -871,6 +939,7 @@ function tickDays(gs, days) {
     ship: gs.ship ? { ...gs.ship } : null,
     lettersAuto: { ...(gs.lettersAuto || { nextDay: 35 }) },
     pendingLetterRequests: [...(gs.pendingLetterRequests || [])],
+    charterClosed: gs.charterClosed ? { ...gs.charterClosed } : null,
   };
   const hasStockade = !!s.outpost.buildings.stockade?.built;
   const hasBarracks = !!s.outpost.buildings.barracks?.built;
@@ -879,6 +948,19 @@ function tickDays(gs, days) {
   for (let i = 0; i < days; i++) {
     s.day += 1;
     s.daysRemaining = Math.max(0, s.daysRemaining - 1);
+
+    // ── charter end: fires once when daysRemaining first hits 0. The Court
+    // closes the file; subsequent days continue to tick (the Factor still
+    // exists in the world) but the charter is over. Subsequent date-driven
+    // events (Indiaman, quarterly nag, auto-letters) are gated on
+    // !s.charterClosed in their own conditions, so they go quiet.
+    if (s.daysRemaining === 0 && !s.charterClosed) {
+      const { letter, outcome } = makeCharterEndLetter(s);
+      s.letters = [...s.letters, letter];
+      s.lettersGenerated = (s.lettersGenerated || 0) + 1;
+      s.charterClosed = { day: s.day, outcome };
+      s.awayLog.push({ day: s.day, type: 'charter-end', text: 'The third year is up. A packet from the Court closes the file.' });
+    }
 
     // ── port stocks replenish toward their cap
     for (const [pk, p] of Object.entries(PORTS)) {
@@ -1026,7 +1108,7 @@ function tickDays(gs, days) {
     // ── Indiaman call: every INDIAMAN_INTERVAL days, the Company sends a
     // ship to lift pepper and cinnamon from the godown back to London. The
     // Director writes by the same packet.
-    if (s.day >= (s.indiaman?.nextDay ?? Infinity) && (s.indiaman?.visits ?? 0) < INDIAMAN_TOTAL) {
+    if (!s.charterClosed && s.day >= (s.indiaman?.nextDay ?? Infinity) && (s.indiaman?.visits ?? 0) < INDIAMAN_TOTAL) {
       const peppLifted = Math.floor(s.outpost.warehouse?.pepper || 0);
       const cinnLifted = Math.floor(s.outpost.warehouse?.cinnamon || 0);
       const idx = Math.min(s.indiaman.visits, INDIAMAN_NAMES.length - 1);
@@ -1070,6 +1152,7 @@ function tickDays(gs, days) {
     // Doesn't fire on a day that already saw an Indiaman visit (above sets
     // lastQuarterly = lastVisit, blocking same-day double letters).
     if (
+      !s.charterClosed &&
       (s.indiaman?.visits || 0) < INDIAMAN_TOTAL &&
       (s.daysRemaining || 0) > 0 &&
       s.day >= (s.indiaman?.lastVisit || 0) + QUARTERLY_INTERVAL &&
@@ -1087,7 +1170,7 @@ function tickDays(gs, days) {
     // and pushes the finished letter into the inbox. Schedule advances
     // whether or not a sender is eligible — quiet stretches reflect a
     // Factor with few correspondents.
-    if ((s.daysRemaining || 0) > 0 && s.day >= (s.lettersAuto?.nextDay || Infinity)) {
+    if (!s.charterClosed && (s.daysRemaining || 0) > 0 && s.day >= (s.lettersAuto?.nextDay || Infinity)) {
       const sender = pickAutoSender(s);
       if (sender) {
         const seedId = Date.now() + s.day * 13 + (s.pendingLetterRequests?.length || 0);
@@ -1106,6 +1189,7 @@ function tickDays(gs, days) {
     // with the Rajah, the Vizier writes to lay the long-suspended concession
     // before him. One-off; the flag prevents re-firing.
     if (
+      !s.charterClosed &&
       !s.flags?.teakLetterSent &&
       !s.flags?.teakConcession &&
       s.day >= 60 &&
@@ -1122,6 +1206,7 @@ function tickDays(gs, days) {
     // Port St. Eustace and the Dutch are not openly hostile. Holding the
     // pass halves the port duty regardless of standing.
     if (
+      !s.charterClosed &&
       !s.flags?.dutchPassLetterSent &&
       !s.flags?.dutchTradePass &&
       !s.flags?.dutchPassDeclined &&
@@ -2398,7 +2483,9 @@ function TitleScreen({ saves, onNewGame, onContinue, onRestore, onDeleteSlot }) 
                       {s.name}, Factor at {s.location || 'Bayan-Kor'}
                     </div>
                     <div style={{ fontSize: '0.82em', color: '#6b4423', letterSpacing: '0.04em' }}>
-                      Day {s.day}{totalDays ? ` of ${totalDays}` : ''} &middot; {fmtAgo(s.lastSavedAt)}
+                      {s.charterClosed
+                        ? <>Charter closed{s.charterClosed.outcome ? ` — ${s.charterClosed.outcome}` : ''} &middot; {fmtAgo(s.lastSavedAt)}</>
+                        : <>Day {s.day}{totalDays ? ` of ${totalDays}` : ''} &middot; {fmtAgo(s.lastSavedAt)}</>}
                     </div>
                   </div>
                   {!isConfirming && (
@@ -3677,7 +3764,7 @@ function Header({ gs, onReturnToTitle }) {
             {gs.player.name}, Factor at {gs.location}
           </h1>
           <div className="display" style={{ fontSize: '0.85em', color: '#6b4423', letterSpacing: '0.1em', marginTop: '0.3rem' }}>
-            DAY {gs.day} · £{gs.money} · HOLD {fmtCwt(cargoWeight(gs.goods))}/{cargoCap(gs)} · {gs.daysRemaining} DAYS REMAIN
+            DAY {gs.day} · £{gs.money} · HOLD {fmtCwt(cargoWeight(gs.goods))}/{cargoCap(gs)} · {gs.charterClosed ? 'CHARTER CLOSED' : `${gs.daysRemaining} DAYS REMAIN`}
           </div>
           <div className="display" style={{ fontSize: '0.78em', color: '#8a6a3f', letterSpacing: '0.08em', marginTop: '0.2rem' }}>
             GODOWN {fmtCwt(warehouseUsed(gs))}/{warehouseCap(gs)} · LONDON: PEPPER {Math.floor(gs.quotas?.pepper?.have || 0)}/{gs.quotas?.pepper?.needed ?? 400} · CINNAMON {Math.floor(gs.quotas?.cinnamon?.have || 0)}/{gs.quotas?.cinnamon?.needed ?? 200}
@@ -5188,6 +5275,7 @@ const summariseSlot = (id, gs, savedAt) => ({
   daysRemaining: gs.daysRemaining,
   location: gs.location,
   lastSavedAt: savedAt,
+  charterClosed: gs.charterClosed ? { outcome: gs.charterClosed.outcome, day: gs.charterClosed.day } : null,
 });
 
 async function loadSavesIndex() {

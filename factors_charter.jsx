@@ -858,10 +858,23 @@ function tickDays(gs, days) {
         if (cinnLifted > 0) s.outpost.warehouse.cinnamon = (s.outpost.warehouse.cinnamon || 0) - cinnLifted;
       }
       const letter = makeIndiamanLetter(s, peppLifted, cinnLifted, shipName);
+      // Numbers reflect the *post-shipment* reckoning the Court will see.
+      const newTotalPepper = (s.quotas?.pepper?.have   || 0) + peppLifted;
+      const newTotalCinn   = (s.quotas?.cinnamon?.have || 0) + cinnLifted;
+      const newVisits      = (s.indiaman?.visits || 0) + 1;
+      const expPep         = Math.round((400 * newVisits) / INDIAMAN_TOTAL);
+      const expCin         = Math.round((200 * newVisits) / INDIAMAN_TOTAL);
+      letter.aiUpgrade = {
+        peppLifted, cinnLifted, shipName,
+        totalPepper: newTotalPepper, totalCinn: newTotalCinn,
+        visits: newVisits,
+        empty:   peppLifted === 0 && cinnLifted === 0,
+        onTrack: newTotalPepper >= expPep * 0.85 && newTotalCinn >= expCin * 0.85,
+      };
       s.quotas = {
         ...s.quotas,
-        pepper:   { ...(s.quotas?.pepper   || { needed: 400, have: 0 }), have: (s.quotas?.pepper?.have   || 0) + peppLifted },
-        cinnamon: { ...(s.quotas?.cinnamon || { needed: 200, have: 0 }), have: (s.quotas?.cinnamon?.have || 0) + cinnLifted },
+        pepper:   { ...(s.quotas?.pepper   || { needed: 400, have: 0 }), have: newTotalPepper },
+        cinnamon: { ...(s.quotas?.cinnamon || { needed: 200, have: 0 }), have: newTotalCinn },
       };
       s.letters = [...s.letters, letter];
       s.lettersGenerated = (s.lettersGenerated || 0) + 1;
@@ -1157,6 +1170,49 @@ Return JSON:
     meta: { senderFrom: sender.from, senderFaction: sender.faction },
   };
   return { result, log };
+}
+
+// Replaces the deterministic Indiaman letter body with AI prose seeded by
+// the actual return. Returns { subject, body, log } or null if the call
+// fails or the parsed result is unusable. Caller decides whether to apply.
+async function genIndiamanLetterPayload(gs, ctx) {
+  const tone = ctx.empty ? 'cold and displeased; the hold went away empty' :
+               ctx.onTrack ? 'satisfied with the present pace' :
+               'concerned that the returns are light';
+  const prompt = `Generate the body of a letter from the Honourable Company's Court of Directors in London, sent by the same packet as the Indiaman ${ctx.shipName}, which has just lifted ${ctx.peppLifted} cwt of pepper and ${ctx.cinnLifted} cwt of cinnamon from the Factor's godown at Bayan-Kor.
+
+${stateContext(gs)}
+
+Cumulative reckoning: ${ctx.totalPepper} of 400 pepper and ${ctx.totalCinn} of 200 cinnamon shipped to London. Visit ${ctx.visits} of ${INDIAMAN_TOTAL}. Charter days remaining: ${gs.daysRemaining}.
+
+VOICE: 1720s formal mercantile English, terse, NO anachronism. The Court speaks plurally ("we"), addresses "Sir, —", signs "Yr. obedt. servants, the Court of Directors". Reference the specific lifted amounts and the cumulative reckoning. The tone is: ${tone}. 3–6 sentences. May, sparingly, mention the late Mr. Wilbraham, the Dutch, the climate, or the Factor's standing — but only if it sharpens the point. Do NOT invent persons or events; do NOT introduce home-station characters in this letter.
+
+Return JSON:
+{
+  "subject": "5-9 word subject, may reference the ship",
+  "body": "the letter body, with salutation and signoff"
+}`;
+  const call = await callClaude(prompt);
+  if (!call.parsed || typeof call.parsed.body !== 'string' || !call.parsed.body.trim()) {
+    return null;
+  }
+  return {
+    subject: typeof call.parsed.subject === 'string' && call.parsed.subject.trim() ? call.parsed.subject : null,
+    body: call.parsed.body,
+    log: {
+      type: 'indiaman_letter',
+      day: gs.day,
+      location: gs.location,
+      prompt: call.prompt,
+      raw: call.raw,
+      parsed: call.parsed,
+      fallback: false,
+      error: call.error,
+      startedAt: call.startedAt,
+      endedAt: call.endedAt,
+      meta: { ...ctx },
+    },
+  };
 }
 
 async function genArrivalVignette(gs, port) {
@@ -1962,6 +2018,47 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
       }
     }
   }, []);
+
+  // Indiaman letters are emitted with a deterministic body and an aiUpgrade
+  // marker. Drain the queue one at a time, replacing the body with AI prose
+  // seeded by the actual return. The deterministic text remains as fallback
+  // if the API call fails. A ref guards against concurrent upgrades.
+  const upgradingLetterRef = useRef(false);
+  useEffect(() => {
+    if (upgradingLetterRef.current) return;
+    const target = (gs.letters || []).find(l => l.aiUpgrade && !l.aiUpgraded);
+    if (!target) return;
+    upgradingLetterRef.current = true;
+    let cancelled = false;
+    (async () => {
+      try {
+        const result = await genIndiamanLetterPayload(gs, target.aiUpgrade);
+        if (cancelled) return;
+        if (!result) {
+          // Mark attempted so we don't retry indefinitely on persistent failure.
+          setGs(prev => ({
+            ...prev,
+            letters: prev.letters.map(l => l.id === target.id ? { ...l, aiUpgrade: null, aiUpgraded: true } : l),
+          }));
+          return;
+        }
+        setGs(prev => ({
+          ...prev,
+          letters: prev.letters.map(l => l.id === target.id ? {
+            ...l,
+            subject: result.subject || l.subject,
+            body: result.body,
+            aiUpgrade: null,
+            aiUpgraded: true,
+          } : l),
+          aiLog: result.log ? pushAiLog(prev.aiLog, result.log) : prev.aiLog,
+        }));
+      } finally {
+        upgradingLetterRef.current = false;
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [gs.letters]);
 
   // Open a specific letter from anywhere (e.g. the Journal "Read" card).
   const openLetterById = (id) => {

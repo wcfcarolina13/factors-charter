@@ -1809,6 +1809,216 @@ const ChartVignette = () => (
   </svg>
 );
 
+// A thatched godown raised on stone piers, bales stacked within. Used for
+// scenes about lodging stock, raids on the warehouse, the harvest coming in.
+const GodownVignette = () => (
+  <svg viewBox="0 0 280 140" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={vignetteWrap}>
+    <g stroke="#5c1a08" strokeWidth="1" fill="none" strokeLinecap="round" strokeLinejoin="round">
+      {/* Distant palms */}
+      <line x1="20" y1="120" x2="20" y2="65" opacity="0.5" strokeWidth="0.7" />
+      <path d="M 20 65 q -6 -3 -10 -10 m 10 10 q 6 -3 10 -10 m -10 10 q -2 -8 -2 -16 m 2 16 q 8 -2 14 -8" opacity="0.5" strokeWidth="0.6" />
+      <line x1="258" y1="118" x2="258" y2="68" opacity="0.5" strokeWidth="0.7" />
+      <path d="M 258 68 q -6 -3 -10 -10 m 10 10 q 6 -3 10 -10 m -10 10 q -2 -8 -2 -16 m 2 16 q 8 -2 14 -8" opacity="0.5" strokeWidth="0.6" />
+      {/* Ground line */}
+      <path d="M 0 120 L 280 120" />
+      {/* Stone piers */}
+      <rect x="62" y="112" width="14" height="8" />
+      <rect x="100" y="112" width="14" height="8" />
+      <rect x="138" y="112" width="14" height="8" />
+      <rect x="176" y="112" width="14" height="8" />
+      <rect x="214" y="112" width="14" height="8" />
+      {/* Floor beam */}
+      <line x1="55" y1="112" x2="235" y2="112" />
+      {/* Walls */}
+      <line x1="60" y1="112" x2="60" y2="70" />
+      <line x1="230" y1="112" x2="230" y2="70" />
+      {/* Roof — thatched, slight slope, with overhang */}
+      <path d="M 50 70 L 145 38 L 240 70" />
+      <path d="M 60 70 L 230 70" />
+      {/* Thatch hatching */}
+      <line x1="80" y1="60" x2="78" y2="65" opacity="0.5" strokeWidth="0.5" />
+      <line x1="100" y1="55" x2="98" y2="60" opacity="0.5" strokeWidth="0.5" />
+      <line x1="120" y1="50" x2="118" y2="55" opacity="0.5" strokeWidth="0.5" />
+      <line x1="140" y1="46" x2="138" y2="51" opacity="0.5" strokeWidth="0.5" />
+      <line x1="160" y1="50" x2="158" y2="55" opacity="0.5" strokeWidth="0.5" />
+      <line x1="180" y1="55" x2="178" y2="60" opacity="0.5" strokeWidth="0.5" />
+      <line x1="200" y1="60" x2="198" y2="65" opacity="0.5" strokeWidth="0.5" />
+      {/* Door */}
+      <path d="M 138 112 L 138 90 L 152 90 L 152 112" />
+      {/* Bales/crates inside, suggested through the doorway */}
+      <rect x="76" y="98" width="14" height="14" opacity="0.6" />
+      <rect x="92" y="100" width="14" height="12" opacity="0.5" />
+      <rect x="195" y="98" width="14" height="14" opacity="0.6" />
+      <rect x="178" y="100" width="14" height="12" opacity="0.5" />
+      {/* A sack with a tied top */}
+      <path d="M 84 98 q 0 -4 6 -4 q 6 0 6 4 z" opacity="0.4" />
+      {/* Lantern hung at the eaves */}
+      <line x1="145" y1="38" x2="145" y2="52" strokeWidth="0.6" opacity="0.7" />
+      <rect x="142" y="52" width="6" height="8" opacity="0.7" />
+    </g>
+  </svg>
+);
+
+// A two-masted brigantine, square-rigged on the foremast and fore-and-aft on
+// the main. Bigger than the pinnace; used for commission events and
+// brigantine voyages.
+const BrigantineVignette = () => (
+  <svg viewBox="0 0 280 140" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={vignetteWrap}>
+    <g stroke="#5c1a08" strokeWidth="1" fill="none" strokeLinecap="round" strokeLinejoin="round">
+      {/* Distant horizon */}
+      <line x1="0" y1="92" x2="60" y2="92" opacity="0.3" strokeWidth="0.5" />
+      <line x1="240" y1="92" x2="280" y2="92" opacity="0.3" strokeWidth="0.5" />
+      {/* Hull — longer than the pinnace */}
+      <path d="M 60 102 L 220 102 L 213 112 L 70 112 Z" />
+      <line x1="90" y1="102" x2="93" y2="112" opacity="0.5" />
+      <line x1="120" y1="102" x2="122" y2="112" opacity="0.5" />
+      <line x1="160" y1="102" x2="161" y2="112" opacity="0.5" />
+      <line x1="195" y1="102" x2="194" y2="112" opacity="0.5" />
+      {/* Gunports */}
+      <rect x="84" y="104" width="3" height="3" opacity="0.7" />
+      <rect x="110" y="104" width="3" height="3" opacity="0.7" />
+      <rect x="138" y="104" width="3" height="3" opacity="0.7" />
+      <rect x="166" y="104" width="3" height="3" opacity="0.7" />
+      <rect x="192" y="104" width="3" height="3" opacity="0.7" />
+      {/* Foremast (square-rigged) */}
+      <line x1="100" y1="102" x2="98" y2="22" />
+      {/* Mainmast (fore-and-aft rigged, slightly aft) */}
+      <line x1="170" y1="102" x2="168" y2="20" />
+      {/* Bowsprit */}
+      <line x1="220" y1="102" x2="248" y2="92" />
+      {/* Foremast yards */}
+      <line x1="78" y1="68" x2="120" y2="68" />
+      <line x1="82" y1="50" x2="116" y2="50" />
+      <line x1="86" y1="34" x2="112" y2="34" />
+      {/* Mainmast gaff */}
+      <line x1="170" y1="50" x2="148" y2="36" />
+      <line x1="170" y1="76" x2="148" y2="80" />
+      {/* Square sails on foremast */}
+      <path d="M 80 69 Q 100 84 120 69 L 120 88 L 80 88 Z" />
+      <path d="M 84 51 Q 100 60 116 51 L 116 67 L 84 67 Z" />
+      <path d="M 88 35 Q 100 41 112 35 L 112 49 L 88 49 Z" />
+      {/* Fore-and-aft (gaff sail) on mainmast */}
+      <path d="M 148 36 L 168 30 L 168 80 L 148 80 Z" />
+      {/* Jib */}
+      <path d="M 220 70 L 168 22 L 246 92 Z" />
+      {/* Pennant */}
+      <path d="M 168 20 L 178 16 L 178 22 L 168 22 Z" />
+      {/* Birds */}
+      <path d="M 30 28 Q 35 25 40 28 Q 45 25 50 28" strokeWidth="0.7" />
+      <path d="M 250 18 Q 255 15 260 18" strokeWidth="0.7" />
+      {/* Waves */}
+      <path d="M 0 102 Q 30 98 60 102 T 220 102 T 280 102" />
+      <path d="M 0 110 Q 40 106 80 110 T 200 110 T 280 110" opacity="0.5" />
+      <path d="M 30 118 Q 70 114 110 118 T 230 118 T 280 118" opacity="0.3" />
+    </g>
+  </svg>
+);
+
+// A three-masted East Indiaman at anchor, much larger than the brigantine,
+// flying the Company colours. Used for Indiaman call events.
+const IndiamanVignette = () => (
+  <svg viewBox="0 0 280 140" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={vignetteWrap}>
+    <g stroke="#5c1a08" strokeWidth="1" fill="none" strokeLinecap="round" strokeLinejoin="round">
+      {/* Distant low coastline */}
+      <path d="M 0 96 q 30 -2 60 0 q 30 2 60 -1 q 30 -2 60 0 q 30 2 60 0 q 20 -1 40 0" opacity="0.3" strokeWidth="0.6" />
+      {/* Hull — broad, with stern castle */}
+      <path d="M 40 100 L 230 100 L 224 115 L 50 115 Z" />
+      <path d="M 220 100 L 232 100 L 232 92 L 224 92 Z" />
+      {/* Two stripes of gunports */}
+      <line x1="60" y1="105" x2="216" y2="105" opacity="0.4" />
+      <line x1="60" y1="110" x2="216" y2="110" opacity="0.3" />
+      {/* Stern windows */}
+      <line x1="225" y1="98" x2="232" y2="98" opacity="0.6" strokeWidth="0.5" />
+      {/* Three masts */}
+      <line x1="80" y1="100" x2="78" y2="14" />
+      <line x1="135" y1="100" x2="133" y2="8" />
+      <line x1="195" y1="100" x2="193" y2="20" />
+      {/* Bowsprit */}
+      <line x1="40" y1="100" x2="14" y2="86" />
+      <line x1="14" y1="86" x2="14" y2="62" />
+      {/* Foremast yards (3 levels) */}
+      <line x1="58" y1="62" x2="100" y2="62" />
+      <line x1="62" y1="44" x2="96" y2="44" />
+      <line x1="66" y1="28" x2="92" y2="28" />
+      {/* Mainmast yards (3 levels) */}
+      <line x1="113" y1="56" x2="155" y2="56" />
+      <line x1="117" y1="38" x2="151" y2="38" />
+      <line x1="121" y1="22" x2="147" y2="22" />
+      {/* Mizzen yards */}
+      <line x1="174" y1="68" x2="212" y2="68" />
+      <line x1="178" y1="50" x2="208" y2="50" />
+      {/* Foremast sails */}
+      <path d="M 60 63 Q 80 78 100 63 L 100 84 L 60 84 Z" />
+      <path d="M 64 45 Q 80 54 96 45 L 96 61 L 64 61 Z" />
+      <path d="M 68 29 Q 80 35 92 29 L 92 43 L 68 43 Z" />
+      {/* Mainmast sails */}
+      <path d="M 115 57 Q 135 72 155 57 L 155 78 L 115 78 Z" />
+      <path d="M 119 39 Q 135 48 151 39 L 151 55 L 119 55 Z" />
+      <path d="M 123 23 Q 135 29 147 23 L 147 37 L 123 37 Z" />
+      {/* Mizzen sails */}
+      <path d="M 176 69 Q 193 80 210 69 L 210 88 L 176 88 Z" />
+      <path d="M 180 51 Q 193 58 206 51 L 206 67 L 180 67 Z" />
+      {/* Lateen on mizzen above */}
+      <path d="M 193 22 L 175 38 L 193 40 Z" />
+      {/* Jibs */}
+      <path d="M 14 62 L 78 14 L 14 86 Z" opacity="0.85" />
+      {/* Company pennant — long, three-tail */}
+      <path d="M 133 8 L 156 6 L 152 11 L 156 14 L 133 12 Z" />
+      {/* Anchor cable */}
+      <line x1="40" y1="115" x2="22" y2="125" opacity="0.6" />
+      {/* Waves */}
+      <path d="M 0 118 Q 40 114 80 118 T 200 118 T 280 118" />
+      <path d="M 0 126 Q 50 122 100 126 T 220 126 T 280 126" opacity="0.45" />
+      <path d="M 30 134 Q 70 130 110 134 T 230 134 T 280 134" opacity="0.3" />
+    </g>
+  </svg>
+);
+
+// The Rajah's palace on its hill above Bayan-Kor — a tiered roof, palms,
+// the suggestion of a courtyard. Used for Vizier letters and palace scenes.
+const PalaceVignette = () => (
+  <svg viewBox="0 0 280 140" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={vignetteWrap}>
+    <g stroke="#5c1a08" strokeWidth="1" fill="none" strokeLinecap="round" strokeLinejoin="round">
+      {/* Hill — gentle curve */}
+      <path d="M 0 124 Q 60 96 140 88 Q 220 96 280 124" />
+      {/* Palms flanking */}
+      <line x1="40" y1="120" x2="40" y2="76" opacity="0.7" strokeWidth="0.7" />
+      <path d="M 40 76 q -8 -4 -14 -12 m 14 12 q 8 -4 14 -12 m -14 12 q -3 -10 -3 -20 m 3 20 q 10 -3 16 -10" opacity="0.7" strokeWidth="0.6" />
+      <line x1="240" y1="120" x2="240" y2="74" opacity="0.7" strokeWidth="0.7" />
+      <path d="M 240 74 q -8 -4 -14 -12 m 14 12 q 8 -4 14 -12 m -14 12 q -3 -10 -3 -20 m 3 20 q 10 -3 16 -10" opacity="0.7" strokeWidth="0.6" />
+      {/* Palace base — wide platform */}
+      <rect x="100" y="86" width="80" height="6" />
+      {/* Walls of the palace */}
+      <rect x="108" y="62" width="64" height="24" />
+      {/* Doors and windows */}
+      <path d="M 134 86 L 134 70 Q 140 64 146 70 L 146 86" />
+      <rect x="116" y="68" width="8" height="10" opacity="0.6" />
+      <rect x="156" y="68" width="8" height="10" opacity="0.6" />
+      {/* Tiered roof — first tier */}
+      <path d="M 100 62 Q 140 50 180 62" />
+      {/* Second (smaller) tier */}
+      <path d="M 118 50 Q 140 40 162 50" />
+      <rect x="124" y="40" width="32" height="10" opacity="0.4" />
+      {/* Spire */}
+      <line x1="140" y1="40" x2="140" y2="22" />
+      <circle cx="140" cy="20" r="2" />
+      {/* Pennant on spire */}
+      <path d="M 140 22 L 152 18 L 152 26 L 140 28 Z" opacity="0.7" />
+      {/* Steps to the platform */}
+      <line x1="128" y1="92" x2="152" y2="92" opacity="0.6" strokeWidth="0.6" />
+      <line x1="124" y1="98" x2="156" y2="98" opacity="0.6" strokeWidth="0.6" />
+      <line x1="120" y1="104" x2="160" y2="104" opacity="0.6" strokeWidth="0.6" />
+      {/* Distant low rooftops at the foot of the hill */}
+      <path d="M 60 122 L 65 116 L 70 122" opacity="0.5" strokeWidth="0.6" />
+      <path d="M 75 122 L 80 116 L 85 122" opacity="0.4" strokeWidth="0.6" />
+      <path d="M 200 122 L 205 116 L 210 122" opacity="0.4" strokeWidth="0.6" />
+      <path d="M 215 122 L 220 116 L 225 122" opacity="0.5" strokeWidth="0.6" />
+      {/* Birds */}
+      <path d="M 195 30 Q 200 27 205 30 Q 210 27 215 30" strokeWidth="0.7" opacity="0.7" />
+    </g>
+  </svg>
+);
+
 // Map a loading message to the appropriate vignette by keyword.
 function pickVignette(msg) {
   if (!msg) return null;
@@ -1821,6 +2031,10 @@ function pickVignette(msg) {
   if (m.includes('messenger') || m.includes('compound')) return <MessengerVignette />;
   if (m.includes('hour passes') || m.includes('hour')) return <HourglassVignette />;
   if (m.includes('chart') || m.includes('unrolling')) return <ChartVignette />;
+  if (m.includes('godown') || m.includes('warehouse') || m.includes('lodge') || m.includes('stocks')) return <GodownVignette />;
+  if (m.includes('brigantine') || m.includes('slipway') || m.includes('keel') || m.includes('caulk')) return <BrigantineVignette />;
+  if (m.includes('indiaman') || m.includes('east india')) return <IndiamanVignette />;
+  if (m.includes('palace') || m.includes('vizier') || m.includes('rajah')) return <PalaceVignette />;
   return null;
 }
 

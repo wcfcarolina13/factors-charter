@@ -153,6 +153,18 @@ const BUILDINGS = {
     blurb: 'A slipway and a small forge. The pinnace will be the better for it.',
     effect: 'Voyages take one day less.',
   },
+  great_godown: {
+    name: 'Great Godown',
+    days: 50, cost: 140,
+    blurb: 'A proper warehouse of teak and tile, raised on stone piers against the rains and the rats.',
+    effect: 'Adds 400 cwt to your port-side storage.',
+  },
+  magazine: {
+    name: 'Powder Magazine',
+    days: 35, cost: 100,
+    blurb: 'A low stone vault, set apart from the godown. Iron-banded door, a single high window, a key kept on the Sergeant\u2019s person.',
+    effect: 'Caps any single raid\u2019s loss at 10%. Reassures the night-watch.',
+  },
 };
 
 // ─────────── HELPERS ───────────
@@ -194,6 +206,16 @@ const cargoWeight = (goods) => {
 };
 
 const cargoCap = (gs) => gs.ship?.holdCwt ?? 60;
+
+// The thatched godown the Factor inherits is the base store.
+// The Great Godown extends it. Capacity is in cwt-equivalents, just like the hold.
+const WAREHOUSE_BASE_CAP = 120;
+const WAREHOUSE_GREAT_BONUS = 400;
+const warehouseCap = (gs) => {
+  const great = !!gs.outpost?.buildings?.great_godown?.built;
+  return WAREHOUSE_BASE_CAP + (great ? WAREHOUSE_GREAT_BONUS : 0);
+};
+const warehouseUsed = (gs) => cargoWeight(gs.outpost?.warehouse || {});
 
 const fmtCwt = (n) => {
   // Tidy display: integer if it rounds, otherwise one decimal.
@@ -282,6 +304,11 @@ const ensureShape = (gs) => {
   if (!Array.isArray(next.acquaintances)) next.acquaintances = [];
   if (!next.flags || typeof next.flags !== 'object') next.flags = {};
   if (!Array.isArray(next.aiLog)) next.aiLog = [];
+  if (!next.outpost || typeof next.outpost !== 'object') {
+    next.outpost = { buildings: {}, queue: [], warehouse: {} };
+  } else if (!next.outpost.warehouse || typeof next.outpost.warehouse !== 'object') {
+    next.outpost = { ...next.outpost, warehouse: {} };
+  }
   return next;
 };
 
@@ -423,6 +450,7 @@ Mr. W. died this morning at half past four. The Reverend will not come down from
   outpost: {
     buildings: {},      // key -> { built: true, builtOn: day } when complete
     queue: [],          // [{ key, daysLeft }]
+    warehouse: {},      // commodity -> qty; port-side storage at Bayan-Kor
   },
   awayLog: [],          // events accrued while away from Bayan-Kor; cleared on digest
   quotas: { pepper: { needed: 400, have: 0 }, cinnamon: { needed: 200, have: 0 } },
@@ -449,7 +477,7 @@ function tickDays(gs, days) {
   let s = {
     ...gs,
     npcs: JSON.parse(JSON.stringify(gs.npcs)),
-    outpost: { ...gs.outpost, buildings: { ...gs.outpost.buildings }, queue: [...gs.outpost.queue] },
+    outpost: { ...gs.outpost, buildings: { ...gs.outpost.buildings }, queue: [...gs.outpost.queue], warehouse: { ...(gs.outpost?.warehouse || {}) } },
     reputation: { ...gs.reputation },
     goods: { ...gs.goods },
     awayLog: [...gs.awayLog],
@@ -500,12 +528,22 @@ function tickDays(gs, days) {
       s.outpost.queue = newQueue;
     }
 
-    // ── plantation harvest every 30 days after built
+    // ── plantation harvest every 30 days after built. Pepper is lodged in the
+    // godown; if the godown is full, the surplus rots in the rains.
     const plant = s.outpost.buildings.plantation;
     if (plant?.built && (s.day - plant.builtOn) > 0 && (s.day - plant.builtOn) % 30 === 0) {
       const yield_ = 5;
-      s.goods.pepper = (s.goods.pepper || 0) + yield_;
-      s.awayLog.push({ day: s.day, type: 'harvest', text: `The plantation yielded ${yield_} cwt of pepper.` });
+      const cap = WAREHOUSE_BASE_CAP + (s.outpost.buildings.great_godown?.built ? WAREHOUSE_GREAT_BONUS : 0);
+      const used = cargoWeight(s.outpost.warehouse);
+      const room = Math.max(0, cap - used);
+      const stored = Math.min(yield_, Math.floor(room / (COMMODITIES.pepper.weight || 1)));
+      const overflow = yield_ - stored;
+      if (stored > 0) s.outpost.warehouse.pepper = (s.outpost.warehouse.pepper || 0) + stored;
+      if (overflow > 0) {
+        s.awayLog.push({ day: s.day, type: 'harvest', text: `The plantation yielded ${yield_} cwt of pepper, but the godown was full; ${overflow} cwt was lost to the rains.` });
+      } else {
+        s.awayLog.push({ day: s.day, type: 'harvest', text: `The plantation yielded ${yield_} cwt of pepper, lodged in the godown.` });
+      }
     }
 
     // ── Hodge: drunkenness roll
@@ -560,6 +598,33 @@ function tickDays(gs, days) {
         'A Dutch sloop stood off the bar for an afternoon, then made away.',
       ];
       s.awayLog.push({ day: s.day, type: 'incident', text: lines[Math.floor(Math.random() * lines.length)] });
+    }
+
+    // ── Raid: opportunists at the godown. Stockade halves the chance, the
+    // Barracks halves it again. The Magazine caps any single loss at 10%.
+    const raidPool = ['pepper', 'cinnamon', 'silver', 'opium', 'sandalwood']
+      .filter(k => Math.floor(s.outpost.warehouse?.[k] ?? 0) >= 1);
+    if (raidPool.length > 0) {
+      let raidChance = 0.012;
+      if (s.outpost.buildings.stockade?.built) raidChance *= 0.5;
+      if (s.outpost.buildings.barracks?.built) raidChance *= 0.5;
+      if (Math.random() < raidChance) {
+        const target = raidPool[Math.floor(Math.random() * raidPool.length)];
+        const have = Math.floor(s.outpost.warehouse[target]);
+        let pct = 0.05 + Math.random() * 0.20;
+        if (s.outpost.buildings.magazine?.built) pct = Math.min(pct, 0.10);
+        const lost = Math.max(1, Math.min(have, Math.floor(have * pct)));
+        s.outpost.warehouse[target] = have - lost;
+        const unit = COMMODITIES[target].unit;
+        const name = COMMODITIES[target].name;
+        const raidLines = [
+          `A Bugis prahu put men ashore at the back of the godown in the night. ${lost} ${unit} of ${name} carried off before the watch could be roused.`,
+          `Thieves cut a panel from the godown wall. ${lost} ${unit} of ${name} taken; the rains came before the trail could be followed.`,
+          `Brigands from the inland made a sortie at first light. ${lost} ${unit} of ${name} lost.`,
+          `A pilfering hand from within the household. ${lost} ${unit} of ${name} unaccounted for; Sgt. Dass has his suspicions.`,
+        ];
+        s.awayLog.push({ day: s.day, type: 'raid', text: raidLines[Math.floor(Math.random() * raidLines.length)] });
+      }
     }
   }
   return s;
@@ -1794,6 +1859,58 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
     });
   };
 
+  // Move goods from the ship's hold into the godown at Bayan-Kor.
+  // Pepper/cinnamon lodged here count toward the London quota (computed from
+  // the warehouse stock at display time, not stored separately).
+  const lodgeGoods = (commodity, qty) => {
+    if (gs.location !== 'Bayan-Kor') return;
+    const have = gs.goods[commodity] || 0;
+    if (have < 1) return;
+    const w = COMMODITIES[commodity].weight || 1;
+    const cap = warehouseCap(gs);
+    const used = warehouseUsed(gs);
+    const room = Math.max(0, cap - used);
+    const byRoom = w > 0 ? Math.floor(room / w) : qty;
+    const move = Math.max(0, Math.min(qty, have, byRoom));
+    if (move <= 0) return;
+    setGs(prev => ({
+      ...prev,
+      goods: { ...prev.goods, [commodity]: (prev.goods[commodity] || 0) - move },
+      outpost: {
+        ...prev.outpost,
+        warehouse: {
+          ...(prev.outpost.warehouse || {}),
+          [commodity]: ((prev.outpost.warehouse || {})[commodity] || 0) + move,
+        },
+      },
+      journal: [...prev.journal, { day: prev.day, entry: `Lodged ${move} ${COMMODITIES[commodity].unit} of ${COMMODITIES[commodity].name} in the godown.` }],
+    }));
+  };
+
+  // Move goods from the godown back to the ship's hold. Limited by hold cap.
+  const withdrawGoods = (commodity, qty) => {
+    if (gs.location !== 'Bayan-Kor') return;
+    const inGodown = gs.outpost?.warehouse?.[commodity] || 0;
+    if (inGodown < 1) return;
+    const w = COMMODITIES[commodity].weight || 1;
+    const remainingHold = Math.max(0, cargoCap(gs) - cargoWeight(gs.goods));
+    const byHold = w > 0 ? Math.floor(remainingHold / w) : qty;
+    const move = Math.max(0, Math.min(qty, inGodown, byHold));
+    if (move <= 0) return;
+    setGs(prev => ({
+      ...prev,
+      goods: { ...prev.goods, [commodity]: (prev.goods[commodity] || 0) + move },
+      outpost: {
+        ...prev.outpost,
+        warehouse: {
+          ...(prev.outpost.warehouse || {}),
+          [commodity]: ((prev.outpost.warehouse || {})[commodity] || 0) - move,
+        },
+      },
+      journal: [...prev.journal, { day: prev.day, entry: `Drew ${move} ${COMMODITIES[commodity].unit} of ${COMMODITIES[commodity].name} from the godown into the hold.` }],
+    }));
+  };
+
   const refitShip = async (expedite = false) => {
     const quote = repairQuote(gs, { expedite });
     if (quote.points <= 0) return;
@@ -1921,7 +2038,7 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
           {tab === 'journal' && <JournalView gs={gs} arrivalProse={arrivalProse} setTab={setTab} openLetterById={openLetterById} />}
           {tab === 'ledger' && <LedgerView gs={gs} />}
           {tab === 'map' && <MapView gs={gs} sailTo={sailTo} />}
-          {tab === 'port' && <PortView gs={gs} buyGood={buyGood} sellGood={sellGood} refitShip={refitShip} arrivalProse={arrivalProse} setTab={setTab} />}
+          {tab === 'port' && <PortView gs={gs} buyGood={buyGood} sellGood={sellGood} refitShip={refitShip} arrivalProse={arrivalProse} setTab={setTab} lodgeGoods={lodgeGoods} withdrawGoods={withdrawGoods} />}
           {tab === 'outpost' && atHome && <OutpostView gs={gs} startBuild={startBuild} expediteBuild={expediteBuild} />}
           {tab === 'letters' && <LettersView gs={gs} setGs={setGs} onRespond={handleLetterResponse} onRequestNew={requestNewLetter} openLetterId={openLetterId} setOpenLetterId={setOpenLetterId} />}
         </div>
@@ -2605,9 +2722,9 @@ function LedgerView({ gs }) {
 
       <div className="cols-2">
         <div>
-          <div className="display" style={{ fontSize: '0.9em', color: '#6b4423', marginBottom: '0.5rem' }}>STORES</div>
+          <div className="display" style={{ fontSize: '0.9em', color: '#6b4423', marginBottom: '0.5rem' }}>IN THE HOLD</div>
           {goodsList.length === 0 ? (
-            <p className="italic">The godown is empty.</p>
+            <p className="italic">The hold is empty.</p>
           ) : (
             <table style={{ width: '100%', fontSize: '0.95em' }}>
               <tbody>
@@ -2620,12 +2737,43 @@ function LedgerView({ gs }) {
               </tbody>
             </table>
           )}
+          {(() => {
+            const ware = gs.outpost?.warehouse || {};
+            const wareList = Object.entries(ware).filter(([,v]) => Math.floor(v) > 0);
+            const cap = warehouseCap(gs);
+            const used = warehouseUsed(gs);
+            return (
+              <>
+                <div className="display" style={{ fontSize: '0.9em', color: '#6b4423', marginTop: '1.5rem', marginBottom: '0.5rem' }}>
+                  GODOWN ({fmtCwt(used)} / {cap} cwt)
+                </div>
+                {wareList.length === 0 ? (
+                  <p className="italic">The godown is empty.</p>
+                ) : (
+                  <table style={{ width: '100%', fontSize: '0.95em' }}>
+                    <tbody>
+                      {wareList.map(([k, v]) => (
+                        <tr key={k}>
+                          <td>{COMMODITIES[k].name}</td>
+                          <td style={{ textAlign: 'right' }}>{Math.floor(v)} {COMMODITIES[k].unit}{Math.floor(v) !== 1 ? 's' : ''}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </>
+            );
+          })()}
           <div className="display" style={{ fontSize: '0.9em', color: '#6b4423', marginTop: '1.5rem', marginBottom: '0.5rem' }}>QUOTAS (TO LONDON)</div>
           <table style={{ width: '100%', fontSize: '0.95em' }}>
             <tbody>
-              {Object.entries(gs.quotas).map(([k, q]) => (
-                <tr key={k}><td>{COMMODITIES[k].name}</td><td style={{ textAlign: 'right' }}>{q.have} / {q.needed} {COMMODITIES[k].unit}</td></tr>
-              ))}
+              {Object.entries(gs.quotas).map(([k, q]) => {
+                const lodged = Math.floor(gs.outpost?.warehouse?.[k] || 0);
+                const have = Math.min(q.needed, lodged);
+                return (
+                  <tr key={k}><td>{COMMODITIES[k].name}</td><td style={{ textAlign: 'right' }}>{have} / {q.needed} {COMMODITIES[k].unit}</td></tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -2836,7 +2984,7 @@ function MapView({ gs, sailTo }) {
 
 // ─────────── PORT VIEW ───────────
 
-function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab }) {
+function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab, lodgeGoods, withdrawGoods }) {
   const port = PORTS[gs.location];
   const sells = Object.keys(port.sells || {});
   const buys = Object.keys(port.buys || {});
@@ -2945,6 +3093,10 @@ function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab }) {
         </div>
       </div>
 
+      {atHome && lodgeGoods && withdrawGoods && (
+        <GodownPanel gs={gs} lodgeGoods={lodgeGoods} withdrawGoods={withdrawGoods} />
+      )}
+
       {quote.points > 0 && (
         <div style={{ marginTop: '1.5rem', padding: '0.9rem 1rem', background: 'rgba(255,255,255,0.3)', borderLeft: '3px solid #5c1a08' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '0.4rem' }}>
@@ -2984,6 +3136,81 @@ function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab }) {
           Set Sail &mdash; Open the Chart
         </button>
       </div>
+    </div>
+  );
+}
+
+// ─────────── GODOWN PANEL ───────────
+// Shown inside PortView when at Bayan-Kor. Lets the player move goods between
+// the ship's hold and the port-side godown. Pepper and cinnamon stored in the
+// godown count toward the London quota (computed live from warehouse stock).
+
+function GodownPanel({ gs, lodgeGoods, withdrawGoods }) {
+  const cap = warehouseCap(gs);
+  const used = warehouseUsed(gs);
+  const ware = gs.outpost?.warehouse || {};
+  const hold = gs.goods || {};
+  const holdRemaining = Math.max(0, cargoCap(gs) - cargoWeight(hold));
+  const hasGreat = !!gs.outpost?.buildings?.great_godown?.built;
+  const hasMag = !!gs.outpost?.buildings?.magazine?.built;
+
+  // Show every commodity that has stock in either side, plus pepper/cinnamon
+  // (so the player can always see quota status here).
+  const seen = new Set();
+  for (const k of Object.keys(hold)) if ((hold[k] || 0) > 0) seen.add(k);
+  for (const k of Object.keys(ware)) if ((ware[k] || 0) > 0) seen.add(k);
+  seen.add('pepper'); seen.add('cinnamon');
+  const rows = Array.from(seen).filter(k => COMMODITIES[k]);
+
+  return (
+    <div style={{ marginTop: '1.5rem', padding: '0.9rem 1rem', background: 'rgba(255,255,255,0.3)', borderLeft: '3px solid #5c1a08' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '0.4rem' }}>
+        <div className="display" style={{ fontSize: '0.9em', color: '#5c1a08' }}>THE GODOWN</div>
+        <div className="display" style={{ fontSize: '0.85em', color: '#6b4423' }}>{fmtCwt(used)} / {cap} cwt</div>
+      </div>
+      <p className="italic" style={{ margin: '0.3rem 0 0.6rem 0', color: '#4a3220', fontSize: '0.92em' }}>
+        {hasGreat
+          ? 'The Great Godown stands behind the dock, its teak doors banded in iron.'
+          : 'The thatched godown is small and the rats are persistent. A Great Godown would treble the room.'}
+        {hasMag ? ' The Magazine cuts the worst of any single raid.' : ''}
+      </p>
+      <div style={{ height: '5px', background: 'rgba(74,44,20,0.15)', borderRadius: '2px', marginBottom: '0.7rem' }}>
+        <div style={{ width: `${Math.min(100, (used / cap) * 100)}%`, height: '100%', background: used >= cap ? '#8b1a1a' : '#5c1a08', borderRadius: '2px' }} />
+      </div>
+
+      {rows.length === 0 ? (
+        <p className="italic" style={{ color: '#6b4423' }}>No stock to lodge or withdraw.</p>
+      ) : rows.map(c => {
+        const inHold = Math.floor(hold[c] || 0);
+        const inGodown = Math.floor(ware[c] || 0);
+        const w = COMMODITIES[c].weight || 1;
+        const lodgeMax = Math.min(inHold, Math.floor(Math.max(0, cap - used) / w));
+        const withdrawMax = Math.min(inGodown, Math.floor(holdRemaining / w));
+        const isQuota = !!gs.quotas?.[c];
+        return (
+          <div key={c} className="trade-row" style={{ borderTop: '1px solid rgba(74,44,20,0.15)', paddingTop: '0.5rem', marginTop: '0.5rem' }}>
+            <div>
+              <div>
+                {COMMODITIES[c].name}
+                {isQuota && (
+                  <span style={{ fontSize: '0.78em', color: '#6b4423', fontStyle: 'italic', marginLeft: '0.4rem' }}>
+                    — {Math.min(gs.quotas[c].needed, inGodown)} / {gs.quotas[c].needed} {COMMODITIES[c].unit} for London
+                  </span>
+                )}
+              </div>
+              <div style={{ fontSize: '0.85em', color: '#6b4423' }}>
+                Hold {inHold} · Godown {inGodown} · {w} cwt ea
+              </div>
+            </div>
+            <div className="actions">
+              <button className="ghost-button-sm" disabled={lodgeMax < 1} onClick={() => lodgeGoods(c, 1)}>Lodge 1</button>
+              <button className="ghost-button-sm" disabled={lodgeMax < 1} onClick={() => lodgeGoods(c, lodgeMax)}>Lodge all ({lodgeMax})</button>
+              <button className="ghost-button-sm" disabled={withdrawMax < 1} onClick={() => withdrawGoods(c, 1)}>Draw 1</button>
+              <button className="ghost-button-sm" disabled={withdrawMax < 1} onClick={() => withdrawGoods(c, withdrawMax)}>Draw all ({withdrawMax})</button>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

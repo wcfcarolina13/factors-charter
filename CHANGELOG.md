@@ -4,6 +4,27 @@ The Factor's Charter — a chronological log of what's shipped. Newest first.
 
 ---
 
+## Session 4 — repair anywhere, money sinks
+
+### Added
+- **Refit at any port.** The slipway panel works at every port now, not only Bayan-Kor. Each away port has a `yard` quality (`fine` = Port St. Eustace, `middling` = Kota Pinang, `rough` = Pelican's Nest). Home stays special-cased: instant work at the existing flat rate (£1/pt with the Shipwright's Yard, £2/pt without).
+- **Time as a refit cost.** Away refits run `tickDays` for the work, so the home colony lives on while you're stuck on the slipway, and away-events accumulate as usual.
+- **Standing modifies cost and time** at non-home ports: cordial faction relations bring the price in (×0.75); hostile relations gouge you (up to ×1.4). `standingMult(rep)` table.
+- **Expedite mechanic** — a single "rush" rate that applies to both repairs and construction:
+  - **Refit (rush):** 1.5× cost, half the time.
+  - **Rush the work** button per queued building: pays a 1.5× premium proportional to the days remaining and halves `daysLeft`. Repeatable until 1 day left.
+- **Slipway UI** now shows yard quality, a faction-standing note when relevant, the points of damage to fix, and side-by-side Refit / Rush buttons.
+
+### Changed
+- `refitCost(gs)` replaced by structured `repairQuote(gs, opts)` returning `{ points, cost, days, yard, standingMult, ... }`. Both the panel and the handler use the same source of truth.
+- `refitShip` is now async and accepts an `expedite` flag; it ticks `tickDays(quote.days)` and writes a journal entry naming the days spent.
+- The "Ship Unfit" sail-block is no longer a dead-end: stranded at the Pelican's Nest with a wrecked hull is now a genuine money/time decision instead of a save-load problem.
+
+### Notes
+- Multi-level buildings, resource-as-payment for repairs, and faction loans are deferred to a later pass.
+
+---
+
 ## Session 3 — scarcity pass
 
 ### Added

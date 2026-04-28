@@ -45,6 +45,8 @@ const PORTS = {
     restock:  { pepper: 0.7, cinnamon: 0.3, sandalwood: 0.2 },
     buys:  { calico: 1.4, opium: 1.5, silver: 1.1, rum: 1.2 },
     faction: 'rajah',
+    yard: 'middling',
+    yardBlurb: 'The Sultan\u2019s harbormaster keeps men who know their trade. The work is fair, the wait reasonable.',
   },
   'Port St. Eustace': {
     name: 'Port St. Eustace',
@@ -55,6 +57,8 @@ const PORTS = {
     restock:  { calico: 0.5, opium: 0.15, saltpetre: 0.3 },
     buys:  { pepper: 1.4, cinnamon: 1.5, sandalwood: 1.2, silver: 1.05 },
     faction: 'dutch', rivalRisk: true,
+    yard: 'fine',
+    yardBlurb: 'The Dutch yard is the finest east of the Cape \u2014 and they will charge a Calvinist\u2019s price.',
   },
   'The Pelican\u2019s Nest': {
     name: 'The Pelican\u2019s Nest',
@@ -65,12 +69,14 @@ const PORTS = {
     restock:  { silver: 1.5, opium: 0.2, saltpetre: 0.3 },
     buys:  { rum: 1.7, calico: 1.3, rice: 1.5 },
     faction: 'pirates',
+    yard: 'rough',
+    yardBlurb: 'The Brotherhood\u2019s wreckers can patch a hull in a hurry \u2014 with what timber they have lifted from elsewhere.',
   },
 };
 
 // \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 SHIPS \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
 // Hull and sails are 0\u2013100 condition. Voyages chip both. Below MIN_SAIL_COND
-// the master refuses to put to sea \u2014 repair at the home wharf.
+// the master refuses to put to sea \u2014 repair at any wharf, at varying cost.
 const SHIP_TYPES = {
   pinnace: {
     name: 'Pinnace',
@@ -80,6 +86,24 @@ const SHIP_TYPES = {
 };
 const MIN_SAIL_COND = 25;
 const MIN_HULL_COND = 25;
+
+// Yard quality determines per-point cost and time for a ship refit.
+// Home (Bayan-Kor) is special-cased: instant, with its own rate.
+const YARDS = {
+  rough:    { label: 'rough',    costPerPoint: 3.0, timePerPoint: 0.3 },
+  middling: { label: 'middling', costPerPoint: 2.5, timePerPoint: 0.2 },
+  fine:     { label: 'fine',     costPerPoint: 2.0, timePerPoint: 0.15 },
+};
+
+// How standing with the local faction modifies refit cost and time at non-home
+// ports. Cordial = a concession; hostile = a gouge.
+const standingMult = (rep) => {
+  if (rep >= 50) return 0.75;
+  if (rep >= 20) return 0.85;
+  if (rep >= -5) return 1.0;
+  if (rep >= -20) return 1.15;
+  return 1.4;
+};
 
 const FACTIONS = {
   company: { name: 'The Honourable Company', short: 'Company' },
@@ -193,13 +217,53 @@ const applyVoyageWear = (ship, days) => {
   };
 };
 
-// Cost to refit the ship to full at the home wharf. Halved with shipwright.
-const refitCost = (gs) => {
+// Yard available to the player at their current port. Home upgrades from
+// rough to fine when the Shipwright's Yard is built.
+const yardOf = (gs) => {
+  const port = PORTS[gs.location];
+  if (port?.isHome) {
+    return gs.outpost?.buildings?.shipwright?.built ? 'fine' : 'rough';
+  }
+  return port?.yard || 'middling';
+};
+
+// Quote a refit at the player's current location. Returns the cost in money,
+// the days the ship will be on the slipway, and the modifiers used. Pass
+// { expedite: true } to get a 1.5x cost / half-time variant. Home is instant.
+const repairQuote = (gs, opts = {}) => {
   const ship = gs.ship || { hull: 100, sails: 100 };
-  const missing = (100 - ship.hull) + (100 - ship.sails);
-  const hasYard = !!gs.outpost?.buildings?.shipwright?.built;
-  const rate = hasYard ? 1 : 2;
-  return Math.round(missing * rate);
+  const points = (100 - ship.hull) + (100 - ship.sails);
+  const port = PORTS[gs.location] || {};
+  const yardKey = yardOf(gs);
+  const rep = gs.reputation?.[port.faction] ?? 0;
+  const sm = port.isHome ? 1 : standingMult(rep);
+  if (points <= 0) {
+    return { points: 0, cost: 0, days: 0, yard: yardKey, faction: port.faction, rep, standingMult: sm, expedite: !!opts.expedite };
+  }
+  let cost, days;
+  if (port.isHome) {
+    const hasYard = !!gs.outpost?.buildings?.shipwright?.built;
+    cost = points * (hasYard ? 1 : 2);
+    days = 0;
+  } else {
+    const yard = YARDS[yardKey];
+    cost = points * yard.costPerPoint * sm;
+    days = Math.ceil(points * yard.timePerPoint * sm);
+  }
+  if (opts.expedite && days > 0) {
+    cost = cost * 1.5;
+    days = Math.max(1, Math.ceil(days / 2));
+  }
+  return {
+    points,
+    cost: Math.max(1, Math.round(cost)),
+    days,
+    yard: yardKey,
+    faction: port.faction,
+    rep,
+    standingMult: sm,
+    expedite: !!opts.expedite,
+  };
 };
 
 // Lazily seed any fields a save may be missing — keeps older manuscripts
@@ -1546,16 +1610,58 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
     });
   };
 
-  const refitShip = () => {
-    if (gs.location !== 'Bayan-Kor') return;
-    const cost = refitCost(gs);
-    if (cost <= 0) return;
-    if (gs.money < cost) return;
+  const refitShip = async (expedite = false) => {
+    const quote = repairQuote(gs, { expedite });
+    if (quote.points <= 0) return;
+    if (gs.money < quote.cost) return;
+
+    if (quote.days <= 0) {
+      // Instant — home or otherwise free of time.
+      setGs(prev => ({
+        ...prev,
+        money: prev.money - quote.cost,
+        ship: { ...prev.ship, hull: 100, sails: 100 },
+        journal: [...prev.journal, { day: prev.day, entry: `Paid £${quote.cost} to refit the ${prev.ship.name} at the slipway. Hull and sails sound.` }],
+      }));
+      return;
+    }
+
+    setPending(true);
+    setPendingMsg(expedite ? 'Caulkers and stitchers driven hard' : 'On the slipway with caulkers and stitchers');
+    let next = { ...gs, money: gs.money - quote.cost };
+    next = tickDays(next, quote.days);
+    next = {
+      ...next,
+      ship: { ...next.ship, hull: 100, sails: 100 },
+      journal: [
+        ...next.journal,
+        { day: next.day, entry: `Paid £${quote.cost} for ${quote.days} day${quote.days !== 1 ? 's' : ''} on the slipway at ${gs.location}${expedite ? ', the work hurried' : ''}. The ${next.ship.name} is sound again.` },
+      ],
+    };
+    setPending(false);
+    setGs(next);
+  };
+
+  const expediteBuild = (idx) => {
+    const item = gs.outpost.queue[idx];
+    if (!item) return;
+    const b = BUILDINGS[item.key];
+    if (!b) return;
+    if (item.daysLeft <= 0) return;
+    // Cost is proportional to remaining work, with a 1.5x rush premium.
+    const proportion = item.daysLeft / b.days;
+    const rushCost = Math.max(5, Math.ceil(proportion * b.cost * 1.5));
+    if (gs.money < rushCost) return;
     setGs(prev => ({
       ...prev,
-      money: prev.money - cost,
-      ship: { ...prev.ship, hull: 100, sails: 100 },
-      journal: [...prev.journal, { day: prev.day, entry: `Paid £${cost} to refit the ${prev.ship.name} at the slipway. Hull and sails sound.` }],
+      money: prev.money - rushCost,
+      outpost: {
+        ...prev.outpost,
+        queue: prev.outpost.queue.map((q, i) =>
+          i === idx ? { ...q, daysLeft: Math.floor(q.daysLeft / 2) } : q
+        ),
+      },
+      journal: [...prev.journal, { day: prev.day, entry: `Paid £${rushCost} extra to hurry the ${b.name}. The work goes faster, the men go later to their suppers.` }],
     }));
   };
 
@@ -1632,7 +1738,7 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
           {tab === 'ledger' && <LedgerView gs={gs} />}
           {tab === 'map' && <MapView gs={gs} sailTo={sailTo} />}
           {tab === 'port' && <PortView gs={gs} buyGood={buyGood} sellGood={sellGood} refitShip={refitShip} arrivalProse={arrivalProse} setTab={setTab} />}
-          {tab === 'outpost' && atHome && <OutpostView gs={gs} startBuild={startBuild} />}
+          {tab === 'outpost' && atHome && <OutpostView gs={gs} startBuild={startBuild} expediteBuild={expediteBuild} />}
           {tab === 'letters' && <LettersView gs={gs} setGs={setGs} onRespond={handleLetterResponse} onRequestNew={requestNewLetter} openLetterId={openLetterId} setOpenLetterId={setOpenLetterId} />}
         </div>
         <ProvisionsDrawer gs={gs} setGs={setGs} requestNewLetter={requestNewLetter} lastSavedAt={lastSavedAt} />
@@ -2136,8 +2242,16 @@ function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab }) {
   };
 
   const atHome = gs.location === 'Bayan-Kor';
-  const refit = refitCost(gs);
+  const quote     = repairQuote(gs);
+  const rushQuote = repairQuote(gs, { expedite: true });
   const hasYard = !!gs.outpost?.buildings?.shipwright?.built;
+  const standingNote = (() => {
+    if (atHome || !port.faction) return '';
+    const m = quote.standingMult;
+    if (m < 1) return `Your standing with the ${FACTIONS[port.faction].short} brings the price in.`;
+    if (m > 1) return `Your standing with the ${FACTIONS[port.faction].short} adds to the bill.`;
+    return '';
+  })();
 
   return (
     <div>
@@ -2216,17 +2330,33 @@ function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab }) {
         </div>
       </div>
 
-      {atHome && refit > 0 && (
+      {quote.points > 0 && (
         <div style={{ marginTop: '1.5rem', padding: '0.9rem 1rem', background: 'rgba(255,255,255,0.3)', borderLeft: '3px solid #5c1a08' }}>
-          <div className="display" style={{ fontSize: '0.9em', color: '#5c1a08', marginBottom: '0.3rem' }}>THE SLIPWAY</div>
-          <p className="italic" style={{ margin: '0 0 0.5rem 0', color: '#4a3220', fontSize: '0.92em' }}>
-            {hasYard
-              ? `The shipwright's apprentices can have the ${ship.name} sound by the morning tide. £${refit} to put her right.`
-              : `Without a proper yard, refit is dear: £${refit} for the work, and most of it bodged. (Build the Shipwright's Yard for the proper rate.)`}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '0.4rem' }}>
+            <div className="display" style={{ fontSize: '0.9em', color: '#5c1a08' }}>THE SLIPWAY</div>
+            <div style={{ fontSize: '0.78em', color: '#6b4423', fontStyle: 'italic' }}>yard: {YARDS[quote.yard].label}</div>
+          </div>
+          <p className="italic" style={{ margin: '0.3rem 0 0.6rem 0', color: '#4a3220', fontSize: '0.92em' }}>
+            {atHome
+              ? (hasYard
+                  ? `The shipwright's apprentices can have the ${ship.name} sound by the morning tide.`
+                  : `Without a proper yard, refit is dear and the work mostly bodged. (Build the Shipwright's Yard for the proper rate.)`)
+              : (port.yardBlurb || 'The wharf can put her right, after a fashion.')}
+            {standingNote && ` ${standingNote}`}
           </p>
-          <button className="wax-button" disabled={gs.money < refit} onClick={refitShip}>
-            Refit the {ship.name} — £{refit}
-          </button>
+          <div style={{ fontSize: '0.85em', color: '#6b4423', marginBottom: '0.5rem' }}>
+            {quote.points} points of damage · {quote.days === 0 ? 'finished overnight' : `${quote.days} day${quote.days !== 1 ? 's' : ''} on the slipway`}
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+            <button className="wax-button" disabled={gs.money < quote.cost} onClick={() => refitShip(false)}>
+              Refit — £{quote.cost}{quote.days > 0 ? ` · ${quote.days}d` : ''}
+            </button>
+            {quote.days > 0 && (
+              <button className="ghost-button" disabled={gs.money < rushQuote.cost} onClick={() => refitShip(true)}>
+                Rush the work — £{rushQuote.cost} · {rushQuote.days}d
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -2245,9 +2375,16 @@ function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab }) {
 
 // ─────────── OUTPOST VIEW ───────────
 
-function OutpostView({ gs, startBuild }) {
+function OutpostView({ gs, startBuild, expediteBuild }) {
   const built = Object.entries(gs.outpost.buildings).filter(([,v]) => v.built);
   const queue = gs.outpost.queue;
+
+  // Same formula as the handler — used to label the Rush button.
+  const rushCost = (q) => {
+    const b = BUILDINGS[q.key];
+    const proportion = q.daysLeft / b.days;
+    return Math.max(5, Math.ceil(proportion * b.cost * 1.5));
+  };
   const available = Object.entries(BUILDINGS).filter(([k]) =>
     !gs.outpost.buildings[k]?.built && !queue.some(q => q.key === k)
   );
@@ -2285,6 +2422,8 @@ function OutpostView({ gs, startBuild }) {
             {queue.map((q, i) => {
               const b = BUILDINGS[q.key];
               const pct = Math.round((1 - q.daysLeft / b.days) * 100);
+              const cost = rushCost(q);
+              const canRush = q.daysLeft > 1 && gs.money >= cost && expediteBuild;
               return (
                 <div key={i} className="parchment" style={{ padding: '0.7rem 1rem', marginBottom: '0.5rem', background: 'rgba(255,253,245,0.5)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
@@ -2294,6 +2433,17 @@ function OutpostView({ gs, startBuild }) {
                   <div style={{ height: '5px', background: 'rgba(74,44,20,0.15)', marginTop: '0.4rem', borderRadius: '2px' }}>
                     <div style={{ width: `${pct}%`, height: '100%', background: '#5c1a08', borderRadius: '2px' }} />
                   </div>
+                  {q.daysLeft > 1 && expediteBuild && (
+                    <div style={{ marginTop: '0.5rem', display: 'flex', justifyContent: 'flex-end' }}>
+                      <button
+                        className="ghost-button-sm"
+                        disabled={!canRush}
+                        onClick={() => expediteBuild(i)}
+                      >
+                        Rush the work — £{cost}
+                      </button>
+                    </div>
+                  )}
                 </div>
               );
             })}

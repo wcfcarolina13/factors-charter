@@ -309,6 +309,13 @@ const ensureShape = (gs) => {
   } else if (!next.outpost.warehouse || typeof next.outpost.warehouse !== 'object') {
     next.outpost = { ...next.outpost, warehouse: {} };
   }
+  if (!next.indiaman || typeof next.indiaman !== 'object') {
+    // Returning saves: schedule the next visit from today, with a 30-day grace
+    // so the Factor has time to lodge stock before the first call.
+    const visits = Math.floor((next.day || 1) / 180);
+    const nextDay = Math.max(180, (next.day || 1) + 30);
+    next.indiaman = { lastVisit: 0, nextDay, visits };
+  }
   return next;
 };
 
@@ -455,6 +462,7 @@ Mr. W. died this morning at half past four. The Reverend will not come down from
   awayLog: [],          // events accrued while away from Bayan-Kor; cleared on digest
   quotas: { pepper: { needed: 400, have: 0 }, cinnamon: { needed: 200, have: 0 } },
   daysRemaining: 1095,
+  indiaman: { lastVisit: 0, nextDay: 180, visits: 0 },
   journal: [],
   letters: [directorLetter, wilbrahamPapers],
   hooks: ['The inland teak concession \u2014 ter Borch wants it.'],
@@ -467,6 +475,54 @@ Mr. W. died this morning at half past four. The Reverend will not come down from
   firstLetterPresented: false,
   };
 };
+
+// ─────────── INDIAMAN ARRIVAL ───────────
+// Every ~180 days the Honourable Company sends an Indiaman to lift the
+// godown's pepper and cinnamon back to London. Cumulative shipments live in
+// gs.quotas[k].have. The Director writes by the same packet, with a tone
+// modulated by how the Factor's reckoning compares to the expected pace.
+
+const INDIAMAN_NAMES = [
+  'the Astrea', 'the Marlborough', 'the Halifax', 'the Sutherland',
+  'the Devonshire', 'the Egmont', 'the Houghton',
+];
+const INDIAMAN_INTERVAL = 180;
+const INDIAMAN_TOTAL = 6;
+
+function makeIndiamanLetter(s, peppLifted, cinnLifted, shipName) {
+  const totalPepper = (s.quotas?.pepper?.have || 0) + peppLifted;
+  const totalCinn   = (s.quotas?.cinnamon?.have || 0) + cinnLifted;
+  const visits      = (s.indiaman?.visits || 0) + 1;
+  const expectedPep = Math.round((400 * visits) / INDIAMAN_TOTAL);
+  const expectedCin = Math.round((200 * visits) / INDIAMAN_TOTAL);
+  const onTrack     = totalPepper >= expectedPep * 0.85 && totalCinn >= expectedCin * 0.85;
+  const empty       = peppLifted === 0 && cinnLifted === 0;
+  const ShipName    = shipName.replace('the ', '').replace(/^./, c => c.toUpperCase());
+
+  let subject, body;
+  if (empty) {
+    subject = `Yr. Returns by ${ShipName}`;
+    body = `Sir, — ${shipName} is returned this week with not one cwt of pepper nor of cinnamon out of yr. station. The Court will not pretend at patience much longer. We are told the climate is unkind; we are told the politics are intricate. We were told the same by the late Mr. Wilbraham, and his bones are now in the chapel-yard. Apply yourself, sir.\n\nYr. servants, the Court of Directors, in London, &c.`;
+  } else if (!onTrack) {
+    subject = `A Light Return by ${ShipName}`;
+    body = `Sir, — ${shipName} is unloaded; ${peppLifted} cwt of pepper and ${cinnLifted} cwt of cinnamon are upon the wharf at Blackwall. We had hoped for more by this hand. The cumulative reckoning stands at ${totalPepper} of 400 pepper and ${totalCinn} of 200 cinnamon. We do not yet despair of yr. station, but the third year is closer than you suppose.\n\nYr. servants, the Court of Directors.`;
+  } else {
+    subject = `Yr. Returns by ${ShipName}`;
+    body = `Sir, — ${shipName} is paid off, ${peppLifted} cwt of pepper and ${cinnLifted} cwt of cinnamon delivered into the House. The reckoning stands at ${totalPepper} of 400 pepper and ${totalCinn} of 200 cinnamon, which the Court is content to call adequate. The Bayan-Kor account is proving itself. Press on.\n\nYr. obedient servants, the Court of Directors.`;
+  }
+  return {
+    id: 1000000 + s.day * 10 + visits,
+    from: 'The Court of Directors, London',
+    subject,
+    body,
+    responses: [
+      { label: 'Acknowledge with formal compliance', seed: 'company satisfied, no surprises' },
+      { label: 'Reply with a measured account of the difficulties', seed: 'company notes the case' },
+      { label: 'Set the letter aside, return to the work', seed: 'no rep change' },
+    ],
+    read: false,
+  };
+}
 
 // ─────────── HOME SIMULATION ───────────
 // Each day the Factor is away (or any day passes), the colony lives.
@@ -482,6 +538,9 @@ function tickDays(gs, days) {
     goods: { ...gs.goods },
     awayLog: [...gs.awayLog],
     portStocks: JSON.parse(JSON.stringify(gs.portStocks || {})),
+    letters: [...(gs.letters || [])],
+    quotas: JSON.parse(JSON.stringify(gs.quotas || {})),
+    indiaman: { ...(gs.indiaman || { lastVisit: 0, nextDay: 180, visits: 0 }) },
   };
   const hasStockade = !!s.outpost.buildings.stockade?.built;
   const hasBarracks = !!s.outpost.buildings.barracks?.built;
@@ -598,6 +657,36 @@ function tickDays(gs, days) {
         'A Dutch sloop stood off the bar for an afternoon, then made away.',
       ];
       s.awayLog.push({ day: s.day, type: 'incident', text: lines[Math.floor(Math.random() * lines.length)] });
+    }
+
+    // ── Indiaman call: every INDIAMAN_INTERVAL days, the Company sends a
+    // ship to lift pepper and cinnamon from the godown back to London. The
+    // Director writes by the same packet.
+    if (s.day >= (s.indiaman?.nextDay ?? Infinity) && (s.indiaman?.visits ?? 0) < INDIAMAN_TOTAL) {
+      const peppLifted = Math.floor(s.outpost.warehouse?.pepper || 0);
+      const cinnLifted = Math.floor(s.outpost.warehouse?.cinnamon || 0);
+      const idx = Math.min(s.indiaman.visits, INDIAMAN_NAMES.length - 1);
+      const shipName = INDIAMAN_NAMES[idx];
+
+      if (peppLifted > 0 || cinnLifted > 0) {
+        s.outpost.warehouse = { ...s.outpost.warehouse };
+        if (peppLifted > 0) s.outpost.warehouse.pepper = (s.outpost.warehouse.pepper || 0) - peppLifted;
+        if (cinnLifted > 0) s.outpost.warehouse.cinnamon = (s.outpost.warehouse.cinnamon || 0) - cinnLifted;
+      }
+      const letter = makeIndiamanLetter(s, peppLifted, cinnLifted, shipName);
+      s.quotas = {
+        ...s.quotas,
+        pepper:   { ...(s.quotas?.pepper   || { needed: 400, have: 0 }), have: (s.quotas?.pepper?.have   || 0) + peppLifted },
+        cinnamon: { ...(s.quotas?.cinnamon || { needed: 200, have: 0 }), have: (s.quotas?.cinnamon?.have || 0) + cinnLifted },
+      };
+      s.letters = [...s.letters, letter];
+      s.lettersGenerated = (s.lettersGenerated || 0) + 1;
+      const ShipName = shipName.replace('the ', '').replace(/^./, c => c.toUpperCase());
+      const tail = (peppLifted === 0 && cinnLifted === 0)
+        ? 'The hold went away empty, by the harbourmaster’s account.'
+        : `${peppLifted} cwt pepper and ${cinnLifted} cwt cinnamon lifted from the godown.`;
+      s.awayLog.push({ day: s.day, type: 'indiaman', text: `${ShipName}, of the Company, called for the returns. ${tail} A letter from the Court came by the same packet.` });
+      s.indiaman = { lastVisit: s.day, nextDay: s.day + INDIAMAN_INTERVAL, visits: (s.indiaman.visits || 0) + 1 };
     }
 
     // ── Raid: opportunists at the godown. Stockade halves the chance, the
@@ -2466,6 +2555,9 @@ function Header({ gs, onReturnToTitle }) {
           <div className="display" style={{ fontSize: '0.85em', color: '#6b4423', letterSpacing: '0.1em', marginTop: '0.3rem' }}>
             DAY {gs.day} · £{gs.money} · HOLD {fmtCwt(cargoWeight(gs.goods))}/{cargoCap(gs)} · {gs.daysRemaining} DAYS REMAIN
           </div>
+          <div className="display" style={{ fontSize: '0.78em', color: '#8a6a3f', letterSpacing: '0.08em', marginTop: '0.2rem' }}>
+            GODOWN {fmtCwt(warehouseUsed(gs))}/{warehouseCap(gs)} · LONDON: PEPPER {Math.floor(gs.quotas?.pepper?.have || 0)}/{gs.quotas?.pepper?.needed ?? 400} · CINNAMON {Math.floor(gs.quotas?.cinnamon?.have || 0)}/{gs.quotas?.cinnamon?.needed ?? 200}
+          </div>
         </div>
         <button
           onClick={() => setMenuOpen(!menuOpen)}
@@ -2768,14 +2860,41 @@ function LedgerView({ gs }) {
           <table style={{ width: '100%', fontSize: '0.95em' }}>
             <tbody>
               {Object.entries(gs.quotas).map(([k, q]) => {
-                const lodged = Math.floor(gs.outpost?.warehouse?.[k] || 0);
-                const have = Math.min(q.needed, lodged);
+                const shipped = Math.floor(q.have || 0);
+                const lodged  = Math.floor(gs.outpost?.warehouse?.[k] || 0);
                 return (
-                  <tr key={k}><td>{COMMODITIES[k].name}</td><td style={{ textAlign: 'right' }}>{have} / {q.needed} {COMMODITIES[k].unit}</td></tr>
+                  <tr key={k}>
+                    <td>{COMMODITIES[k].name}</td>
+                    <td style={{ textAlign: 'right' }}>
+                      {shipped} / {q.needed} {COMMODITIES[k].unit}
+                      {lodged > 0 && (
+                        <span style={{ fontSize: '0.82em', color: '#6b4423', fontStyle: 'italic' }}>
+                          {' · '}{lodged} awaiting
+                        </span>
+                      )}
+                    </td>
+                  </tr>
                 );
               })}
             </tbody>
           </table>
+          {(() => {
+            const i = gs.indiaman || {};
+            const visitsLeft = INDIAMAN_TOTAL - (i.visits || 0);
+            if (visitsLeft <= 0) {
+              return (
+                <div style={{ fontSize: '0.82em', color: '#6b4423', fontStyle: 'italic', marginTop: '0.4rem' }}>
+                  No further calls expected. The reckoning is closed.
+                </div>
+              );
+            }
+            const dueIn = Math.max(0, (i.nextDay || 0) - gs.day);
+            return (
+              <div style={{ fontSize: '0.82em', color: '#6b4423', fontStyle: 'italic', marginTop: '0.4rem' }}>
+                Next Indiaman expected in {dueIn} day{dueIn !== 1 ? 's' : ''}. {visitsLeft} call{visitsLeft !== 1 ? 's' : ''} remain.
+              </div>
+            );
+          })()}
         </div>
         <div>
           <div className="display" style={{ fontSize: '0.9em', color: '#6b4423', marginBottom: '0.5rem' }}>STANDING WITH POWERS</div>
@@ -3194,7 +3313,7 @@ function GodownPanel({ gs, lodgeGoods, withdrawGoods }) {
                 {COMMODITIES[c].name}
                 {isQuota && (
                   <span style={{ fontSize: '0.78em', color: '#6b4423', fontStyle: 'italic', marginLeft: '0.4rem' }}>
-                    — {Math.min(gs.quotas[c].needed, inGodown)} / {gs.quotas[c].needed} {COMMODITIES[c].unit} for London
+                    — {Math.floor(gs.quotas[c].have || 0)} / {gs.quotas[c].needed} {COMMODITIES[c].unit} shipped to London{inGodown > 0 ? `; ${inGodown} awaiting` : ''}
                   </span>
                 )}
               </div>

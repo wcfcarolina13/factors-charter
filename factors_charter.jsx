@@ -1241,6 +1241,30 @@ async function callClaude(prompt) {
 
 const LORE = [
   {
+    key: 'bayan-kor',
+    tag: 'home',
+    trigger: { location: 'Bayan-Kor' },
+    text: 'Bayan-Kor is small: a thatched godown, a leaky dock, the Rajah’s palace on the green hill above. The wet season runs March to October; everything wooden warps in it. The Rajah keeps his court in the Malay style and prefers the Friday audience to any other day. Sgt. Dass commands a sepoy garrison of three at full strength; less, when fever takes one.',
+  },
+  {
+    key: 'kota-pinang',
+    tag: 'sultanate',
+    trigger: { location: 'Kota Pinang' },
+    text: 'Kota Pinang sits up the strait, a Malay sultanate that suffers Europeans for the duty they pay. The Sultan’s harbourmaster is a Bugis named Daeng Mamping who notes every ship and every man aboard her. Pepper comes down from the hills in baskets each new moon. The Sultan takes a tenth of everything bought, and weighs it himself when he doubts.',
+  },
+  {
+    key: 'port-st-eustace',
+    tag: 'dutch',
+    trigger: { location: 'Port St. Eustace' },
+    text: 'Port St. Eustace is whitewashed and orderly, the only paved street east of Malacca. The Dutch House keeps three factors in residence and a Calvinist minister who preaches against Asian pleasures with no measurable effect. Their Bugis interpreters are paid better than most English captains. They watch the Strait and they keep ledgers; what they do with the ledgers is their own concern.',
+  },
+  {
+    key: 'pelicans-nest',
+    tag: 'pirate-haven',
+    trigger: { location: 'The Pelican’s Nest' },
+    text: 'The Pelican’s Nest is a hidden cove east of the chart, with a mangrove channel that admits no ship larger than a sloop without a pilot. The Brotherhood holds court here; their captains are Dutchmen, Bugis, English deserters, and one renegado Portuguese who was a bishop’s son. No flag flies on a fixed mast. The water is fresh from a spring at the head of the bay, and that is why the Brotherhood chose it.',
+  },
+  {
     // Inspired by the history of Bacalar (Yucatan): a coastal lagoon held by
     // pirates from the 1648 sack onward, "lagoon of seven colours" for the
     // bands of blue, repeatedly contested and refortified by the colonial
@@ -1269,6 +1293,82 @@ function loreForState(gs) {
     }
     return true;
   }).slice(0, 3); // cap to keep prompt budget under control
+}
+
+// ─────────── SCRIPTED ARRIVAL ENCOUNTERS ───────────
+// Curated, choice-driven moments that fire on arrival at a non-home port,
+// when a trigger condition (flag, location, standing) matches. Each choice
+// carries deterministic outcome prose + changes — no AI generation on the
+// mechanical side, since these are load-bearing story payoffs.
+//
+// Trigger keys (any combination, all must match):
+//   flag       — gs.flags[flag] is truthy
+//   location   — exact destination port name
+//   locationIn — destination is one of these port names
+//   repAtLeast — { factionKey: minRep }
+//   visited    — destination has been visited at least once before
+
+const SCRIPTED_ARRIVALS = [
+  {
+    key: 'dutch-packet',
+    trigger: {
+      flag: 'carryingDutchPacket',
+      locationIn: ['The Pelican’s Nest', 'Tanjung Cermin'],
+    },
+    title: 'The Dutchman’s Packet',
+    prose: 'A wharf-rat with a missing thumb finds you before yr. men have set the gangway down. He gives the Bugis word for paper and offers a hand. The sealed packet from Mynheer Boom has been in yr. coat since Eustace; the man waits, no warmer for waiting.',
+    choices: [
+      {
+        label: 'Hand the packet over without ceremony',
+        prose: 'He takes it, signs nothing, and is gone before yr. clerk has noted the matter. The errand is done. What was in the wax is no longer yr. concern.',
+        changes: {
+          reputation: { dutch: 5 },
+          flags: { carryingDutchPacket: false, deliveredDutchPacket: true },
+          journal: 'Delivered Mynheer Boom’s packet at the wharf, into a hand I did not learn the name of. The Dutch may be counted to remember it.',
+        },
+      },
+      {
+        label: 'Open the seal first, then deliver',
+        prose: 'You break the wax in yr. cabin before he is brought aboard. The papers are accounts in a Dutch hand: names of English captains and the prices they paid for Brotherhood passages, with sums and dates back four years. You re-seal as best you can; the wharf-rat takes it without remark, but his look is one degree colder.',
+        changes: {
+          reputation: { dutch: 2 },
+          flags: { carryingDutchPacket: false, openedDutchPacket: true },
+          journal: 'Read Mynheer Boom’s packet before delivery — accounts of English captains who have bought Brotherhood passages. Re-sealed and handed over. The Dutch are watching what is paid in this strait.',
+          hook: 'The Dutch ledger of English-pirate dealings — names and sums, four years back. Use of which is not yet apparent.',
+        },
+      },
+      {
+        label: 'Cast the packet into the harbour',
+        prose: 'You drop it overboard before he reaches the gangway. The seal vanishes in the green water. Yr. man at the rail watches without comment. The Brotherhood’s eyes are everywhere; somewhere yr. choice will be remarked.',
+        changes: {
+          reputation: { dutch: -8, pirates: 3 },
+          flags: { carryingDutchPacket: false, jettisonedDutchPacket: true },
+          journal: 'Threw Mynheer Boom’s packet into the harbour before it could change hands. Boom will hear of it.',
+          hook: 'Boom’s lost packet — the Dutch House at Eustace will not let the matter rest.',
+        },
+      },
+    ],
+  },
+];
+
+function pickArrivalEncounter(gs, dest) {
+  if (!Array.isArray(SCRIPTED_ARRIVALS)) return null;
+  for (const e of SCRIPTED_ARRIVALS) {
+    const t = e.trigger || {};
+    if (t.flag && !gs.flags?.[t.flag]) continue;
+    if (t.location && t.location !== dest) continue;
+    if (t.locationIn && !t.locationIn.includes(dest)) continue;
+    if (t.visited && !gs.visited?.includes(dest)) continue;
+    if (t.repAtLeast) {
+      let ok = true;
+      for (const [f, n] of Object.entries(t.repAtLeast)) {
+        if ((gs.reputation?.[f] || 0) < n) { ok = false; break; }
+      }
+      if (!ok) continue;
+    }
+    return e;
+  }
+  return null;
 }
 
 const stateContext = (gs) => {
@@ -2499,6 +2599,7 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
   const [arrivalProse, setArrivalProse] = useState(null);
   const [awayDigest, setAwayDigest] = useState(null);
   const [openLetterId, setOpenLetterId] = useState(null);
+  const [scriptedArrival, setScriptedArrival] = useState(null); // { encounter, port }
 
   // The very first time the game proper begins (after the opening sequence),
   // route the player straight into the unread Director letter so they cannot miss it.
@@ -2705,8 +2806,26 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
       } else {
         setArrivalProse(null);
       }
+      // After the standard arrival surface, check for any scripted encounter
+      // whose triggers match. Curated payoffs for hooks the player has
+      // earned (e.g. the Dutch packet, plot threads from earlier choices).
+      const scripted = pickArrivalEncounter(newGs, dest);
+      if (scripted) {
+        setScriptedArrival({ encounter: scripted, port: dest });
+      }
       setTab(returningHome ? 'journal' : 'port');
     }
+  };
+
+  // Resolve a scripted-arrival choice: apply its deterministic changes,
+  // surface the outcome prose, and clear the scriptedArrival state.
+  const handleScriptedChoice = (choice) => {
+    setGs(prev => applyOutcomeChangesPure(prev, choice.changes || {}));
+    setScriptedArrival(s => s ? ({ ...s, resolvedChoice: choice }) : s);
+  };
+
+  const dismissScriptedArrival = () => {
+    setScriptedArrival(null);
   };
 
   const sailTo = async (portKey) => {
@@ -3047,6 +3166,18 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
 
   if (awayDigest) {
     return <AwayDigestScreen digest={awayDigest} onContinue={handleDigestContinue} onResolveRaid={handleResolveRaid} />;
+  }
+
+  if (scriptedArrival) {
+    return (
+      <ScriptedArrivalScreen
+        scene={scriptedArrival.encounter}
+        port={scriptedArrival.port}
+        resolvedChoice={scriptedArrival.resolvedChoice}
+        onChoose={handleScriptedChoice}
+        onContinue={dismissScriptedArrival}
+      />
+    );
   }
 
   if (encounter && pending) {
@@ -4571,6 +4702,64 @@ function OutpostView({ gs, startBuild, expediteBuild }) {
 }
 
 // ─────────── AWAY DIGEST SCREEN ───────────
+
+// Renders a curated arrival encounter from SCRIPTED_ARRIVALS. Shows the
+// scene's prose and choice buttons until the player picks; then renders
+// the chosen outcome's prose and a Continue. The mechanical changes are
+// applied by the parent (handleScriptedChoice) before the resolved state
+// reaches this component.
+function ScriptedArrivalScreen({ scene, port, resolvedChoice, onChoose, onContinue }) {
+  return (
+    <Page>
+      <div className="ink-fade-in" style={{ maxWidth: '42rem', margin: '0 auto', padding: '3.0rem 1.5rem', width: '100%' }}>
+        <div className="display text-center" style={{ fontSize: '0.85em', color: '#6b4423', letterSpacing: '0.2em', marginBottom: '0.5rem' }}>
+          AT THE WHARF — {(port || '').toUpperCase()}
+        </div>
+        <h2 className="display text-center" style={{ fontSize: '1.8em', color: '#5c1a08', marginBottom: '1rem' }}>
+          {scene.title}
+        </h2>
+        <Fleuron />
+        <p className="drop-cap" style={{ fontSize: '1.05em' }}>{scene.prose}</p>
+        <Fleuron char="❧" />
+
+        {!resolvedChoice && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '1rem' }}>
+            {scene.choices.map((c, i) => (
+              <button
+                key={i}
+                className="ghost-button"
+                style={{ textAlign: 'left' }}
+                onClick={() => onChoose(c)}
+              >
+                — {c.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {resolvedChoice && (
+          <div className="parchment ink-fade-in" style={{
+            padding: '1rem 1.1rem', marginTop: '1rem', marginBottom: '1.2rem',
+            background: 'rgba(255,253,245,0.55)',
+          }}>
+            <div className="display" style={{ fontSize: '0.85em', color: '#6b4423', letterSpacing: '0.06em', marginBottom: '0.3rem' }}>
+              YOU CHOSE: <span style={{ fontStyle: 'italic', textTransform: 'none', letterSpacing: 0 }}>{resolvedChoice.label}</span>
+            </div>
+            <p style={{ margin: 0, fontSize: '1em' }}>{resolvedChoice.prose}</p>
+          </div>
+        )}
+
+        {resolvedChoice && (
+          <div className="text-center" style={{ marginTop: '1rem' }}>
+            <button className="wax-button" onClick={onContinue}>
+              Take Up the Work
+            </button>
+          </div>
+        )}
+      </div>
+    </Page>
+  );
+}
 
 function AwayDigestScreen({ digest, onContinue, onResolveRaid }) {
   const [raidPending, setRaidPending] = useState(false);

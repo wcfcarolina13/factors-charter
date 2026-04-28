@@ -95,6 +95,27 @@ Cross-reference with the LORE registry in `factors_charter.jsx`.
   banner in PortView surfaces "Yr. writ of free trade is honoured here."
   when held.
 
+### The Dutch packet payoff (scripted arrival encounter)
+
+- **Setup:** option 2 from Boom's pass letter plants
+  `gs.flags.carryingDutchPacket: true`. The Factor never reads the seal
+  but has to deliver it east.
+- **Payoff:** scripted arrival encounter — fires on arrival at the
+  Pelican's Nest or Tanjung Cermin while the flag is set. A wharf-rat
+  with a missing thumb meets the gangway. Three choices, deterministic
+  outcomes:
+  - **Hand it over** — Dutch +5, no other consequence; clean delivery.
+  - **Open the seal first** — Dutch +2 (the seal was disturbed); plants
+    a new hook: Dutch ledger of English captains who paid Brotherhood
+    passages, four years deep.
+  - **Cast it overboard** — Dutch −8, Pirates +3; plants a hook: Boom
+    will not let the matter rest.
+- **In code:** `SCRIPTED_ARRIVALS` registry +
+  `pickArrivalEncounter(gs, dest)` helper +
+  `ScriptedArrivalScreen` component, all in `factors_charter.jsx`. The
+  framework is generic — future port-arrival encounters land here as
+  new entries with their own triggers.
+
 ---
 
 ## INSPIRATIONS PENDING
@@ -135,15 +156,21 @@ might pull on. Update when a hook gets resolved or a new one emerges.
 
 Things we've discussed but haven't built yet.
 
-- **The Dutch packet** — if the player took option 2 from Boom's letter
-  (`carryingDutchPacket: true`), the recipient and consequence are still
-  pending. Likely fires on a voyage east (toward the Pelican's Nest or
-  Tanjung Cermin) — an encounter where a Bugis or Brotherhood figure
-  asks after "the Dutchman's papers" and the player decides what to do
-  with the packet's contents.
-- **Port arrival encounters** — interactive moment at the wharf on some
-  arrivals (alongside the existing first-visit vignettes). Could be a
-  touch point for mail delivery too.
+- **The opened-packet thread** — if the player chose option 2 of the
+  Dutch packet payoff (read the seal), `gs.flags.openedDutchPacket`
+  is set and a hook plants the existence of a Dutch ledger of
+  English-pirate dealings. Currently lore only; could become a
+  Director letter ("we are told you have seen something at Eustace
+  worth telling us"), or a future faction event where the Factor's
+  knowledge becomes leverage.
+- **The jettisoned-packet thread** — if option 3, Boom will not forget.
+  Could become a follow-up Dutch letter, a denied service at Eustace,
+  or a hostile encounter on a future voyage.
+- **Mail delivery on port arrival** — currently auto-letters fire on
+  a time schedule regardless of location. Could be made richer by
+  having some senders deliver via specific ports (Capt. Faulke at
+  Kota Pinang, ter Borch at Eustace, the Anonymous Hand at the
+  Pelican's Nest).
 - **Bigger ship beyond the brigantine** — eventually the Factor might
   command a small ship-rigged trader (~300cwt, deep voyages). Late-charter
   reward.

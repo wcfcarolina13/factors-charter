@@ -4,6 +4,33 @@ The Factor's Charter — a chronological log of what's shipped. Newest first.
 
 ---
 
+## Session 5 — schema expansion, AI log, robust saves
+
+### Added
+- **AI generations are now persisted.** Every Sonnet exchange (voyage encounter, outcome, letter, arrival vignette, away digest) records a full entry into `gs.aiLog`: `{ type, day, location, prompt, raw, parsed, fallback, error, startedAt, endedAt, meta }`. Capped at the most-recent 500 entries via `pushAiLog` to stay under localStorage limits; manuscript download still includes whatever's there.
+- **"Download AI log" button** in the header menu — exports just `gs.aiLog` as timestamped JSON for offline analysis (categorising encounter types, scoring AI prose, etc.).
+- **Outcome schema is open at the edges.** `genOutcome`'s prompt now describes three optional fields the AI can use:
+  - `shipDamage: { hull: 0–40, sails: 0–40 }` — applied via `applyOutcomeChangesPure`. Letter outcomes can never damage the ship, even if the model returns it (defensive guard in both prompt and code).
+  - `newAcquaintances: [{ name, role, location, notes }]` — minor characters introduced by the AI. Stored on `gs.acquaintances` via `upsertAcquaintance`, which dedupes on name and merges notes.
+  - `flags: { key: value }` — narrative flags merged into `gs.flags`. Sparse, lasting, queryable.
+- **`stateContext` now feeds back acquaintances, flags, and ship condition** so the AI sees its own world-state additions on later calls. Continuity emerges naturally — characters introduced once may recur.
+- **Acquaintances panel in the Ledger** showing the last 8 named figures, where you met them, and accumulated notes.
+- **Open Matters strip in the Ledger** when any narrative flags are set.
+- **Ship damage and "Met X" appear in the Of Note summary** after an encounter resolves.
+
+### Changed
+- `callClaude` returns a rich record `{ parsed, raw, prompt, startedAt, endedAt, error }` instead of just the parsed JSON. All gen* helpers were updated to return `{ result, log }` accordingly.
+- Every AI call site in `GameHub` (`sailTo`, `handleEncounterChoice`, `handleLetterResponse`, `requestNewLetter`, `arriveAt`'s digest + arrival paths) now appends its log entry to `gs.aiLog`.
+- `applyOutcomeChangesPure(state, changes, opts = {})` accepts an `isLetter` flag and routes around ship damage in letter contexts.
+- `SYSTEM_PROMPT` got a new "WORLD STATE" section describing the optional fields and how Sonnet should use them.
+- `ensureShape` now seeds `acquaintances: []`, `flags: {}`, `aiLog: []` for older saves.
+
+### Notes
+- The 500-entry log cap is mainly to protect localStorage; a typical playthrough won't reach it. If it ever does, the oldest entries roll off but the manuscript download still captures what's live.
+- Schema-expansion is permissive on purpose: the AI is invited to plant state but not required to. Old fallbacks (when the API is down) still produce playable outcomes without any of the new fields.
+
+---
+
 ## Session 4 — repair anywhere, money sinks
 
 ### Added

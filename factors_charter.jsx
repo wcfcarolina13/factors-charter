@@ -279,7 +279,51 @@ const ensureShape = (gs) => {
       next.portStocks[k] = { ...(p.stockMax || {}) };
     }
   }
+  if (!Array.isArray(next.acquaintances)) next.acquaintances = [];
+  if (!next.flags || typeof next.flags !== 'object') next.flags = {};
+  if (!Array.isArray(next.aiLog)) next.aiLog = [];
   return next;
+};
+
+// Maximum number of AI exchanges retained on the live state. We cap so a
+// long charter doesn't blow past localStorage limits — the manuscript
+// download still gets the cap'd record, which is fine for offline review.
+const AI_LOG_CAP = 500;
+
+// Append an AI call record to the log, trimming the oldest entries if needed.
+const pushAiLog = (log, entry) => {
+  const next = [...(log || []), entry];
+  return next.length > AI_LOG_CAP ? next.slice(next.length - AI_LOG_CAP) : next;
+};
+
+// Insert or merge an AI-introduced minor character. Dedupes on lowercased name;
+// existing entries get their lastSeen day bumped and a new note appended.
+const upsertAcquaintance = (list, day, npc) => {
+  if (!npc || !npc.name) return list;
+  const idx = list.findIndex(a => a.name.toLowerCase() === npc.name.toLowerCase());
+  if (idx >= 0) {
+    const existing = list[idx];
+    const merged = {
+      ...existing,
+      role: npc.role || existing.role,
+      location: npc.location || existing.location,
+      lastSeen: day,
+      notes: npc.notes ? (existing.notes ? `${existing.notes} / ${npc.notes}` : npc.notes) : existing.notes,
+    };
+    return [...list.slice(0, idx), merged, ...list.slice(idx + 1)];
+  }
+  return [
+    ...list,
+    {
+      id: `${npc.name.replace(/\s+/g, '_').toLowerCase()}_d${day}`,
+      name: npc.name,
+      role: npc.role || '',
+      location: npc.location || '',
+      notes: npc.notes || '',
+      introduced: day,
+      lastSeen: day,
+    },
+  ];
 };
 
 // ─────────── INITIAL STATE ───────────
@@ -387,6 +431,9 @@ Mr. W. died this morning at half past four. The Reverend will not come down from
   letters: [directorLetter, wilbrahamPapers],
   hooks: ['The inland teak concession \u2014 ter Borch wants it.'],
   visited: ['Bayan-Kor'],
+  acquaintances: [],     // AI-introduced minor characters; recur via stateContext
+  flags: {},             // narrative flags the AI may set
+  aiLog: [],             // raw record of every Sonnet exchange this charter
   seenOpening: false,
   lettersGenerated: 2,
   firstLetterPresented: false,
@@ -530,9 +577,17 @@ WORLD GROUNDING (do not violate):
 - A scene that takes place at sea or in a non-home port must NOT introduce home-station characters in person. If they appear, they must be aboard the Factor's ship explicitly, or referenced via letters, never bumped into ashore elsewhere.
 - The Mission is at Bayan-Kor. The Reverend cannot be "visited" at any other port.
 
+WORLD STATE (you may extend it):
+- Outcomes can plant minor characters into the world via "newAcquaintances": [{ "name", "role", "location", "notes" }]. These characters persist; later scenes will see them in the state context and may bring them back. Use period-plausible names. Don't duplicate existing acquaintances or named home-station characters.
+- Outcomes at sea or under combat can damage the ship via "shipDamage": { "hull": int 0–40, "sails": int 0–40 }. Both fields optional. Only use this when the prose justifies it (storm, gunfire, grounding). Letter outcomes must NEVER set shipDamage.
+- Outcomes can set narrative flags via "flags": { "key": value }. Use sparingly, for things future scenes might want to remember (e.g. "owesViziersFavor": true, "carriesContraband": true).
+
 CONSTRAINTS: Output ONLY valid JSON. No code fences, no preamble, no commentary. Stay within the requested length.`;
 
-async function callClaude(prompt, schema) {
+// Returns a full record so the caller can both use the parsed result and log
+// the raw exchange: { parsed, raw, prompt, startedAt, endedAt, error }.
+async function callClaude(prompt) {
+  const startedAt = Date.now();
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -545,13 +600,18 @@ async function callClaude(prompt, schema) {
       }),
     });
     const data = await res.json();
-    const text = data.content.filter(b => b.type === 'text').map(b => b.text).join('');
+    const text = data?.content?.filter(b => b.type === 'text').map(b => b.text).join('') || '';
     const cleaned = text.replace(/```json|```/g, '').trim();
     const match = cleaned.match(/\{[\s\S]*\}/);
-    return match ? JSON.parse(match[0]) : null;
+    let parsed = null;
+    let parseError = null;
+    if (match) {
+      try { parsed = JSON.parse(match[0]); } catch (e) { parseError = e.message; }
+    }
+    return { parsed, raw: text, prompt, startedAt, endedAt: Date.now(), error: parseError };
   } catch (e) {
     console.error('API error:', e);
-    return null;
+    return { parsed: null, raw: '', prompt, startedAt, endedAt: Date.now(), error: e.message || String(e) };
   }
 }
 
@@ -561,8 +621,16 @@ const stateContext = (gs) => {
     .map(([k,v]) => `${FACTIONS[k].short}: ${v > 0 ? '+' : ''}${v} (${repTone(v)})`)
     .join(', ') || 'none of note';
   const recentJournal = gs.journal.slice(-3).map(j => j.entry).join(' / ') || 'none';
-  const hooks = gs.hooks.slice(-3).join(' | ') || 'none';
-  return `Day ${gs.day}. Location: ${gs.location}. Crew: ${gs.crew.map(c=>`${c.name} (${c.trait} ${c.role})`).join(', ')}. Reputation: ${reps}. Recent: ${recentJournal}. Open threads: ${hooks}.`;
+  const hooks = (gs.hooks || []).slice(-3).join(' | ') || 'none';
+  const acquaintances = (gs.acquaintances || []).slice(-6)
+    .map(a => `${a.name} (${a.role}${a.location ? `, ${a.location}` : ''}${a.notes ? `: ${a.notes}` : ''})`)
+    .join(' | ') || 'none';
+  const flagEntries = Object.entries(gs.flags || {});
+  const flags = flagEntries.length
+    ? flagEntries.map(([k, v]) => `${k}=${typeof v === 'string' ? v : JSON.stringify(v)}`).join(', ')
+    : 'none';
+  const ship = gs.ship ? `Ship: ${gs.ship.name}, hull ${gs.ship.hull}/100, sails ${gs.ship.sails}/100` : '';
+  return `Day ${gs.day}. Location: ${gs.location}. ${ship}. Crew: ${gs.crew.map(c=>`${c.name} (${c.trait} ${c.role})`).join(', ')}. Reputation: ${reps}. Recent: ${recentJournal}. Open threads: ${hooks}. Acquaintances: ${acquaintances}. Flags: ${flags}.`;
 };
 
 async function genVoyageEncounter(gs, fromPort, toPort) {
@@ -580,7 +648,7 @@ Return JSON:
     { "label": "5-9 word verb phrase", "seed": "what tonally happens if chosen" }
   ]
 }`;
-  return await callClaude(prompt) || {
+  const fallback = {
     prose: 'A line of squalls runs along the horizon. The wind drops, then turns. The bosun looks to you for orders.',
     choices: [
       { label: 'Run before the weather, lose a day', seed: 'lose time but no harm' },
@@ -588,13 +656,29 @@ Return JSON:
       { label: 'Reef and ride it out', seed: 'safe but slow' },
     ],
   };
+  const call = await callClaude(prompt);
+  const result = call.parsed || fallback;
+  const log = {
+    type: 'voyage_encounter',
+    day: gs.day,
+    location: `at sea, ${fromPort} → ${toPort}`,
+    prompt: call.prompt,
+    raw: call.raw,
+    parsed: call.parsed,
+    fallback: !call.parsed,
+    error: call.error,
+    startedAt: call.startedAt,
+    endedAt: call.endedAt,
+    meta: { fromPort, toPort },
+  };
+  return { result, log };
 }
 
 async function genOutcome(gs, encounterProse, choice, opts = {}) {
   const isLetter = !!opts.isLetter;
   const constraintLine = isLetter
-    ? `SCENE CONSTRAINT: This is the Factor writing a reply at his desk. The outcome is what proceeds from the words he writes — no travel, no scenes elsewhere, no time of consequence passing. Set "days" to 0.`
-    : `SCENE CONSTRAINT: The outcome must follow plainly from the encounter as set up above. Do not introduce new characters or settings unrelated to that scene. The Factor cannot meet home-station characters (Hodge, Dass, the Vizier, Reverend Pyke) outside Bayan-Kor.`;
+    ? `SCENE CONSTRAINT: This is the Factor writing a reply at his desk. The outcome is what proceeds from the words he writes — no travel, no scenes elsewhere, no time of consequence passing. Set "days" to 0. Do NOT damage the ship.`
+    : `SCENE CONSTRAINT: The outcome must follow plainly from the encounter as set up above. Do not introduce new characters or settings unrelated to that scene. The Factor cannot meet home-station characters (Hodge, Dass, the Vizier, Reverend Pyke) outside Bayan-Kor. If the prose involves a storm, gunfire, grounding, etc., you may set shipDamage.`;
   const prompt = `In the encounter: "${encounterProse}"
 The Factor chose: "${choice.label}" (${choice.seed})
 ${stateContext(gs)}
@@ -610,14 +694,33 @@ Generate the outcome. Return JSON:
     "reputation": { "company": int, "crown": int, "rajah": int, "pirates": int, "mission": int, "dutch": int },
     "goods": { "commodity_name": int delta },
     "journal": "one-sentence note for the journal in past tense",
-    "hook": "optional: a thread that may return later, or empty string"
+    "hook": "optional: a thread that may return later, or empty string",
+    "shipDamage": ${isLetter ? 'null  (letters never damage the ship)' : '{ "hull": 0-40, "sails": 0-40 }  // optional; only when prose justifies'},
+    "newAcquaintances": [ { "name": "...", "role": "...", "location": "...", "notes": "..." } ],
+    "flags": { "key": value }
   }
 }
-Reputation deltas should be small (-15 to +15). Only include factions that actually shift. Goods can include any of: pepper, cinnamon, calico, silver, sandalwood, opium, rice, rum, saltpetre.`;
-  return await callClaude(prompt) || {
+Reputation deltas should be small (-15 to +15). Only include factions that actually shift. Goods can include any of: pepper, cinnamon, calico, silver, sandalwood, opium, rice, rum, saltpetre. Use newAcquaintances when the scene introduces a memorable named figure who could plausibly recur. Flags are sparse and should describe lasting narrative state. Omit any of the optional fields you do not need.`;
+  const fallback = {
     prose: 'It plays out as you might expect, neither as well nor as ill as feared.',
     changes: { money: 0, days: isLetter ? 0 : 1, reputation: {}, goods: {}, journal: 'A day passed without consequence.', hook: '' },
   };
+  const call = await callClaude(prompt);
+  const result = call.parsed || fallback;
+  const log = {
+    type: 'outcome',
+    day: gs.day,
+    location: gs.location,
+    prompt: call.prompt,
+    raw: call.raw,
+    parsed: call.parsed,
+    fallback: !call.parsed,
+    error: call.error,
+    startedAt: call.startedAt,
+    endedAt: call.endedAt,
+    meta: { encounterProse, choiceLabel: choice.label, choiceSeed: choice.seed, isLetter },
+  };
+  return { result, log };
 }
 
 async function genLetter(gs) {
@@ -646,8 +749,7 @@ Return JSON:
     { "label": "Set aside, do not reply", "seed": "ignore, possible drift" }
   ]
 }`;
-  const result = await callClaude(prompt);
-  return result || {
+  const fallback = {
     from: sender.from,
     subject: 'A Matter Requiring Your Attention',
     body: 'Sir, — I trust this finds you in such health as the climate permits. There is a matter I should wish to lay before you when next our paths cross. Yr. obedient servant, &c.',
@@ -657,6 +759,22 @@ Return JSON:
       { label: 'Set aside, do not reply', seed: 'silence' },
     ],
   };
+  const call = await callClaude(prompt);
+  const result = call.parsed || fallback;
+  const log = {
+    type: 'letter',
+    day: gs.day,
+    location: gs.location,
+    prompt: call.prompt,
+    raw: call.raw,
+    parsed: call.parsed,
+    fallback: !call.parsed,
+    error: call.error,
+    startedAt: call.startedAt,
+    endedAt: call.endedAt,
+    meta: { senderFrom: sender.from, senderFaction: sender.faction },
+  };
+  return { result, log };
 }
 
 async function genArrivalVignette(gs, port) {
@@ -666,13 +784,28 @@ Return JSON:
 {
   "prose": "2-3 sentences of arrival prose. Sensory, specific to this port. Period."
 }`;
-  const result = await callClaude(prompt);
-  return result?.prose || `The ${port} pilot comes aboard at first light. The harbor smells of fish and woodsmoke.`;
+  const fallbackProse = `The ${port} pilot comes aboard at first light. The harbor smells of fish and woodsmoke.`;
+  const call = await callClaude(prompt);
+  const result = call.parsed?.prose || fallbackProse;
+  const log = {
+    type: 'arrival',
+    day: gs.day,
+    location: port,
+    prompt: call.prompt,
+    raw: call.raw,
+    parsed: call.parsed,
+    fallback: !call.parsed,
+    error: call.error,
+    startedAt: call.startedAt,
+    endedAt: call.endedAt,
+    meta: { port },
+  };
+  return { result, log };
 }
 
-async function genAwayDigest(gs, log) {
-  if (!log || log.length === 0) return null;
-  const events = log.slice(-12).map(e => `Day ${e.day}: ${e.text}`).join('\n');
+async function genAwayDigest(gs, awayEvents) {
+  if (!awayEvents || awayEvents.length === 0) return { result: null, log: null };
+  const events = awayEvents.slice(-12).map(e => `Day ${e.day}: ${e.text}`).join('\n');
   const prompt = `The Factor returns to Bayan-Kor after a period away. In his absence, the following came to pass:
 
 ${events}
@@ -680,8 +813,23 @@ ${events}
 Compose a single paragraph (4-6 sentences) in the Factor\u2019s journal voice, written upon his return. He is reading the household ledger, hearing Hodge stammer through reports, and walking the compound. Period prose, dry observation, sensory detail. Do not list the events; weave them.
 
 Return JSON: { "prose": "..." }`;
-  const result = await callClaude(prompt);
-  return result?.prose || 'Returned to find the godown standing and the ledger half-kept. The work of catching up begins tomorrow.';
+  const fallbackProse = 'Returned to find the godown standing and the ledger half-kept. The work of catching up begins tomorrow.';
+  const call = await callClaude(prompt);
+  const result = call.parsed?.prose || fallbackProse;
+  const log = {
+    type: 'away_digest',
+    day: gs.day,
+    location: gs.location,
+    prompt: call.prompt,
+    raw: call.raw,
+    parsed: call.parsed,
+    fallback: !call.parsed,
+    error: call.error,
+    startedAt: call.startedAt,
+    endedAt: call.endedAt,
+    meta: { eventCount: awayEvents.length },
+  };
+  return { result, log };
 }
 
 // ─────────── COMPONENTS ───────────
@@ -1380,9 +1528,11 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
     setOpenLetterId(id);
   };
 
-  // Apply non-time changes (money, reputation, goods, journal, hook) to a state object
-  // Returns a new state. Does NOT advance time — voyage time is handled separately via tickDays.
-  const applyOutcomeChangesPure = (state, changes) => {
+  // Apply non-time changes (money, reputation, goods, journal, hook,
+  // shipDamage, newAcquaintances, flags) to a state object. Returns a new
+  // state. Does NOT advance time — voyage time is handled separately via
+  // tickDays.
+  const applyOutcomeChangesPure = (state, changes, opts = {}) => {
     const next = { ...state };
     if (changes.money) next.money = Math.max(0, next.money + changes.money);
     if (changes.reputation) {
@@ -1407,6 +1557,29 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
     if (changes.hook) {
       next.hooks = [...next.hooks, changes.hook];
     }
+    // Ship damage — never apply to letter outcomes, no matter what the model returned.
+    if (changes.shipDamage && !opts.isLetter && next.ship) {
+      const sd = changes.shipDamage;
+      const hullHit  = Math.max(0, Math.min(40, Number(sd.hull)  || 0));
+      const sailsHit = Math.max(0, Math.min(40, Number(sd.sails) || 0));
+      next.ship = {
+        ...next.ship,
+        hull:  Math.max(0, next.ship.hull  - hullHit),
+        sails: Math.max(0, next.ship.sails - sailsHit),
+      };
+    }
+    // New named characters introduced by the AI; persist into world state.
+    if (Array.isArray(changes.newAcquaintances) && changes.newAcquaintances.length) {
+      let acq = next.acquaintances || [];
+      for (const npc of changes.newAcquaintances) {
+        acq = upsertAcquaintance(acq, next.day, npc);
+      }
+      next.acquaintances = acq;
+    }
+    // Narrative flags — merge in.
+    if (changes.flags && typeof changes.flags === 'object') {
+      next.flags = { ...(next.flags || {}), ...changes.flags };
+    }
     return next;
   };
 
@@ -1418,18 +1591,25 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
     if (returningHome && hasEvents) {
       setPending(true);
       setPendingMsg('Surveying what passed in your absence');
-      const digestProse = await genAwayDigest(newGs, newGs.awayLog);
+      const { result: digestProse, log } = await genAwayDigest(newGs, newGs.awayLog);
       setPending(false);
       setAwayDigest({ log: newGs.awayLog, prose: digestProse });
-      // Clear the awayLog now that it's shown
-      setGs({ ...newGs, awayLog: [] });
+      // Clear the awayLog now that it's shown; persist the AI exchange.
+      setGs({
+        ...newGs,
+        awayLog: [],
+        aiLog: log ? pushAiLog(newGs.aiLog, log) : newGs.aiLog,
+      });
     } else {
       setGs(newGs);
       setPending(true);
       setPendingMsg('Coming into port');
-      const prose = await genArrivalVignette(newGs, dest);
+      const { result: prose, log } = await genArrivalVignette(newGs, dest);
       setPending(false);
       setArrivalProse({ port: dest, prose });
+      if (log) {
+        setGs(prev => ({ ...prev, aiLog: pushAiLog(prev.aiLog, log) }));
+      }
       setTab(returningHome ? 'journal' : 'port');
     }
   };
@@ -1446,8 +1626,9 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
     const haveEncounter = Math.random() < 0.6;
 
     if (haveEncounter) {
-      const enc = await genVoyageEncounter(gs, gs.location, portKey);
+      const { result: enc, log } = await genVoyageEncounter(gs, gs.location, portKey);
       setPending(false);
+      if (log) setGs(prev => ({ ...prev, aiLog: pushAiLog(prev.aiLog, log) }));
       setEncounter({ ...enc, type: 'voyage', destination: portKey });
     } else {
       const baseDays = Math.max(1, (port.daysFromHome || 1) - (hasShipwright ? 1 : 0));
@@ -1470,8 +1651,9 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
   const handleEncounterChoice = async (choice) => {
     setPending(true);
     setPendingMsg('The hour passes');
-    const result = await genOutcome(gs, encounter.prose, choice);
+    const { result, log } = await genOutcome(gs, encounter.prose, choice);
     setPending(false);
+    if (log) setGs(prev => ({ ...prev, aiLog: pushAiLog(prev.aiLog, log) }));
     setOutcome({ ...result, encounter });
   };
 
@@ -1483,11 +1665,11 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
       const baseDays = Math.max(1, (port.daysFromHome || 1) - (hasShipwright ? 1 : 0));
       const totalDays = baseDays + (outcome.changes.days || 0);
 
-      // Apply outcome changes (no time)
+      // Apply outcome changes (no time) — schema supports shipDamage at sea.
       let newGs = applyOutcomeChangesPure(gs, outcome.changes);
       // Tick the voyage days (advances day, runs home sim)
       newGs = tickDays(newGs, totalDays);
-      // Land — apply voyage wear to the ship
+      // Land — apply voyage wear on top of any encounter shipDamage.
       newGs = {
         ...newGs,
         ship: applyVoyageWear(newGs.ship, totalDays),
@@ -1501,8 +1683,8 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
 
       await arriveAt(newGs, dest);
     } else if (encounter.type === 'letter') {
-      // Letter responses: instant in game time
-      const newGs = applyOutcomeChangesPure(gs, outcome.changes);
+      // Letter responses: instant in game time, no ship damage even if model returned it.
+      const newGs = applyOutcomeChangesPure(gs, outcome.changes, { isLetter: true });
       setGs(newGs);
       setEncounter(null);
       setOutcome(null);
@@ -1518,11 +1700,12 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
     });
     setPending(true);
     setPendingMsg('Sealing the letter');
-    const result = await genOutcome(gs, `Letter from ${letter.from}: ${letter.body}`, response, { isLetter: true });
+    const { result, log } = await genOutcome(gs, `Letter from ${letter.from}: ${letter.body}`, response, { isLetter: true });
     setPending(false);
     setGs(prev => ({
       ...prev,
       letters: prev.letters.map(l => l.id === letter.id ? { ...l, replied: true, replyLabel: response.label } : l),
+      aiLog: log ? pushAiLog(prev.aiLog, log) : prev.aiLog,
     }));
     // Letter replies are instant in game time. Strip any days the model invented
     // so the summary and the actual state agree.
@@ -1533,12 +1716,13 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
   const requestNewLetter = async () => {
     setPending(true);
     setPendingMsg('A messenger crosses the compound');
-    const letter = await genLetter(gs);
+    const { result: letter, log } = await genLetter(gs);
     setPending(false);
     setGs(prev => ({
       ...prev,
       letters: [...prev.letters, { ...letter, id: Date.now(), read: false }],
       lettersGenerated: prev.lettersGenerated + 1,
+      aiLog: log ? pushAiLog(prev.aiLog, log) : prev.aiLog,
     }));
     setTab('letters');
   };
@@ -1787,6 +1971,24 @@ function Header({ gs, onReturnToTitle }) {
     }
   };
 
+  const downloadAiLog = () => {
+    try {
+      const log = gs.aiLog || [];
+      const data = JSON.stringify({ player: gs.player.name, day: gs.day, count: log.length, aiLog: log }, null, 2);
+      const blob = new Blob([data], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `factors-charter-ai-log-day${gs.day}-${Date.now()}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showFlash(`AI log downloaded (${log.length} entries).`);
+      setMenuOpen(false);
+    } catch (e) {
+      showFlash('Download failed.');
+    }
+  };
+
   return (
     <div style={{ marginBottom: '1.5rem', borderBottom: '1px solid rgba(74,44,20,0.3)', paddingBottom: '1rem', position: 'relative' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.5rem' }}>
@@ -1840,10 +2042,18 @@ function Header({ gs, onReturnToTitle }) {
           </button>
           <button
             className="ghost-button"
-            style={{ width: '100%', textAlign: 'left', marginBottom: '0.6rem' }}
+            style={{ width: '100%', textAlign: 'left', marginBottom: '0.3rem' }}
             onClick={copyManuscript}
           >
             ⎘ Copy to clipboard
+          </button>
+          <button
+            className="ghost-button"
+            style={{ width: '100%', textAlign: 'left', marginBottom: '0.6rem' }}
+            onClick={downloadAiLog}
+            disabled={!gs.aiLog || gs.aiLog.length === 0}
+          >
+            ↓ Download AI log ({(gs.aiLog || []).length})
           </button>
 
           <div className="display" style={{ fontSize: '0.75em', color: '#6b4423', letterSpacing: '0.08em', padding: '0 0.3rem', marginBottom: '0.4rem' }}>
@@ -2063,6 +2273,39 @@ function LedgerView({ gs }) {
           </table>
         </div>
       </div>
+
+      {Array.isArray(gs.acquaintances) && gs.acquaintances.length > 0 && (
+        <div style={{ marginTop: '1.5rem' }}>
+          <div className="display" style={{ fontSize: '0.9em', color: '#6b4423', marginBottom: '0.7rem' }}>ACQUAINTANCES ABROAD</div>
+          <div className="cols-2">
+            {gs.acquaintances.slice().reverse().slice(0, 8).map((a) => (
+              <div key={a.id} className="parchment" style={{ padding: '0.7rem 0.9rem', background: 'rgba(255,255,255,0.25)' }}>
+                <div className="display" style={{ fontSize: '1em', color: '#5c1a08' }}>{a.name}</div>
+                <div style={{ fontSize: '0.82em', color: '#6b4423', fontStyle: 'italic' }}>
+                  {a.role}{a.location ? ` · ${a.location}` : ''}
+                </div>
+                {a.notes && (
+                  <div style={{ fontSize: '0.85em', color: '#4a3220', fontStyle: 'italic', marginTop: '0.3rem' }}>{a.notes}</div>
+                )}
+                <div style={{ fontSize: '0.75em', color: '#8b7050', marginTop: '0.3rem' }}>
+                  Met day {a.introduced}{a.lastSeen !== a.introduced ? `, last seen day ${a.lastSeen}` : ''}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {gs.flags && Object.keys(gs.flags).length > 0 && (
+        <div style={{ marginTop: '1rem' }}>
+          <div className="display" style={{ fontSize: '0.85em', color: '#6b4423', marginBottom: '0.4rem' }}>OPEN MATTERS</div>
+          <div style={{ fontSize: '0.85em', color: '#4a3220', fontStyle: 'italic' }}>
+            {Object.entries(gs.flags).map(([k, v], i) => (
+              <span key={k}>{i > 0 ? ' · ' : ''}{k}{v === true ? '' : `: ${typeof v === 'string' ? v : JSON.stringify(v)}`}</span>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div style={{ marginTop: '2rem' }}>
         <div className="display" style={{ fontSize: '0.9em', color: '#6b4423', marginBottom: '0.7rem' }}>THE HOUSEHOLD</div>
@@ -2633,6 +2876,17 @@ function ChangesSummary({ changes }) {
     for (const [k, v] of Object.entries(changes.reputation)) {
       if (!v) continue;
       items.push({ label: `${FACTIONS[k]?.short || k} ${v > 0 ? '+' : ''}${v}`, color: v > 0 ? '#3a5c2a' : '#8b1a1a' });
+    }
+  }
+  if (changes.shipDamage) {
+    const sd = changes.shipDamage;
+    if (sd.hull)  items.push({ label: `Hull −${Math.min(40, Number(sd.hull) || 0)}`,  color: '#8b1a1a' });
+    if (sd.sails) items.push({ label: `Sails −${Math.min(40, Number(sd.sails) || 0)}`, color: '#8b1a1a' });
+  }
+  if (Array.isArray(changes.newAcquaintances)) {
+    for (const a of changes.newAcquaintances) {
+      if (!a?.name) continue;
+      items.push({ label: `Met ${a.name}${a.role ? ` (${a.role})` : ''}`, color: '#4a3220' });
     }
   }
   if (items.length === 0) return null;

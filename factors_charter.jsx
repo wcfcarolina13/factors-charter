@@ -57,6 +57,9 @@ const PORTS = {
     restock:  { calico: 0.5, opium: 0.15, saltpetre: 0.3 },
     buys:  { pepper: 1.4, cinnamon: 1.5, sandalwood: 1.2, silver: 1.05 },
     faction: 'dutch', rivalRisk: true,
+    // Port duty levied on every transaction. Modulated by Dutch standing
+    // through portTaxRate(). The Calvinist clerks miss nothing.
+    taxBase: 0.10,
     yard: 'fine',
     yardBlurb: 'The Dutch yard is the finest east of the Cape \u2014 and they will charge a Calvinist\u2019s price.',
   },
@@ -193,6 +196,23 @@ const priceFor = (portKey, commodity, day) => {
   const mult = port.sells?.[commodity] ?? port.buys?.[commodity] ?? 1;
   const fluct = ((hashCode(`${day}-${portKey}-${commodity}`) % 21) - 10) / 100;
   return Math.max(1, Math.round(base * mult * (1 + fluct)));
+};
+
+// Port duty (Dutch tax at Port St. Eustace) — proportion of transaction value.
+// Standing with the local faction shifts the rate: cordial -25%, warm -10%,
+// cool +25%, hostile +60%. Returns 0 for ports without a taxBase.
+const portTaxRate = (gs, portKey) => {
+  const port = PORTS[portKey];
+  const base = port?.taxBase || 0;
+  if (!base) return 0;
+  const rep = (gs.reputation?.[port.faction] ?? 0);
+  let mult = 1;
+  if (rep >= 50) mult = 0.75;
+  else if (rep >= 20) mult = 0.90;
+  else if (rep >= -5) mult = 1.0;
+  else if (rep >= -20) mult = 1.25;
+  else mult = 1.6;
+  return base * mult;
 };
 
 const repTone = (n) => {
@@ -1048,6 +1068,11 @@ const SYSTEM_PROMPT = `You are the narrator of "The Factor's Charter," a text-ba
 
 VOICE: Dry, observational, period-appropriate. Sensory details (heat, salt, mildew, palm oil, gun smoke). No anachronisms — no "okay," no modern idiom. Specific, not generic. Slight melancholy, occasional dark humor. Names of people and ships should sound period-plausible.
 
+PROSE DISCIPLINE:
+- Concrete sensory detail over metaphor. Plain observation does the work; figurative language is a seasoning, not the dish. At most one metaphor or simile per passage. Prefer the named thing to the comparison.
+- Short sentences when the matter is small. Long sentences only when they earn it.
+- Avoid clauses that explain what the prose has already shown.
+
 WORLD GROUNDING (do not violate):
 - The Factor's home station is Bayan-Kor. The named characters who live there are Mr. Hodge (clerk, drunkard), Sgt. Dass (sepoy), the Rajah's Vizier, and Reverend Pyke (at the Mission). These characters can ONLY appear in scenes set at Bayan-Kor or via correspondence.
 - The other ports — Kota Pinang, Port St. Eustace, The Pelican's Nest — are reached only by voyage. They have their own anonymous local populations (harbormasters, merchants, soldiers, etc.).
@@ -1057,7 +1082,8 @@ WORLD GROUNDING (do not violate):
 WORLD STATE (you may extend it):
 - Outcomes can plant minor characters into the world via "newAcquaintances": [{ "name", "role", "location", "notes" }]. These characters persist; later scenes will see them in the state context and may bring them back. Use period-plausible names. Don't duplicate existing acquaintances or named home-station characters.
 - Outcomes at sea or under combat can damage the ship via "shipDamage": { "hull": int 0–40, "sails": int 0–40 }. Both fields optional. Only use this when the prose justifies it (storm, gunfire, grounding). Letter outcomes must NEVER set shipDamage.
-- Outcomes can set narrative flags via "flags": { "key": value }. Use sparingly, for things future scenes might want to remember (e.g. "owesViziersFavor": true, "carriesContraband": true).
+- Outcomes can set narrative flags via "flags": { "key": value }. Be very sparing. ONE flag per fact — do not set paired flags that mean the same thing (e.g. "askedX: true" + "awaitingReplyOnX: true" is one fact, set one). Only set a flag if a later scene or letter could plausibly reference it. Flags are durable state, not journal entries.
+- Outcomes may add a "hook" — but before doing so, consider the open threads listed in the state context. If a new hook restates an existing one, REFINE the existing thread instead by leaving "hook" empty (the world keeps the older thread). Add a hook only when it is genuinely a new thread the world would not otherwise hold.
 
 CONSTRAINTS: Output ONLY valid JSON. No code fences, no preamble, no commentary. Stay within the requested length.`;
 
@@ -1126,11 +1152,11 @@ async function genVoyageEncounter(gs, fromPort, toPort) {
   const prompt = `Generate a voyage encounter at sea, sailing from ${fromPort} toward ${toPort}.
 ${stateContext(gs)}
 
-SCENE CONSTRAINT: This encounter happens on the open water during the voyage, not at any port. The Factor is aboard the pinnace with anonymous crew (a bosun, sailors). Do NOT introduce Mr. Hodge, Sgt. Dass, the Vizier, or Reverend Pyke unless you state plainly that they have been brought aboard for this voyage. New characters (e.g. another ship's captain, a passenger, a castaway) should have period-plausible names.
+SCENE CONSTRAINT: This encounter happens on the open water during the voyage, not at any port. The Factor is aboard his ship with anonymous crew (a bosun, sailors). Do NOT introduce Mr. Hodge, Sgt. Dass, the Vizier, or Reverend Pyke unless you state plainly that they have been brought aboard for this voyage. New characters (e.g. another ship's captain, a passenger, a castaway) should have period-plausible names.
 
 Return JSON:
 {
-  "prose": "3-4 sentences of period prose. Concrete sensory detail. Set the scene and present a situation requiring a decision.",
+  "prose": "2-3 sentences of period prose. Concrete sensory detail. Plain observation, not metaphor. Set the scene and present a situation requiring a decision.",
   "choices": [
     { "label": "5-9 word verb phrase", "seed": "what tonally happens if chosen" },
     { "label": "5-9 word verb phrase", "seed": "what tonally happens if chosen" },
@@ -1176,7 +1202,7 @@ ${constraintLine}
 
 Generate the outcome. Return JSON:
 {
-  "prose": "2-3 sentences of period prose describing what happens.",
+  "prose": "2-3 sentences of period prose describing what happens. Concrete observation. Avoid metaphor.",
   "changes": {
     "money": integer delta (often 0; range -200 to +200),
     "days": integer days passed (${isLetter ? '0 only' : '0-3'}),
@@ -2294,13 +2320,20 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
       });
     } else {
       setGs(newGs);
-      setPending(true);
-      setPendingMsg('Coming into port');
-      const { result: prose, log } = await genArrivalVignette(newGs, dest);
-      setPending(false);
-      setArrivalProse({ port: dest, prose });
-      if (log) {
-        setGs(prev => ({ ...prev, aiLog: pushAiLog(prev.aiLog, log) }));
+      // First-visit arrivals get a generated vignette to set the place. Revisits
+      // skip the AI call — the port is familiar; no need to pay for flavor.
+      const firstVisit = !gs.visited?.includes(dest);
+      if (firstVisit) {
+        setPending(true);
+        setPendingMsg('Coming into port');
+        const { result: prose, log } = await genArrivalVignette(newGs, dest);
+        setPending(false);
+        setArrivalProse({ port: dest, prose });
+        if (log) {
+          setGs(prev => ({ ...prev, aiLog: pushAiLog(prev.aiLog, log) }));
+        }
+      } else {
+        setArrivalProse(null);
       }
       setTab(returningHome ? 'journal' : 'port');
     }
@@ -2489,7 +2522,10 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
   };
 
   const buyGood = (commodity, qty, price) => {
-    const cost = qty * price;
+    const grossCost = qty * price;
+    const taxRate = portTaxRate(gs, gs.location);
+    const tax = Math.round(grossCost * taxRate);
+    const cost = grossCost + tax;
     if (gs.money < cost) return;
     // Hold cap: total stowage of current goods plus this purchase must fit.
     const w = COMMODITIES[commodity].weight;
@@ -2499,6 +2535,7 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
     const stockHere = gs.portStocks?.[gs.location] || {};
     const available = Math.floor(stockHere[commodity] ?? Infinity);
     if (qty > available) return;
+    const taxLine = tax > 0 ? `, with £${tax} duty to the Dutch` : '';
     setGs(prev => ({
       ...prev,
       money: prev.money - cost,
@@ -2510,26 +2547,23 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
           [commodity]: Math.max(0, (prev.portStocks?.[prev.location]?.[commodity] ?? 0) - qty),
         },
       },
-      journal: [...prev.journal, { day: prev.day, entry: `Bought ${qty} ${COMMODITIES[commodity].unit} of ${COMMODITIES[commodity].name} at ${gs.location} for £${cost}.` }],
+      journal: [...prev.journal, { day: prev.day, entry: `Bought ${qty} ${COMMODITIES[commodity].unit} of ${COMMODITIES[commodity].name} at ${gs.location} for £${grossCost}${taxLine}.` }],
     }));
   };
 
   const sellGood = (commodity, qty, price) => {
     if ((gs.goods[commodity] || 0) < qty) return;
-    const proceeds = qty * price;
-    setGs(prev => {
-      const next = {
-        ...prev,
-        money: prev.money + proceeds,
-        goods: { ...prev.goods, [commodity]: prev.goods[commodity] - qty },
-        journal: [...prev.journal, { day: prev.day, entry: `Sold ${qty} ${COMMODITIES[commodity].unit} of ${COMMODITIES[commodity].name} at ${gs.location} for £${proceeds}.` }],
-      };
-      // Quota tracking: shipped to home or to St. Eustace counts toward quota partial
-      if (prev.location === 'Bayan-Kor' && next.quotas?.[commodity]) {
-        // Selling at home doesn't count; you need to ship to London. Skip for prototype.
-      }
-      return next;
-    });
+    const grossProceeds = qty * price;
+    const taxRate = portTaxRate(gs, gs.location);
+    const tax = Math.round(grossProceeds * taxRate);
+    const proceeds = grossProceeds - tax;
+    const taxLine = tax > 0 ? `, less £${tax} Dutch duty` : '';
+    setGs(prev => ({
+      ...prev,
+      money: prev.money + proceeds,
+      goods: { ...prev.goods, [commodity]: prev.goods[commodity] - qty },
+      journal: [...prev.journal, { day: prev.day, entry: `Sold ${qty} ${COMMODITIES[commodity].unit} of ${COMMODITIES[commodity].name} at ${gs.location} for £${grossProceeds}${taxLine}.` }],
+    }));
   };
 
   // Move goods from the ship's hold into the godown at Bayan-Kor.
@@ -3715,10 +3749,13 @@ function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab, lodg
   const ship = gs.ship || { name: 'The Pinnace', hull: 100, sails: 100 };
 
   // Compute the largest qty the player can buy of a commodity, given money,
-  // hold capacity, and port stock. Used to decide when to disable Buy buttons.
+  // hold capacity, and port stock. Tax inflates per-unit cost when buying at
+  // a port that levies duty (Dutch).
+  const taxRate = portTaxRate(gs, gs.location);
   const maxBuyable = (c, price) => {
     const w = COMMODITIES[c].weight;
-    const byMoney = Math.floor(gs.money / price);
+    const perUnit = Math.max(1, Math.ceil(price * (1 + taxRate)));
+    const byMoney = Math.floor(gs.money / perUnit);
     const byHold  = w > 0 ? Math.floor(remaining / w) : Infinity;
     const byStock = Math.floor(stocks[c] ?? Infinity);
     return Math.max(0, Math.min(byMoney, byHold, byStock));
@@ -3762,6 +3799,11 @@ function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab, lodg
             <span style={{ color: '#8b1a1a', fontStyle: 'italic' }}>— too damaged to put to sea</span>
           )}
         </div>
+        {taxRate > 0 && (
+          <div style={{ marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px dashed rgba(74,44,20,0.25)', fontSize: '0.85em', color: '#8b1a1a', fontStyle: 'italic' }}>
+            The Dutch port levies a duty of {Math.round(taxRate * 100)}% on every transaction.
+          </div>
+        )}
       </div>
 
       <div className="cols-2">
@@ -3771,12 +3813,13 @@ function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab, lodg
             const price = priceFor(gs.location, c, gs.day);
             const onHand = Math.floor(stocks[c] ?? 0);
             const max = maxBuyable(c, price);
+            const effPrice = taxRate > 0 ? Math.ceil(price * (1 + taxRate)) : price;
             return (
               <div key={c} className="trade-row">
                 <div>
                   <div>{COMMODITIES[c].name}</div>
                   <div style={{ fontSize: '0.85em', color: '#6b4423' }}>
-                    £{price} per {COMMODITIES[c].unit} · {COMMODITIES[c].weight} cwt ea ·{' '}
+                    £{price} per {COMMODITIES[c].unit}{taxRate > 0 ? ` (£${effPrice} w/ duty)` : ''} · {COMMODITIES[c].weight} cwt ea ·{' '}
                     <span style={{ color: onHand === 0 ? '#8b1a1a' : '#6b4423' }}>
                       {onHand === 0 ? 'none on hand' : `${onHand} on hand`}
                     </span>
@@ -3796,11 +3839,12 @@ function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab, lodg
           {buys.length === 0 ? <p className="italic">No one is buying.</p> : buys.map(c => {
             const price = priceFor(gs.location, c, gs.day);
             const have = gs.goods[c] || 0;
+            const netPrice = taxRate > 0 ? Math.floor(price * (1 - taxRate)) : price;
             return (
               <div key={c} className="trade-row">
                 <div>
                   <div>{COMMODITIES[c].name} <span style={{ fontSize: '0.85em', color: '#6b4423' }}>(have {have})</span></div>
-                  <div style={{ fontSize: '0.85em', color: '#6b4423' }}>£{price} per {COMMODITIES[c].unit}</div>
+                  <div style={{ fontSize: '0.85em', color: '#6b4423' }}>£{price} per {COMMODITIES[c].unit}{taxRate > 0 ? ` (£${netPrice} after duty)` : ''}</div>
                 </div>
                 <div className="actions">
                   <button className="ghost-button-sm" disabled={have < 1} onClick={() => sellGood(c, 1, price)}>Sell 1</button>

@@ -1775,7 +1775,9 @@ async function genVoyageEncounter(gs, fromPort, toPort) {
   const prompt = `Generate a voyage encounter at sea, sailing from ${fromPort} toward ${toPort}.
 ${stateContext(gs)}
 
-SCENE CONSTRAINT: This encounter happens on the open water during the voyage, not at any port. The Factor is aboard his ship with anonymous crew (a bosun, sailors). Do NOT introduce Mr. Hodge, Sgt. Dass, the Vizier, or Reverend Pyke unless you state plainly that they have been brought aboard for this voyage. New characters (e.g. another ship's captain, a passenger, a castaway) should have period-plausible names.
+SCENE CONSTRAINT: This encounter happens on the open water during the voyage, not at any port. The Factor is aboard his ship with anonymous crew (a bosun, sailors). Do NOT introduce Mr. Hodge, Sgt. Dass, the Vizier, or Reverend Pyke unless you state plainly that they have been brought aboard for this voyage.
+
+USE WHAT IS THERE: If the Open threads, Acquaintances, or Flags above include a name, vessel, location, or matter the Factor is plausibly carrying with him on this leg, PRIORITISE pulling one of them into this scene. A signal from a ship Faulke described, a man Ramdeen named, a packet still sealed, an arrangement with the Brotherhood about to be tested — pick something the player has accumulated and advance, complicate, or resolve it. Only invent a brand-new figure or thread if NONE of the existing state would plausibly surface here.
 
 Return JSON:
 {
@@ -1822,6 +1824,8 @@ The Factor chose: "${choice.label}" (${choice.seed})
 ${stateContext(gs)}
 
 ${constraintLine}
+
+USE WHAT IS THERE: Where the outcome would naturally touch the Open threads, Acquaintances, or Flags listed above, do — refine an existing thread rather than parallel-track a new one. If the choice resolves a hook, you may leave the "hook" field empty (the open thread is the one that closes). Add a NEW hook only when the action genuinely opens a new thread the world would not otherwise hold.
 
 Generate the outcome. Return JSON:
 {
@@ -1960,6 +1964,64 @@ Return JSON:
       meta: { ...ctx },
     },
   };
+}
+
+// Generate a scene that brings a specific thread back into play. The
+// player picks the thread (a hook line, a named acquaintance, or a flag)
+// from the Pursue panel; the AI weaves it into an encounter the player
+// then resolves through the standard outcome flow. 1-2 days advance.
+async function genPursueThread(gs, thread) {
+  const where = gs.location || 'Bayan-Kor';
+  const scene = where === 'Bayan-Kor'
+    ? `at the godown or compound at Bayan-Kor`
+    : `at the wharves or in the back-rooms of ${where}`;
+  const homeRule = where === 'Bayan-Kor'
+    ? `Mr. Hodge, Sgt. Dass, the Vizier, and Reverend Pyke MAY appear if it is natural — the Factor is at home.`
+    : `The Factor is NOT at home. Mr. Hodge, Sgt. Dass, the Vizier, and Reverend Pyke must NOT appear in person.`;
+
+  const prompt = `The Factor decides to pursue a particular matter, ${scene}. He turns his attention deliberately to this:
+
+THREAD TO PURSUE: ${thread}
+
+${stateContext(gs)}
+
+Generate a scene that brings the thread above into play. Use the named figures, places, and details already established in the state above. Do NOT invent a wholly new figure or thread for this scene — this scene is about the thread named, advanced, complicated, or partially resolved. ${homeRule}
+
+This is an active investigation by the Factor, not a passive happening. The choices below should reflect what HE can decide to do about the thread now that it is before him.
+
+Return JSON:
+{
+  "prose": "2-3 sentences of period prose, concrete observation. Set the scene. The thread above must be central, not garnish.",
+  "choices": [
+    { "label": "5-9 word verb phrase", "seed": "what tonally happens if chosen" },
+    { "label": "5-9 word verb phrase", "seed": "what tonally happens if chosen" },
+    { "label": "5-9 word verb phrase", "seed": "what tonally happens if chosen" }
+  ]
+}`;
+  const fallback = {
+    prose: `You apply yourself to the matter — ${thread.slice(0, 120)}${thread.length > 120 ? '…' : ''} — but the day yields little beyond a confirmation of what was already supposed.`,
+    choices: [
+      { label: 'Press the matter further at present', seed: 'second attempt; small effect' },
+      { label: 'Set the matter aside for another day', seed: 'no change; thread remains open' },
+      { label: 'Carry the matter to a confidant', seed: 'word to Hodge or Dass; small ripple' },
+    ],
+  };
+  const call = await callClaude(prompt);
+  const result = call.parsed || fallback;
+  const log = {
+    type: 'pursue_thread',
+    day: gs.day,
+    location: gs.location,
+    prompt: call.prompt,
+    raw: call.raw,
+    parsed: call.parsed,
+    fallback: !call.parsed,
+    error: call.error,
+    startedAt: call.startedAt,
+    endedAt: call.endedAt,
+    meta: { thread },
+  };
+  return { result, log };
 }
 
 async function genArrivalVignette(gs, port) {
@@ -3247,6 +3309,20 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
     setOutcome({ ...result, encounter });
   };
 
+  // Pursue a specific open thread — a hook line, a named acquaintance, or
+  // a flag the player wants to act upon. Generates a scene seeded with the
+  // chosen thread; the player's choice is then resolved through the same
+  // outcome flow as a voyage encounter. Treated as a "pursue" encounter
+  // so the outcome's days delta (1-2) ticks the world forward.
+  const handlePursueThread = async (thread) => {
+    setPending(true);
+    setPendingMsg(`Pursuing ${thread.slice(0, 40)}${thread.length > 40 ? '…' : ''}`);
+    const { result: enc, log } = await genPursueThread(gs, thread);
+    setPending(false);
+    if (log) setGs(prev => ({ ...prev, aiLog: pushAiLog(prev.aiLog, log) }));
+    setEncounter({ ...enc, type: 'pursue', thread });
+  };
+
   const concludeOutcome = async () => {
     if (encounter.type === 'voyage') {
       const dest = encounter.destination;
@@ -3274,6 +3350,21 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
     } else if (encounter.type === 'letter') {
       // Letter responses: instant in game time, no ship damage even if model returned it.
       const newGs = applyOutcomeChangesPure(gs, outcome.changes, { isLetter: true });
+      setGs(newGs);
+      setEncounter(null);
+      setOutcome(null);
+    } else if (encounter.type === 'pursue') {
+      // Pursuing a thread: apply changes, tick the days the AI returned
+      // (typically 1-2), and stay at the current location. Ship may take
+      // damage if the thread led somewhere violent. Journal records the
+      // pursuit explicitly so the player can find it later.
+      const days = Math.max(0, Math.min(3, outcome.changes.days || 1));
+      let newGs = applyOutcomeChangesPure(gs, outcome.changes);
+      newGs = tickDays(newGs, days);
+      newGs = {
+        ...newGs,
+        journal: [...newGs.journal, { day: newGs.day, entry: `Pursued the matter of ${encounter.thread.slice(0, 80)}${encounter.thread.length > 80 ? '…' : ''}` }],
+      };
       setGs(newGs);
       setEncounter(null);
       setOutcome(null);
@@ -3586,7 +3677,7 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
       <Page>
         <div className="ink-fade-in" style={{ maxWidth: '42rem', margin: '0 auto', padding: '3.0rem 1.5rem', width: '100%' }}>
           <div className="display text-center" style={{ fontSize: '0.85em', color: '#6b4423', letterSpacing: '0.2em', marginBottom: '0.5rem' }}>
-            {encounter.type === 'voyage' ? 'AT SEA' : 'AN INCIDENT'}
+            {encounter.type === 'voyage' ? 'AT SEA' : encounter.type === 'pursue' ? 'A MATTER PURSUED' : 'AN INCIDENT'}
           </div>
           <Fleuron />
           <p className="drop-cap" style={{ fontSize: '1.1em' }}>{encounter.prose}</p>
@@ -3621,7 +3712,7 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
         <Header gs={gs} onReturnToTitle={onReturnToTitle} />
         <Tabs tab={tab} setTab={setTab} unread={gs.letters.filter(l => !l.read).length} atHome={atHome} />
         <div className="parchment" style={{ padding: '1.25rem', minHeight: '24rem', background: 'rgba(255,253,245,0.4)' }}>
-          {tab === 'journal' && <JournalView gs={gs} arrivalProse={arrivalProse} setTab={setTab} openLetterById={openLetterById} />}
+          {tab === 'journal' && <JournalView gs={gs} arrivalProse={arrivalProse} setTab={setTab} openLetterById={openLetterById} pursueThread={handlePursueThread} />}
           {tab === 'ledger' && <LedgerView gs={gs} />}
           {tab === 'map' && <MapView gs={gs} sailTo={sailTo} />}
           {tab === 'port' && <PortView gs={gs} buyGood={buyGood} sellGood={sellGood} refitShip={refitShip} arrivalProse={arrivalProse} setTab={setTab} lodgeGoods={lodgeGoods} withdrawGoods={withdrawGoods} commissionBrigantine={commissionBrigantine} />}
@@ -4429,7 +4520,7 @@ function Tabs({ tab, setTab, unread, atHome }) {
 
 // ─────────── JOURNAL VIEW ───────────
 
-function JournalView({ gs, arrivalProse, setTab, openLetterById }) {
+function JournalView({ gs, arrivalProse, setTab, openLetterById, pursueThread }) {
   const entries = [...gs.journal].reverse().slice(0, 20);
   const unread = gs.letters.filter(l => !l.read);
   const latestLetter = gs.letters.length > 0 ? gs.letters[gs.letters.length - 1] : null;
@@ -4500,16 +4591,94 @@ function JournalView({ gs, arrivalProse, setTab, openLetterById }) {
           ))}
         </div>
       )}
-      {gs.hooks.length > 0 && (
+      {(gs.hooks.length > 0 || (gs.acquaintances || []).length > 0) && pursueThread && (
         <>
           <Fleuron char="❧" />
-          <div className="display" style={{ fontSize: '0.85em', color: '#6b4423', marginBottom: '0.5rem' }}>OPEN THREADS</div>
-          {gs.hooks.slice(-5).map((h, i) => (
-            <div key={i} className="italic" style={{ marginBottom: '0.3rem', color: '#4a3220' }}>&mdash; {h}</div>
-          ))}
+          <PursueThreadPanel gs={gs} pursueThread={pursueThread} />
         </>
       )}
     </div>
+  );
+}
+
+// Interactive threads panel — replaces the old static OPEN THREADS list.
+// Shows the most recent hooks and named acquaintances; tapping one
+// triggers an AI-generated encounter that brings the thread forward.
+// The Factor "pursues the matter" — 1-2 days advance.
+function PursueThreadPanel({ gs, pursueThread }) {
+  const [open, setOpen] = useState(false);
+  const hooks = (gs.hooks || []).slice(-6);
+  const acqs = (gs.acquaintances || []).slice(-6);
+
+  const renderAcquaintance = (a) => {
+    const where = a.location ? `, ${a.location}` : '';
+    const note = a.notes ? ` — ${a.notes}` : '';
+    return `${a.name} (${a.role}${where})${note}`;
+  };
+
+  return (
+    <>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.5rem' }}>
+        <div className="display" style={{ fontSize: '0.85em', color: '#6b4423' }}>OPEN THREADS</div>
+        {hooks.length + acqs.length > 0 && (
+          <button
+            className="ghost-button-sm"
+            onClick={() => setOpen(!open)}
+          >
+            {open ? '— hide —' : 'Pursue a matter'}
+          </button>
+        )}
+      </div>
+
+      {hooks.map((h, i) => (
+        <div key={`h${i}`} className="italic" style={{ marginBottom: '0.3rem', color: '#4a3220' }}>&mdash; {h}</div>
+      ))}
+
+      {open && (
+        <div className="ink-fade-in" style={{ marginTop: '0.7rem', padding: '0.7rem 0.9rem', background: 'rgba(255,253,245,0.55)', borderLeft: '3px solid #5c1a08' }}>
+          <div className="display" style={{ fontSize: '0.82em', color: '#5c1a08', letterSpacing: '0.06em', marginBottom: '0.4rem' }}>
+            ⁂ PURSUE A MATTER
+          </div>
+          <p style={{ fontStyle: 'italic', color: '#4a3220', fontSize: '0.88em', margin: '0 0 0.7rem 0' }}>
+            Apply yr. attention to one of these. Pursuing a matter takes a day or two and may surface what was unfinished.
+          </p>
+          {hooks.length > 0 && (
+            <>
+              <div className="display" style={{ fontSize: '0.78em', color: '#6b4423', letterSpacing: '0.06em', marginBottom: '0.3rem' }}>HOOKS</div>
+              <div style={{ marginBottom: '0.6rem' }}>
+                {hooks.map((h, i) => (
+                  <button
+                    key={`hb${i}`}
+                    className="ghost-button"
+                    style={{ width: '100%', textAlign: 'left', marginBottom: '0.3rem', whiteSpace: 'normal', fontSize: '0.88em' }}
+                    onClick={() => { setOpen(false); pursueThread(h); }}
+                  >
+                    &mdash; {h}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+          {acqs.length > 0 && (
+            <>
+              <div className="display" style={{ fontSize: '0.78em', color: '#6b4423', letterSpacing: '0.06em', marginBottom: '0.3rem' }}>SEND WORD TO</div>
+              <div>
+                {acqs.map((a) => (
+                  <button
+                    key={a.id}
+                    className="ghost-button"
+                    style={{ width: '100%', textAlign: 'left', marginBottom: '0.3rem', whiteSpace: 'normal', fontSize: '0.88em' }}
+                    onClick={() => { setOpen(false); pursueThread(renderAcquaintance(a)); }}
+                  >
+                    &mdash; {a.name} <span style={{ color: '#6b4423', fontStyle: 'italic' }}>({a.role}{a.location ? `, ${a.location}` : ''})</span>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </>
   );
 }
 

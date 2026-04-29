@@ -32,6 +32,13 @@ const COMMODITIES = {
   // Indian-cut and uncut. The Factor's strongbox can hide a fortune in
   // diamonds without anyone noticing.
   diamonds:   { name: 'Diamonds',   unit: 'parcel', basePrice: 200, weight: 0.01 },
+  // Pegu / inland-Sumatran teak. Heavy, slow-growing, prized for ship's
+  // keels — the brigantine at Bayan-Kor was built of it. Available at
+  // Kota Pinang's inland teak yard once the Factor holds the concession.
+  teak:       { name: 'Teak',       unit: 'log',    basePrice: 14,  weight: 1.8  },
+  // Indian dyestuff. The Hollanders trade it on their own books at
+  // Eustace; in the back rooms, the price is more agreeable.
+  indigo:     { name: 'Indigo',     unit: 'cake',   basePrice: 22,  weight: 0.5  },
 };
 
 // Each port has finite stocks of what it sells, replenishing over time.
@@ -109,12 +116,46 @@ const PORTS = {
     sells: { saltpetre: 0.65, calico: 0.85 },
     stockMax: { saltpetre: 24, calico: 40 },
     restock:  { saltpetre: 0.3, calico: 0.5 },
-    buys:  { pepper: 1.5, cinnamon: 1.6, sandalwood: 1.3, camphor: 1.5, pearls: 1.4, diamonds: 1.5 },
+    buys:  { pepper: 1.5, cinnamon: 1.6, sandalwood: 1.3, camphor: 1.5, pearls: 1.4, diamonds: 1.5, teak: 1.6, indigo: 1.4 },
     faction: 'crown',
     yard: 'fine',
     yardBlurb: 'Crown carpenters at the King\u2019s pay \u2014 close work, no Dutchman\u2019s premium, the figures plainly written.',
   },
 };
+
+// \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 PORT SUBLOCATIONS \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+// A second trade panel that opens at certain ports when gating flags are
+// set. Same shape as a port's sells/stockMax/restock \u2014 the player buys at
+// the panel like a sublocation of the port. Doesn't change the port's
+// main trade columns; renders as a separate panel below.
+
+const PORT_SUBLOCATIONS = {
+  'Kota Pinang': {
+    key: 'teak-yard',
+    label: 'THE INLAND TEAK YARD',
+    blurb: 'A clearing inland of Kota Pinang \u2014 yr. own concession by the Vizier\'s grant. The teak is felled, squared, and stacked here at the cut price an English Factor pays his own foreman.',
+    gate: (gs) => gs.flags?.teakConcession === 'self',
+    sells:    { teak: 0.6 },
+    stockMax: { teak: 24 },
+    restock:  { teak: 0.25 },
+  },
+  'Port St. Eustace': {
+    key: 'back-rooms',
+    label: 'THE BACK ROOMS',
+    blurb: 'A separate counting-house behind the Dutch warehouse, where the Hollanders\' clerks transact what the open ledger does not record. Yr. trade pass admits you. Indian indigo by way of Surat — not on Eustace\'s open books.',
+    gate: (gs) => gs.flags?.dutchTradePass === true,
+    sells:    { indigo: 0.65 },
+    stockMax: { indigo: 16 },
+    restock:  { indigo: 0.3 },
+  },
+};
+
+// Returns the active sublocation for a port given current state, or null.
+function activeSublocation(portKey, gs) {
+  const sub = PORT_SUBLOCATIONS[portKey];
+  if (!sub) return null;
+  return sub.gate && sub.gate(gs) ? sub : null;
+}
 
 // \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 SHIPS \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
 // Hull and sails are 0\u2013100 condition. Voyages chip both. Below MIN_SAIL_COND
@@ -700,6 +741,9 @@ const LONDON_MULT = {
   // The new commodities. Camphor and tobacco at solid markups; pearls
   // and diamonds eyewatering — fine goods are why a Factor goes home rich.
   camphor: 3.2, tobacco: 2.4, pearls: 4.5, diamonds: 5.0,
+  // Sublocation commodities — teak for the brigantine yards back home,
+  // indigo as a Dutch off-ledger trade good.
+  teak: 2.6, indigo: 3.0,
 };
 const londonValue = (commodity, qty) => {
   const c = COMMODITIES[commodity];
@@ -2148,12 +2192,18 @@ function tickDays(gs, days) {
       s.awayLog.push({ day: s.day, type: 'charter-end', text: 'The third year is up. A packet from the Court closes the file.' });
     }
 
-    // ── port stocks replenish toward their cap
+    // ── port stocks replenish toward their cap. Sublocation stocks live
+    // in the same portStocks bucket as the main port (keyed by commodity);
+    // the sublocation's commodities don't overlap with the main port's, so
+    // the maps merge cleanly.
     for (const [pk, p] of Object.entries(PORTS)) {
-      if (!p.restock) continue;
-      if (!s.portStocks[pk]) s.portStocks[pk] = { ...(p.stockMax || {}) };
-      for (const [c, rate] of Object.entries(p.restock)) {
-        const cap = p.stockMax?.[c] ?? 0;
+      const sub = activeSublocation(pk, s);
+      const restock  = sub  ? { ...(p.restock  || {}), ...(sub.restock  || {}) } : p.restock;
+      const stockMax = sub  ? { ...(p.stockMax || {}), ...(sub.stockMax || {}) } : p.stockMax;
+      if (!restock) continue;
+      if (!s.portStocks[pk]) s.portStocks[pk] = { ...(stockMax || {}) };
+      for (const [c, rate] of Object.entries(restock)) {
+        const cap = stockMax?.[c] ?? 0;
         const cur = s.portStocks[pk][c] ?? cap;
         s.portStocks[pk][c] = Math.min(cap, cur + rate);
       }
@@ -6887,6 +6937,12 @@ function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab, lodg
         </div>
       )}
 
+      {(() => {
+        const sub = activeSublocation(gs.location, gs);
+        if (!sub) return null;
+        return <SublocationPanel gs={gs} sub={sub} buyGood={buyGood} taxRate={taxRate} />;
+      })()}
+
       {atHome && takeBottomry && (
         <BottomryPanel gs={gs} takeBottomry={takeBottomry} />
       )}
@@ -6993,6 +7049,61 @@ function GodownPanel({ gs, lodgeGoods, withdrawGoods }) {
 // Mehmet Pasha's panel at the bazaar. Shows current bond if any (with the
 // outcome rules), or the available principals to borrow if not. Repayment
 // only happens automatically on return to Bayan-Kor — not from this panel.
+
+// ─────────── SUBLOCATION PANEL ───────────
+// Renders a sublocation's trade rows when its gate is met. Buy goes through
+// the same buyGood handler as the main wharf — the price multiplier comes
+// from the sublocation's sells map; stocks are tracked in the same
+// portStocks bucket as the port.
+
+function SublocationPanel({ gs, sub, buyGood, taxRate }) {
+  const stocks = gs.portStocks?.[gs.location] || {};
+  const sells = Object.keys(sub.sells || {});
+  if (sells.length === 0) return null;
+  return (
+    <div style={{ marginTop: '1.5rem', padding: '0.9rem 1rem', background: 'rgba(255,255,255,0.3)', borderLeft: '3px solid #5c1a08' }}>
+      <div className="display" style={{ fontSize: '0.9em', color: '#5c1a08', marginBottom: '0.3rem' }}>
+        {sub.label}
+      </div>
+      <p className="italic" style={{ margin: '0 0 0.6rem 0', color: '#4a3220', fontSize: '0.92em' }}>
+        {sub.blurb}
+      </p>
+      {sells.map(c => {
+        const com = COMMODITIES[c];
+        if (!com) return null;
+        const subMult = sub.sells[c];
+        const base = com.basePrice;
+        const fluct = ((Math.abs((gs.day || 1) * 7919 + c.charCodeAt(0)) % 17) - 8) / 100;
+        const price = Math.max(1, Math.round(base * subMult * (1 + fluct)));
+        const onHand = Math.floor(stocks[c] ?? 0);
+        const effPrice = taxRate > 0 ? Math.ceil(price * (1 + taxRate)) : price;
+        const w = com.weight || 1;
+        const remaining = Math.max(0, cargoCap(gs) - cargoWeight(gs.goods));
+        const byMoney = Math.floor(gs.money / Math.max(1, effPrice));
+        const byHold  = w > 0 ? Math.floor(remaining / w) : Infinity;
+        const max = Math.max(0, Math.min(byMoney, byHold, onHand));
+        return (
+          <div key={c} className="trade-row" style={{ borderTop: '1px solid rgba(74,44,20,0.15)', paddingTop: '0.5rem', marginTop: '0.5rem' }}>
+            <div>
+              <div>{com.name}</div>
+              <div style={{ fontSize: '0.85em', color: '#6b4423' }}>
+                £{price} per {com.unit}{taxRate > 0 ? ` (£${effPrice} w/ duty)` : ''} · {com.weight} cwt ea ·{' '}
+                <span style={{ color: onHand === 0 ? '#8b1a1a' : '#6b4423' }}>
+                  {onHand === 0 ? 'none on hand' : `${onHand} on hand`}
+                </span>
+              </div>
+            </div>
+            <div className="actions">
+              <button className="ghost-button-sm" disabled={max < 1} onClick={() => buyGood(c, 1, price)}>Buy 1</button>
+              <button className="ghost-button-sm" disabled={max < 5} onClick={() => buyGood(c, 5, price)}>Buy 5</button>
+              <button className="ghost-button-sm" disabled={max < 1} onClick={() => buyGood(c, max, price)}>Buy max ({max})</button>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 function BottomryPanel({ gs, takeBottomry }) {
   const b = gs.bottomry;

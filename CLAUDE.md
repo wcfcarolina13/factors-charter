@@ -16,9 +16,15 @@ This document is for any future Claude session picking up work on this project. 
 
 ## Where the code lives
 
-Single file: **`/mnt/user-data/outputs/factors_charter.jsx`**
+Single file: **`factors_charter.jsx`** at the repo root. When working inside the artifact, the same file lives at `/mnt/user-data/outputs/factors_charter.jsx` and must be presented to the user after each substantive edit.
 
-Roughly 2,500 lines, single React component tree, default export `FactorsCharter`. Renders as a Claude.ai artifact. The file is monolithic by design — easier to ship as a single artifact, easier to keep in one place. Don't fragment it.
+~9,000 lines, single React component tree, default export `FactorsCharter`. Renders as a Claude.ai artifact. The file is monolithic by design — easier to ship as a single artifact, easier to keep in one place. Don't fragment it.
+
+**Sibling docs at the repo root** (read before any session that touches their domain):
+- `WORLD_NOTES.md` — Bradley's lore feedstock. Required reading before narrative work.
+- `DESIGN_NOTES.md` — design research, sources scoured, decisions made, ordered backlog. Read before any gameplay-shape change.
+- `CHANGELOG.md` — chronological log of what shipped, by session.
+- `HANDOFF.md` — state of the most recent branch. Often ahead of CLAUDE.md.
 
 ---
 
@@ -34,37 +40,59 @@ Roughly 2,500 lines, single React component tree, default export `FactorsCharter
 
 ## Code architecture (top to bottom)
 
-1. **Constants**: `COMMODITIES` (9), `PORTS` (4: Bayan-Kor home, Kota Pinang, Port St. Eustace, The Pelican's Nest), `FACTIONS` (6), `BUILDINGS` (6).
-2. **`makeInitialState(name)`**: returns the starting `gs` object. **Pre-populates two letters** in the inbox (Director letter + Wilbraham's papers) and one open thread (the teak concession hook).
-3. **Game state (`gs`) shape**:
+1. **Registries (top-level constants)**:
+   - `COMMODITIES` (16): pepper, cinnamon, calico, silver, sandalwood, opium, rice, rum, saltpetre, camphor, tobacco, pearls, diamonds, teak, indigo, ambergris, gambier. Pearls/diamonds/ambergris are the **fine-goods** class — high value, near-zero weight.
+   - `PORTS` (6): Bayan-Kor (home), Kota Pinang, Port St. Eustace, The Pelican's Nest, Tanjung Cermin (gated), Fort Marlborough/Bencoolen (Crown).
+   - `PORT_SUBLOCATIONS`: gated extra venues at existing ports (Kota Pinang's inland teak yard, Eustace's Dutch back rooms, the Nest's wreckers' market, the inland plantation warehouse). Surfaced in `PortView` only when their flag/concession unlocks.
+   - `SHIP_TYPES` (pinnace, brigantine), `FACTIONS` (6), `BUILDINGS`, `BUILDING_ARRIVALS` (a building completion delivers a named NPC).
+   - `AUTO_SENDERS`, `LORE`, `MAJOR_COMMITMENTS` (the surfaced "Standing Arrangements"), `SCRIPTED_ARRIVALS`.
+   - `PLATE_*_DATA` constants — six base64-inlined 1720s engravings; `pickPlate(text)` keyword-matches prose; `ImagePlate` renders.
+2. **`makeInitialState(name)`**: returns the starting `gs` object. Pre-populates two letters (Director appointment + Wilbraham's papers) and one open thread (the teak concession hook).
+3. **Game state (`gs`) shape** (high level — `ensureShape(gs)` is the migration funnel for old saves):
    ```
-   { day, location, player, money, goods, reputation, crew, npcs,
-     outpost, awayLog, quotas, daysRemaining,
-     journal[], letters[], hooks[], visited[],
+   { day, location, player, money, goods, ship, portStocks,
+     reputation, crew, npcs (hodge/dass/vizier with stat blocks),
+     outpost (buildings/queue/warehouse), awayLog, quotas, daysRemaining,
+     charterClosed, indiaman, shipCommission,
+     lettersAuto, pendingLetterRequests,
+     privateConsignment, privateTradeProceeds, bottomry,
+     journal[], letters[], hooks[], visited[], acquaintances[],
+     flags{}, aiLog[],
      seenOpening, lettersGenerated, firstLetterPresented }
    ```
-4. **`tickDays(gs, days)`**: pure home-station simulation engine. Drives outpost build queues and away-log accrual.
-5. **AI helpers**: `SYSTEM_PROMPT`, `callClaude`, `stateContext`, `genVoyageEncounter`, `genOutcome(gs, prose, choice, opts)`, `genLetter`, `genArrivalVignette`, `genAwayDigest`. All have fallbacks. The system prompt contains a **WORLD GROUNDING** section that constrains hallucinations.
-6. **`safeStorage`**: get/set/delete with dual backend.
-7. **Vignettes**: 8 hand-drawn SVG line illustrations (`PinnaceVignette`, `HorizonVignette`, `HarborVignette`, `DeskVignette`, `SealVignette`, `MessengerVignette`, `HourglassVignette`, `ChartVignette`). Each uses direct SVG presentation attributes on `<g>` (not CSS style — CSS inheritance for SVG was unreliable). `pickVignette(msg)` keyword-matches loading messages to vignettes.
+4. **`tickDays(gs, days)`**: pure home-station simulation engine. Drives outpost build queues, away-log accrual, raid rolls, auto-letter scheduling, Indiaman/quarterly cadences, and one-off faction-letter triggers. Most new content lands here as a guarded `if` block.
+5. **AI helpers**: `SYSTEM_PROMPT`, `callClaude`, `stateContext`, `genVoyageEncounter`, `genOutcome(gs, prose, choice, opts)`, `genLetter`, `genArrivalVignette`, `genAwayDigest`, `genIndiamanLetterPayload`. All have deterministic fallbacks. The system prompt contains **WORLD GROUNDING** and **PROSE / FLAGS / HOOKS DISCIPLINE** blocks.
+6. **`safeStorage`**: get/set/delete with dual backend (`window.storage` → `localStorage`).
+7. **Vignettes**: 12 hand-drawn SVG line illustrations (the original 8 plus `GodownVignette`, `BrigantineVignette`, `IndiamanVignette`, `PalaceVignette`). Direct SVG presentation attributes on `<g>` — CSS inheritance for SVG was unreliable. `pickVignette(msg)` keyword-matches loading messages.
 8. **`Loading`** component renders the matched vignette above the loading text.
-9. **Components**: `Page`, `Fleuron`, `TitleScreen`, `OpeningSequence`, `GameHub`, `Header`, `Tabs`, `JournalView`, `LedgerView`, `MapView`, `PortView`, `OutpostView`, `AwayDigestScreen`, `LettersView`, `ChangesSummary`, `ProvisionsDrawer`.
-10. **Root**: `FactorsCharter` (default export). Always lands on the title screen first — never auto-resumes.
+9. **Components**: `Page`, `Fleuron`, `ImagePlate`, `TitleScreen`, `OpeningSequence`, `GameHub`, `IllustrationModal`, `ImaginePanel`, `ExportModal`, `Header`, `Tabs`, `JournalView`, `PursueThreadPanel`, `LedgerView`, `MapView`, `PortView`, `GodownPanel`, `OutpostView`, `ScriptedArrivalScreen`, `AwayDigestScreen`, `LettersView`, `ChangesSummary`, `ProvisionsDrawer`.
+10. **Root**: `FactorsCharter` (default export). Always lands on the title screen first — never auto-resumes. Title screen offers per-slot Continue / Renew (charter end, success/partial) / Take up successor / Strike out.
 
 ---
 
 ## Critical conventions and patterns
 
 ### World grounding (do not violate)
-The system prompt explicitly states: home-station characters (Mr. Hodge the clerk, Sgt. Dass, the Vizier, Reverend Pyke at the Mission) only appear at Bayan-Kor or in correspondence. They cannot be encountered at Kota Pinang, Port St. Eustace, or The Pelican's Nest. The Mission is at Bayan-Kor — it is not a separate port. New characters in voyage scenes must be properly introduced (a passing captain, a passenger, a castaway).
+The system prompt explicitly states: home-station characters (Mr. Hodge the clerk, Sgt. Dass, the Vizier, Reverend Pyke at the Mission) only appear at Bayan-Kor or in correspondence. They cannot be encountered at Kota Pinang, Port St. Eustace, The Pelican's Nest, Tanjung Cermin, or Fort Marlborough. The Mission is at Bayan-Kor — it is not a separate port. New characters in voyage scenes must be properly introduced (a passing captain, a passenger, a castaway).
 
-If the AI starts hallucinating these — e.g. "you visit the Reverend at Port St. Eustace" — tighten the per-call prompt's `SCENE CONSTRAINT` line. Don't try to fix it post-hoc in code.
+**Sublocations** (inland teak yard at Kota Pinang; Dutch back rooms at Eustace; wreckers' market at the Nest; the plantation warehouse) are **gated**: they only render in `PortView` when their unlocking flag/concession holds. Don't have the AI describe a sublocation the player hasn't unlocked.
+
+If the AI starts hallucinating any of this — e.g. "you visit the Reverend at Port St. Eustace" — tighten the per-call prompt's `SCENE CONSTRAINT` line. Don't try to fix it post-hoc in code.
 
 ### Letters are instant
 Letter responses do **not** advance time. The `genOutcome` helper takes an `opts.isLetter` flag that tells the model to set `days: 0`, and `handleLetterResponse` belt-and-suspenders strips `days` from the result before applying. Don't break this — the user noticed and complained when phantom days appeared.
 
 ### Inbox style
 All letters (read AND unread) stay visible in the Letters tab. The Journal page shows a persistent "Latest correspondence" card that adapts: bold red wax for unread, subtle "Re-read" for read. The first Director letter auto-opens after the prologue via `firstLetterPresented` flag. Tapping the card opens the letter directly (one tap, not two).
+
+### Multi-step questlines (the established pattern)
+Long plots run as **chains of scripted letters with deterministic `fixedOutcome` branches**, not AI-improvised arcs. Each step is a `make<Name>StepN()` helper returning a letter object; the previous step's `fixedOutcome.changes` sets a flag (e.g. `flags.cylinderOpened = true`); the next step is triggered in `tickDays` gated on that flag plus a day delay. Branching happens at chosen steps via three response choices, each carrying its own `fixedOutcome`. Examples shipped: Faulke / Brotherhood operative (3 steps), the Oilskin Cylinder (2 steps, 3 branches), the Pale Man's Sealed Letter (2 steps, 3 branches), the Wilbraham Mystery (3 steps), Dryden's Speculative Bench → Lord Mountfair. Resolution flags (e.g. `companyFaction`, `mountfairPatron`) are read by the charter-end branching outcomes (knighthood, estate, Resident, Brotherhood). When extending a chain, mirror an existing one — don't invent a new shape.
+
+### Scripted arrivals
+`SCRIPTED_ARRIVALS` is a registry of curated wharf moments. Triggers: `flag`, `location`, `locationIn`, `repAtLeast`, `visited`. `pickArrivalEncounter(gs, dest)` picks the first match on arrival; `ScriptedArrivalScreen` renders deterministic prose + choices. Use this for *payoffs* of plot beats, not generic flavour — first-visit AI vignettes already cover atmosphere.
+
+### Standing Arrangements
+`MAJOR_COMMITMENTS` lists the small set of **player-visible** ongoing arrangements (Dutch trade pass, Brotherhood compact, teak concession, Pyke's school subscription, &c.). Each entry carries a label function over `gs`. Surfaced in the Ledger as "Standing Arrangements." Deliberately curated — do **not** auto-flatten every flag here, that's the AI-flag spam we explicitly suppressed.
 
 ### Vignettes
 Loading screens have an enforced minimum visible duration of **800ms** via wrapped `setPending` in `GameHub`. This is non-negotiable — without it, fast API responses make the vignettes flash too briefly to register and the user thinks they're broken (user reported this).
@@ -84,13 +112,19 @@ If you need to add a new loading vignette: add the SVG component, add a keyword 
 - Download manuscript creates a timestamped `.json` file via Blob + anchor click — works on mobile.
 - Restore parses pasted JSON, validates structure (`parsed.gs.player`, `parsed.gs.day !== undefined`).
 
+### Save shape evolution (`ensureShape`)
+`ensureShape(gs)` is the migration funnel for old saves. New top-level fields go in as `if (!next.X) next.X = default`. Never read a `gs` field without going through `ensureShape` on load. When you can't migrate cleanly, the title screen's Begin Anew is the answer — tell the user to wipe.
+
+### Charter end, renewal, succession
+At `daysRemaining === 0` the charter closes: `gs.charterClosed = { day, outcome }` is set, a final Director letter lands, the HUD swaps to "CHARTER CLOSED", and Indiaman / quarterly nags / one-off triggers all gate on `!charterClosed`. The title screen surfaces two paths: **Renew** (same Factor, fresh 3-year clock — only on success/partial outcomes) and **Take up the Charter** as named successor (fresh Factor, world state persists: standing, godown, brigantine, outpost). The four narrative end-states (knighthood, estate, Resident, Brotherhood) are read off the questline-resolution flags accumulated through play.
+
 ### Editing the file
-- **Always use `view` or `bash grep` to verify content before `str_replace`.** The file evolves rapidly and prior context may be stale.
+- **Always use `Read` or `grep` to verify content before `Edit`.** The file evolves rapidly and prior context may be stale.
 - **Run a parser sanity check after edits**:
   ```
-  node -e "const p=require('/tmp/node_modules/@babel/parser'); const fs=require('fs'); const c=fs.readFileSync('/mnt/user-data/outputs/factors_charter.jsx','utf8'); try { p.parse(c,{sourceType:'module',plugins:['jsx']}); console.log('OK'); } catch(e) { console.log('ERR:',e.message); }"
+  node -e "const p=require('/tmp/node_modules/@babel/parser'); const fs=require('fs'); const c=fs.readFileSync('factors_charter.jsx','utf8'); try { p.parse(c,{sourceType:'module',plugins:['jsx']}); console.log('OK',c.split('\n').length,'lines'); } catch(e) { console.log('ERR:',e.message); }"
   ```
-- **Use `present_files`** to surface the updated file to the user after each substantive edit.
+- In an artifact session, **surface the updated file to the user** after each substantive edit.
 
 ---
 
@@ -136,11 +170,13 @@ He has a Drive folder for this project (id `1yqTKacEuy4j3_Ph2QR5CKr1T_xIqpjeU`, 
 
 ---
 
-## World-building feedstock
+## World-building feedstock & design feedstock
 
-Read `WORLD_NOTES.md` at the repo root before any session that touches narrative or new content. It's Bradley's notebook — inspirations, names he likes, anti-patterns, open hooks in plain English, and a record of which real-world references have already been transposed into the fictional SE-Asian setting (e.g. Bacalar → Tanjung Cermin). When new entries appear in the "INSPIRATIONS PENDING" section, translate them: usually one or more of `LORE`, `PORTS`, an auto-letter sender, an event hook. Never copy a real-world place 1:1 — always transpose for the world's geography.
+**Narrative work** → read `WORLD_NOTES.md` first. It's Bradley's notebook — inspirations, names he likes, anti-patterns, open hooks in plain English, and a record of which real-world references have already been transposed into the fictional SE-Asian setting (e.g. Bacalar → Tanjung Cermin). When new entries appear in the "INSPIRATIONS PENDING" section, translate them: usually one or more of `LORE`, `PORTS`, an auto-letter sender, an event hook. Never copy a real-world place 1:1 — always transpose for the world's geography.
 
-The runtime `LORE` registry in `factors_charter.jsx` is the bridge: lore entries are surfaced to the AI in `stateContext` only when their triggers (location, flag, faction standing, visited) match. Keep entries tight (2–4 short sentences) — every line costs prompt budget on every relevant call.
+**Gameplay-shape work** (mechanics, new systems, rebalances) → read `DESIGN_NOTES.md` first. It's the joint design notebook: research surveyed (Morrowind/EEC, Tamriel Rebuilt, Robinson Crusoe, period mercantile reality, Patrician/Anno/CK3/Port Royale), candidate moves, anti-patterns ruled out, and an ordered backlog. Add to the backlog with a date stamp rather than chatting decisions away.
+
+The runtime `LORE` registry in `factors_charter.jsx` is the bridge: lore entries are surfaced to the AI in `stateContext` only when their triggers (location, flag, faction standing, visited) match. Capped at 3 entries per prompt. Keep entries tight (2–4 short sentences) — every line costs prompt budget on every relevant call.
 
 ---
 

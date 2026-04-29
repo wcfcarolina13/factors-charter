@@ -3173,7 +3173,11 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
           setGs(prev => ({ ...prev, aiLog: pushAiLog(prev.aiLog, log) }));
         }
       } else {
+        // Revisits: no vignette, but we MUST clear the pending state set
+        // during sailTo's "voyage uneventful" message — otherwise the
+        // loading screen sticks forever and the player has to restart.
         setArrivalProse(null);
+        setPending(false);
       }
       // After the standard arrival surface, check for any scripted encounter
       // whose triggers match. Curated payoffs for hooks the player has

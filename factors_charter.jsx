@@ -39,6 +39,14 @@ const COMMODITIES = {
   // Indian dyestuff. The Hollanders trade it on their own books at
   // Eustace; in the back rooms, the price is more agreeable.
   indigo:     { name: 'Indigo',     unit: 'cake',   basePrice: 22,  weight: 0.5  },
+  // Salvaged from whale carcasses; period-real, used in perfume; near-
+  // weightless, fortune-bearing. The wreckers at the Pelican's Nest take
+  // what the sea returns.
+  ambergris:  { name: 'Ambergris',  unit: 'lump',   basePrice: 150, weight: 0.04 },
+  // Malay catechu, an extract of the gambir vine, used in tanning and
+  // dyeing. Bulky, mid-priced, the kind of cargo a plantation warehouse
+  // turns out by the season.
+  gambier:    { name: 'Gambier',    unit: 'cake',   basePrice: 9,   weight: 1.2  },
 };
 
 // Each port has finite stocks of what it sells, replenishing over time.
@@ -74,7 +82,7 @@ const PORTS = {
     sells: { calico: 0.75, opium: 0.85, saltpetre: 0.8, tobacco: 0.8 },
     stockMax: { calico: 60, opium: 14, saltpetre: 24, tobacco: 30 },
     restock:  { calico: 0.5, opium: 0.15, saltpetre: 0.3, tobacco: 0.4 },
-    buys:  { pepper: 1.4, cinnamon: 1.5, sandalwood: 1.2, silver: 1.05, camphor: 1.4, pearls: 1.35 },
+    buys:  { pepper: 1.4, cinnamon: 1.5, sandalwood: 1.2, silver: 1.05, camphor: 1.4, pearls: 1.35, ambergris: 1.5, gambier: 1.25 },
     faction: 'dutch', rivalRisk: true,
     // Port duty levied on every transaction. Modulated by Dutch standing
     // through portTaxRate(). The Calvinist clerks miss nothing.
@@ -116,7 +124,7 @@ const PORTS = {
     sells: { saltpetre: 0.65, calico: 0.85 },
     stockMax: { saltpetre: 24, calico: 40 },
     restock:  { saltpetre: 0.3, calico: 0.5 },
-    buys:  { pepper: 1.5, cinnamon: 1.6, sandalwood: 1.3, camphor: 1.5, pearls: 1.4, diamonds: 1.5, teak: 1.6, indigo: 1.4 },
+    buys:  { pepper: 1.5, cinnamon: 1.6, sandalwood: 1.3, camphor: 1.5, pearls: 1.4, diamonds: 1.5, teak: 1.6, indigo: 1.4, ambergris: 1.6, gambier: 1.3 },
     faction: 'crown',
     yard: 'fine',
     yardBlurb: 'Crown carpenters at the King\u2019s pay \u2014 close work, no Dutchman\u2019s premium, the figures plainly written.',
@@ -147,6 +155,24 @@ const PORT_SUBLOCATIONS = {
     sells:    { indigo: 0.65 },
     stockMax: { indigo: 16 },
     restock:  { indigo: 0.3 },
+  },
+  'The Pelican’s Nest': {
+    key: 'wreckers-market',
+    label: 'THE WRECKERS\' MARKET',
+    blurb: 'A scattered stall under a tarpaulin behind the cove, where what the sea returns is laid out for the discerning buyer. Ambergris washed up at the reef; the price is what the wreckers ask, and the wreckers know what they have.',
+    gate: (gs) => (gs.reputation?.pirates || 0) >= 20,
+    sells:    { ambergris: 0.7 },
+    stockMax: { ambergris: 5 },
+    restock:  { ambergris: 0.04 },
+  },
+  'Bayan-Kor': {
+    key: 'plantation-warehouse',
+    label: 'THE PLANTATION WAREHOUSE',
+    blurb: 'A small store-shed at the edge of yr. own pepper plantation, where Aman Singh\'s men cake the gambir vine extract in season. Mid-bulk, mid-price; fair to a Factor whose foreman is paid by the Company.',
+    gate: (gs) => !!gs.outpost?.buildings?.plantation?.built,
+    sells:    { gambier: 0.7 },
+    stockMax: { gambier: 30 },
+    restock:  { gambier: 0.4 },
   },
 };
 
@@ -744,6 +770,10 @@ const LONDON_MULT = {
   // Sublocation commodities — teak for the brigantine yards back home,
   // indigo as a Dutch off-ledger trade good.
   teak: 2.6, indigo: 3.0,
+  // Ambergris is the highest London markup of any commodity — the
+  // perfumiers of Mayfair will pay anything. Gambier is the steady
+  // tanning trade.
+  ambergris: 6.0, gambier: 2.2,
 };
 const londonValue = (commodity, qty) => {
   const c = COMMODITIES[commodity];

@@ -867,20 +867,21 @@ function makeQuarterlyNagLetter(s) {
                      && lodgedPep === 0 && lodgedCinn === 0;
   const reckoning    = `${totalPepper} of 400 pepper and ${totalCinn} of 200 cinnamon shipped, with ${lodgedPep} and ${lodgedCinn}cwt respectively in yr. godown awaiting the next call.`;
   const rival = rivalLine(s);
+  const dryden = drydenQuarterlyAddendum(s);
 
   let subject, body;
   if (nothingYet) {
     subject = 'A First Quarterly Note';
-    body = `Sir, — We open yr. file at the Court for the present charter. The first Indiaman is despatched in due course; we shall expect a return at her holds. We pray you have laid the ground.\n\nWe are mindful of the climate, the politics, and the price of plank. We are mindful also that the late Mr. Wilbraham held the post for two years on similar excuses.\n\nYr. obedt. servants, the Court of Directors.`;
+    body = `Sir, — We open yr. file at the Court for the present charter. The first Indiaman is despatched in due course; we shall expect a return at her holds. We pray you have laid the ground.\n\nWe are mindful of the climate, the politics, and the price of plank. We are mindful also that the late Mr. Wilbraham held the post for two years on similar excuses.\n\nYr. obedt. servants, the Court of Directors.${dryden}`;
   } else if (finalStretch && !onTrack) {
     subject = 'A Pointed Word';
-    body = `Sir, — A reckoning at this hand: ${reckoning}${rival} The third year is upon us, and the figures are not what we are owed. The Court has the names of two replacements before it. We trust you take our meaning.\n\nYr. servants, the Court of Directors.`;
+    body = `Sir, — A reckoning at this hand: ${reckoning}${rival} The third year is upon us, and the figures are not what we are owed. The Court has the names of two replacements before it. We trust you take our meaning.\n\nYr. servants, the Court of Directors.${dryden}`;
   } else if (onTrack) {
     subject = 'Yr. Progress Noted';
-    body = `Sir, — Returns reckon ${reckoning}${rival} The Court is content with the present pace. Press on.\n\nYr. obedt. servants, the Court of Directors.`;
+    body = `Sir, — Returns reckon ${reckoning}${rival} The Court is content with the present pace. Press on.\n\nYr. obedt. servants, the Court of Directors.${dryden}`;
   } else {
     subject = 'A Quarterly Reminder';
-    body = `Sir, — We have to remind you that the present hand finds the books at ${reckoning}${rival} The next Indiaman comes round in due course, and we shall watch what she brings.\n\nYr. servants, the Court of Directors.`;
+    body = `Sir, — We have to remind you that the present hand finds the books at ${reckoning}${rival} The next Indiaman comes round in due course, and we shall watch what she brings.\n\nYr. servants, the Court of Directors.${dryden}`;
   }
   return {
     id: 3000000 + s.day,
@@ -1149,6 +1150,80 @@ Edward Whitcombe, Captain.`,
     ],
     read: false,
   };
+}
+
+// ─────────── THE COMPANY'S OTHER VOICE: MR. DRYDEN ───────────
+// The Honourable Company is not monolithic. The Court of Directors is split,
+// in private, between a senior Conservative bench (the existing Director
+// voice — quotas met, paperwork in order, deference to Madras protocols)
+// and a Speculative bench led by one Mr. Dryden, who favours private trade,
+// country shipping, and ambitious returns even at the price of an irregularity.
+// Once around day 150 the Factor receives Dryden's first letter — a personal
+// note, not on Company paper. The response sets gs.flags.companyFaction =
+// 'speculative' | 'conservative' | 'declined', which then influences the
+// tone of subsequent quarterly nags and the final charter-end letter.
+
+function makeDrydenLetter(s) {
+  return {
+    id: 9400000 + s.day,
+    from: 'Mr. Edmund Dryden, of the Court of Directors',
+    subject: 'A note in private',
+    body: `Sir, — This is not on Company paper, nor on the formal record. I am one of those Directors who concern themselves more with what may be made than with what has been weighed; the Court is, in private, divided as such matters always are.
+
+Yr. station has been remarked upon for some time. There are at this hand two views of yr. work: the senior bench's, which sees what is in the books at Leadenhall and writes in proper terms; and mine, which is concerned with what an enterprising Factor in yr. waters might do beyond the proper terms. Private trade, country trade, the small contracts that do not crowd the Indiaman and yet pay better than her — these are matters of which I should be glad to hear.
+
+If you choose to write to me upon them, do so by my own hand here. I shall send acknowledgements through the same channel and not by yr. file at the Court.
+
+Yr. obedt. servant in private,
+Edmund Dryden`,
+    responses: [
+      {
+        label: 'Reply formally; thank him, write nothing private',
+        seed: 'standing with the conservative bench held; speculative declines but no insult',
+        fixedOutcome: {
+          prose: 'You write a brief note acknowledging the kindness and pleading the press of yr. office. The reply is not unfriendly; it does not invite a sequel. The senior bench remains yr. only correspondent at the Court.',
+          changes: {
+            reputation: { company: 1 },
+            flags: { drydenLetterSent: true, companyFaction: 'conservative' },
+            journal: 'Replied formally to Mr. Dryden of the Speculative Bench; declined a private correspondence. The conservative bench is yr. only voice at the Court.',
+          },
+        },
+      },
+      {
+        label: 'Write back at length about yr. private enterprise',
+        seed: 'speculative alignment; backer found; risk of conservative cooling',
+        fixedOutcome: {
+          prose: 'You sit four hours at yr. desk composing a careful letter — what the godown has held, what the Indiaman has lifted on yr. private account, what country trade you have laid yr. hand to. Hodge copies it twice. Dryden\'s answer comes within the year: a Director who reads what you write and answers in his own hand. The senior bench\'s tone, by report, is fractionally cooler thereafter.',
+          changes: {
+            reputation: { company: 3 },
+            flags: { drydenLetterSent: true, companyFaction: 'speculative' },
+            journal: 'Wrote at length to Mr. Dryden of the Speculative Bench. He answers in his own hand. The conservative bench has noticed the absence of Madras-format paper.',
+            hook: 'Yr. private file with Mr. Dryden grows. The senior bench is, on report, fractionally cooler.',
+          },
+        },
+      },
+      {
+        label: 'Decline the correspondence; this is not how a Factor works',
+        seed: 'conservative gain; speculative offended',
+        fixedOutcome: {
+          prose: 'You write a curt note refusing the private channel and citing the proprieties of yr. office. Dryden does not reply; he does not, however, forget. Yr. file at the Court is, by all accounts, in proper Madras format and growing thicker.',
+          changes: {
+            reputation: { company: 4 },
+            flags: { drydenLetterSent: true, companyFaction: 'declined' },
+            journal: 'Refused Mr. Dryden\'s private correspondence on principle. The senior bench knows it; the speculative bench will remember it.',
+          },
+        },
+      },
+    ],
+    read: false,
+  };
+}
+
+// Returns a short addendum paragraph when the speculative faction is held,
+// to be appended to the existing quarterly nag body. Empty string otherwise.
+function drydenQuarterlyAddendum(s) {
+  if (s.flags?.companyFaction !== 'speculative') return '';
+  return `\n\n[Folded into the same packet, in another hand:]\nMr. Dryden remarks that yr. private returns of late have been read with interest. He asks if you have considered the diamond trade at the Madras yard, and would thank you for word on the matter when next a packet permits. — E.D.`;
 }
 
 // ─────────── THE HODGE CRISIS ───────────
@@ -2440,6 +2515,23 @@ function tickDays(gs, days) {
       s.awayLog.push({ day: s.day, type: 'letter', text: 'A King’s letter under a Royal Navy seal — Capt. Whitcombe of HMS Adventure.' });
     }
 
+    // ── Mr. Dryden of the Speculative Bench: a private letter from a
+    // Director of the Court of Directors who concerns himself with private
+    // trade and country shipping, in counterpoint to the senior bench.
+    // One-off; the player's reply sets companyFaction = speculative |
+    // conservative | declined, which colours subsequent quarterly nags.
+    if (
+      !s.charterClosed &&
+      !s.flags?.drydenLetterSent &&
+      s.day >= 150
+    ) {
+      const letter = makeDrydenLetter(s);
+      s.letters = [...s.letters, letter];
+      s.lettersGenerated = (s.lettersGenerated || 0) + 1;
+      s.flags = { ...(s.flags || {}), drydenLetterSent: true };
+      s.awayLog.push({ day: s.day, type: 'letter', text: 'A private letter, not on Company paper — from one Mr. Dryden of the Court.' });
+    }
+
     // ── Hodge crisis: once after day 200, when Hodge's drinking has run
     // long enough to tip into a real episode. Sgt. Dass writes; the player
     // chooses what to do with him. Won't fire if Hodge has already been
@@ -2769,6 +2861,24 @@ const MAJOR_COMMITMENTS = [
       v === 'declined'                 ? 'Capt. Faulke’s proposal — declined.' :
       null },
   { key: 'brotherhoodAlerted', label: (v) => v ? 'The Brotherhood knows you informed.' : null },
+  { key: 'companyFaction', label: (v) =>
+      v === 'speculative'  ? 'A private correspondence with Mr. Dryden of the Speculative Bench.' :
+      v === 'conservative' ? 'Yr. file is held in proper Madras format with the senior bench.' :
+      v === 'declined'     ? 'You refused Mr. Dryden\'s private channel; he has not forgotten.' :
+      null },
+  { key: 'cylinderQuest', label: (v) =>
+      v === 'pending'              ? 'Idris\'s cylinder lies under yr. weights; he has written.' :
+      v === 'opened'               ? 'You have read Idris\'s Bugis schedules; the matter is yrs. to resolve.' :
+      v === 'returning'            ? 'Idris\'s cylinder is set aside for Hamzah at Kota Pinang.' :
+      v === 'held'                 ? 'Idris\'s cylinder still sits unanswered; pressure may grow.' :
+      v === 'closed-sold-bugis'    ? 'Said bin Mahmood has the schedules; £80 in unmarked silver.' :
+      v === 'closed-sold-crown'    ? 'The Crown has Idris\'s schedules; the Brotherhood will hear.' :
+      v === 'closed-burned'        ? 'You burned Idris\'s schedules; the matter is closed.' :
+      v === 'closed-honor'         ? 'Hamzah received the cylinder unopened; the Bugis houses note it.' :
+      v === 'closed-handed-over'   ? 'You handed the cylinder to the unnamed Bugis caller.' :
+      v === 'closed-refused'       ? 'You refused the unnamed caller; the watch is heavier.' :
+      v === 'closed-forged'        ? 'A forged copy was given; the original sleeps in yr. strongbox.' :
+      null },
 ];
 
 function commitmentsFor(gs) {

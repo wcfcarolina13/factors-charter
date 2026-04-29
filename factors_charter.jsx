@@ -1045,6 +1045,97 @@ Edward Whitcombe, Captain.`,
   };
 }
 
+// ─────────── THE HODGE CRISIS ───────────
+// Once per charter, around day 200+, Hodge's drinking finally tips into a
+// real crisis — he's gone missing for three days, found at the back of the
+// godown, the ledger has not been kept. The player must choose what to do
+// with him. The four responses each change the household concretely:
+//
+//   - Send him to the Reverend for a course of temperance: costs £40,
+//     Hodge's sobriety jumps and stays high for the rest of the charter
+//     (a permanent npcs.hodge.reformed flag); his loyalty rises.
+//   - Send him home to Bristol on the next Indiaman: he is replaced by
+//     Mr. Tyler, a sober but mediocre junior clerk. Hodge is gone.
+//   - Hire a junior to share the work: £60 up front + £2/month wage; a
+//     new acquaintance, "Mr. Coombe", arrives. Hodge stays as he is.
+//     Adds a second clerk in the household for the rest of the charter.
+//   - Accept it; the man has earned that much: Hodge stays, no cost,
+//     but his sobriety floor is lowered (he will hit 0 sometimes).
+
+function makeHodgeCrisisLetter(s) {
+  return {
+    id: 9000000 + s.day,
+    from: 'Sgt. Dass, on yr. behalf',
+    subject: 'Concerning Mr. Hodge',
+    body: `Sir, — I write at the urging of the household, with apologies for the liberty.
+
+Mr. Hodge has been three days from his desk. We found him this morning behind the cinnamon bales at the back of the godown, in such a condition as I shall not describe, with the ledger unkept since Monday and a Bugis trader at the gate who has gone away unsatisfied. The Reverend has been to see him; he weeps and is sorry, as he has been before.
+
+I do not pretend to advise yr. office, but the matter cannot stand as it has stood. There are four ways forward that the Reverend and I have between us considered, set out below.
+
+Yr. obedt. servant,
+Dass`,
+    responses: [
+      {
+        label: 'Send him to the Reverend for a course of temperance',
+        seed: 'reformed; sobriety holds; cost paid',
+        fixedOutcome: {
+          prose: 'You commit Hodge to the Reverend Pyke for the season. Forty pounds is paid out — for the Mission’s trouble and the man’s board — and Hodge is closed up with the catechist and the curate for the better part of three months. He emerges in October a thinner man, his hand steady, his ledger again immaculate. He weeps once at the door of the chapel and does not weep again.',
+          changes: {
+            money: -40,
+            reputation: { mission: 5 },
+            flags: { hodgeCrisis: 'reformed' },
+            journal: 'Sent Mr. Hodge to the Reverend for a course of temperance. £40 disbursed. He is, by all accounts, a different man from the one we found.',
+            hook: 'Hodge’s sobriety is the Reverend’s achievement — and the Reverend will remember it.',
+          },
+        },
+      },
+      {
+        label: 'Send him home to Bristol on the next Indiaman',
+        seed: 'hodge replaced by mr. tyler; the household is changed',
+        fixedOutcome: {
+          prose: 'Hodge is put aboard the next Indiaman with two trunks and a letter to his wife. He shakes Dass’s hand at the dock and does not look back. Six weeks later Mr. Tyler arrives from Madras — a sober, dutiful, plodding clerk of perhaps two-and-twenty, with a hand that is legible if not quick.',
+          changes: {
+            flags: { hodgeCrisis: 'sent_home' },
+            journal: 'Sent Mr. Hodge home to Bristol. Mr. Tyler of the Madras establishment will replace him.',
+            hook: 'Mr. Tyler is sober and earnest, but Hodge knew the weights and measures of every Bugis prahu in the strait. We shall miss that knowledge.',
+            newAcquaintances: [
+              { name: 'Mr. Tyler', role: 'Junior Clerk', location: 'Bayan-Kor', notes: 'Replaced Mr. Hodge on the Madras establishment\'s recommendation. Sober, dutiful, slow.' },
+            ],
+          },
+        },
+      },
+      {
+        label: 'Hire a junior clerk to share Mr. Hodge\'s work',
+        seed: 'mr. coombe arrives; hodge stays; the household has a second clerk',
+        fixedOutcome: {
+          prose: 'You write to Madras for a junior; the answer comes by the next packet, in the form of one Mr. Coombe — twenty-three years old, half a Cornishman, a hand fair as Wilbraham’s ever was. £60 is paid for his passage and the first quarter of his wage; thereafter £2 a month is added to the household account. Hodge receives him with damp gratitude. The ledger is again kept.',
+          changes: {
+            money: -60,
+            flags: { hodgeCrisis: 'junior_hired' },
+            journal: 'Engaged Mr. Coombe of Madras as a junior clerk. £60 paid; £2/month thereafter. Hodge remains as he is.',
+            newAcquaintances: [
+              { name: 'Mr. Coombe', role: 'Junior Clerk', location: 'Bayan-Kor', notes: 'Hired to share Mr. Hodge\'s work. Twenty-three, Cornish, a fair hand.' },
+            ],
+          },
+        },
+      },
+      {
+        label: 'Accept it; the man has earned that much',
+        seed: 'no change; hodge stays as he is, with worse days ahead',
+        fixedOutcome: {
+          prose: 'You let the matter stand. Hodge is given a week’s rest and returned to his desk; he is grateful and ashamed in equal measure. Dass takes the cinnamon ledger from him for a fortnight to give him room to recover. The household runs on as before — which is to say, as well as Hodge can manage on his good days, and not at all on his bad.',
+          changes: {
+            flags: { hodgeCrisis: 'accepted' },
+            journal: 'Decided to let Mr. Hodge be. He is grateful. We shall see.',
+          },
+        },
+      },
+    ],
+    read: false,
+  };
+}
+
 // ─────────── BROTHERHOOD OPERATIVE QUESTLINE (3 STEPS) ───────────
 // First multi-step plot in the game. Pattern: each step is a letter with
 // fixedOutcome responses. Each response sets a flag that gates the next
@@ -1427,22 +1518,34 @@ function tickDays(gs, days) {
       }
     }
 
-    // ── Hodge: drunkenness roll
-    const drunkChance = Math.max(0.04, (100 - s.npcs.hodge.sobriety) / 220);
-    if (Math.random() < drunkChance && (s.day - s.npcs.hodge.lastDrunk) > 4) {
-      const hit = 6 + Math.floor(Math.random() * 8);
-      s.npcs.hodge.sobriety = Math.max(0, s.npcs.hodge.sobriety - hit);
+    // ── Hodge: drunkenness roll. The crisis resolution flag changes the
+    // rules: 'reformed' raises the floor and slows episodes; 'sent_home'
+    // skips his rolls entirely; 'accepted' makes them slightly worse;
+    // 'junior_hired' leaves Hodge as he was.
+    const hodgeState = s.flags?.hodgeCrisis;
+    if (hodgeState === 'sent_home') {
+      // Hodge is gone — Mr. Tyler has the desk now and doesn't drink.
+    } else if (Math.random() < (Math.max(0.04, (100 - s.npcs.hodge.sobriety) / 220) * (hodgeState === 'reformed' ? 0.2 : hodgeState === 'accepted' ? 1.2 : 1)) && (s.day - s.npcs.hodge.lastDrunk) > 4) {
+      const hit = (hodgeState === 'reformed' ? 3 : hodgeState === 'accepted' ? 8 : 6) + Math.floor(Math.random() * 8);
+      const floor = hodgeState === 'reformed' ? 60 : 0;
+      s.npcs.hodge.sobriety = Math.max(floor, s.npcs.hodge.sobriety - hit);
       s.npcs.hodge.lastDrunk = s.day;
-      const lines = [
-        'Mr. Hodge was found insensible behind the godown.',
-        'Mr. Hodge missed the morning ledger entirely; the rum was at fault.',
-        'Mr. Hodge wept on Sgt. Dass\u2019s shoulder for an hour, then slept.',
-        'Mr. Hodge mistook a Bugis trader for his late wife; the matter was smoothed.',
-      ];
+      const lines = hodgeState === 'reformed'
+        ? [
+            'Mr. Hodge took a single glass at supper; Sgt. Dass had a quiet word.',
+            'Mr. Hodge was tempted at the wharf, and refused. The Reverend was told and was content.',
+          ]
+        : [
+            'Mr. Hodge was found insensible behind the godown.',
+            'Mr. Hodge missed the morning ledger entirely; the rum was at fault.',
+            'Mr. Hodge wept on Sgt. Dass\u2019s shoulder for an hour, then slept.',
+            'Mr. Hodge mistook a Bugis trader for his late wife; the matter was smoothed.',
+          ];
       s.awayLog.push({ day: s.day, type: 'npc', npc: 'hodge', text: lines[Math.floor(Math.random() * lines.length)] });
-    } else {
-      // slow recovery
-      if (Math.random() < 0.3) s.npcs.hodge.sobriety = Math.min(100, s.npcs.hodge.sobriety + 1);
+    } else if (hodgeState !== 'sent_home') {
+      // slow recovery \u2014 faster if reformed
+      const recoverChance = hodgeState === 'reformed' ? 0.55 : 0.3;
+      if (Math.random() < recoverChance) s.npcs.hodge.sobriety = Math.min(100, s.npcs.hodge.sobriety + 1);
     }
 
     // ── Dass: occasional report
@@ -1676,6 +1779,24 @@ function tickDays(gs, days) {
       s.lettersGenerated = (s.lettersGenerated || 0) + 1;
       s.flags = { ...(s.flags || {}), crownLetterSent: true };
       s.awayLog.push({ day: s.day, type: 'letter', text: 'A King’s letter under a Royal Navy seal — Capt. Whitcombe of HMS Adventure.' });
+    }
+
+    // ── Hodge crisis: once after day 200, when Hodge's drinking has run
+    // long enough to tip into a real episode. Sgt. Dass writes; the player
+    // chooses what to do with him. Won't fire if Hodge has already been
+    // sent home or reformed in a prior crisis.
+    if (
+      !s.charterClosed &&
+      !s.flags?.hodgeCrisisLetterSent &&
+      !s.flags?.hodgeCrisis &&
+      s.day >= 200 &&
+      (s.npcs?.hodge?.sobriety || 100) <= 35
+    ) {
+      const letter = makeHodgeCrisisLetter(s);
+      s.letters = [...s.letters, letter];
+      s.lettersGenerated = (s.lettersGenerated || 0) + 1;
+      s.flags = { ...(s.flags || {}), hodgeCrisisLetterSent: true };
+      s.awayLog.push({ day: s.day, type: 'letter', text: 'A note in Sgt. Dass’s careful hand — concerning Mr. Hodge.' });
     }
 
     // ── Brotherhood operative questline (Faulke).
@@ -5419,8 +5540,26 @@ function LedgerView({ gs }) {
               <div className="display" style={{ fontSize: '1.05em', color: '#5c1a08' }}>{n.name}</div>
               <div style={{ fontSize: '0.85em', color: '#6b4423', marginBottom: '0.5rem', fontStyle: 'italic' }}>{n.role}</div>
               {key === 'hodge' && <>
-                {stateBar('Sobriety', n.sobriety, n.sobriety < 30 ? '#8b1a1a' : '#5c1a08')}
-                {stateBar('Loyalty', n.loyalty)}
+                {gs.flags?.hodgeCrisis === 'sent_home' ? (
+                  <div className="italic" style={{ color: '#6b4423', fontSize: '0.88em' }}>
+                    Sent home to Bristol. Mr. Tyler holds the desk now.
+                  </div>
+                ) : (
+                  <>
+                    {stateBar('Sobriety', n.sobriety, n.sobriety < 30 ? '#8b1a1a' : '#5c1a08')}
+                    {stateBar('Loyalty', n.loyalty)}
+                    {gs.flags?.hodgeCrisis === 'reformed' && (
+                      <div className="italic" style={{ color: '#3a5c2a', fontSize: '0.82em', marginTop: '0.2rem' }}>
+                        — under the Reverend’s temperance.
+                      </div>
+                    )}
+                    {gs.flags?.hodgeCrisis === 'junior_hired' && (
+                      <div className="italic" style={{ color: '#6b4423', fontSize: '0.82em', marginTop: '0.2rem' }}>
+                        — Mr. Coombe shares the work.
+                      </div>
+                    )}
+                  </>
+                )}
               </>}
               {key === 'dass' && <>
                 {stateBar('Loyalty', n.loyalty)}

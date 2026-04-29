@@ -3125,6 +3125,9 @@ const MAJOR_COMMITMENTS = [
       v === 'closed-half-contract' ? 'A reduced contract with the pale man — half the cargo, less the risk.' :
       v === 'closed-declined-late' ? 'You declined the pale man\'s offer at the Kota Pinang wharf.' :
       v === 'closed-crown-bounty'  ? 'The Crown took the pale man (Mr. Holcombe of the Bombay establishment); £120 bounty paid.' :
+      v === 'closed-delivered'     ? 'The contract is fulfilled. Opium delivered at Eustace under cover; £400 paid.' :
+      v === 'closed-delivered-half'? 'The reduced contract is fulfilled. £200 paid by the trusted runner.' :
+      v === 'closed-caught'        ? 'Caught at the Eustace customs. The cargo is gone, the Dutch know yr. face.' :
       null },
   { key: 'cylinderQuest', label: (v) =>
       v === 'pending'              ? 'Idris\'s cylinder lies under yr. weights; he has written.' :
@@ -5289,6 +5292,63 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
     }));
   };
 
+  // ─── PALE MAN'S CONTRACT — DELIVERY MECHANIC ───
+  // Lift opium at the Pelican's Nest under Said bin Mahmood's name.
+  // Drop at Port St. Eustace: customs check, branched by trade pass and
+  // Dutch standing. Success pays the second half of the contract;
+  // capture voids the contract and crashes Dutch standing.
+  const liftContractOpium = () => {
+    if (gs.location !== 'The Pelican’s Nest') return;
+    const stage = gs.flags?.paleManQuest;
+    if (stage !== 'closed-contracted' && stage !== 'closed-half-contract') return;
+    if (gs.flags?.contractOpiumLifted) return;
+    const cwt = stage === 'closed-half-contract' ? 2 : 4;
+    setGs(prev => ({
+      ...prev,
+      goods: { ...prev.goods, opium: (prev.goods.opium || 0) + cwt },
+      flags: { ...(prev.flags || {}), contractOpiumLifted: cwt },
+      journal: [...prev.journal, { day: prev.day, entry: `Lifted ${cwt} cwt of opium under Said bin Mahmood's name at the Pelican's Nest. The drop at Eustace remains.` }],
+    }));
+  };
+
+  const runDutchCustoms = () => {
+    if (gs.location !== 'Port St. Eustace') return;
+    const lifted = gs.flags?.contractOpiumLifted;
+    if (!lifted) return;
+    if (gs.flags?.paleManQuest !== 'closed-contracted' && gs.flags?.paleManQuest !== 'closed-half-contract') return;
+    const isHalf = gs.flags.paleManQuest === 'closed-half-contract';
+    // Catch chance: 30% base; trade pass cuts to 5%; Dutch standing >= +20 trims further.
+    let catchChance = 0.30;
+    if (gs.flags?.dutchTradePass) catchChance = 0.05;
+    if ((gs.reputation?.dutch || 0) >= 20) catchChance = Math.max(0.02, catchChance - 0.10);
+    const caught = Math.random() < catchChance;
+    setGs(prev => {
+      const next = { ...prev };
+      // Cargo leaves the hold either way.
+      next.goods = { ...next.goods, opium: Math.max(0, (next.goods.opium || 0) - lifted) };
+      const flags = { ...(next.flags || {}) };
+      delete flags.contractOpiumLifted;
+      if (caught) {
+        // Dutch customs find the cargo. Heavy standing penalty + cargo
+        // confiscated; advance kept but final payment void.
+        next.reputation = { ...(next.reputation || {}), dutch: Math.max(-100, (next.reputation?.dutch || 0) - 30) };
+        flags.paleManQuest = 'closed-caught';
+        next.flags = flags;
+        next.journal = [...next.journal, { day: next.day, entry: `Caught at the Eustace customs with ${lifted} cwt of unmanifested opium. The cargo is confiscated; Dutch standing collapses by 30. The contract is void.` }];
+        next.hooks = [...next.hooks, 'The Hollanders know yr. face at Eustace now. The trade pass, if held, did not hold here.'];
+      } else {
+        // Cargo cleared. Final payment lands by the trusted hand.
+        const payout = isHalf ? 200 : 400;
+        next.money = (next.money || 0) + payout;
+        next.reputation = { ...(next.reputation || {}), pirates: Math.min(100, (next.reputation?.pirates || 0) + 5) };
+        flags.paleManQuest = isHalf ? 'closed-delivered-half' : 'closed-delivered';
+        next.flags = flags;
+        next.journal = [...next.journal, { day: next.day, entry: `Cleared the Eustace customs with ${lifted} cwt of opium under cover; £${payout} delivered to yr. hand by a trusted runner. The contract is fulfilled.` }];
+      }
+      return next;
+    });
+  };
+
   // ─────── RENDER ───────
 
   // Away-digest first — narrative news, including the Indiaman's call, is
@@ -5391,7 +5451,7 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
           {tab === 'journal' && <JournalView gs={gs} arrivalProse={arrivalProse} setTab={setTab} openLetterById={openLetterById} pursueThread={handlePursueThread} />}
           {tab === 'ledger' && <LedgerView gs={gs} />}
           {tab === 'map' && <MapView gs={gs} sailTo={sailTo} />}
-          {tab === 'port' && <PortView gs={gs} buyGood={buyGood} sellGood={sellGood} refitShip={refitShip} arrivalProse={arrivalProse} setTab={setTab} lodgeGoods={lodgeGoods} withdrawGoods={withdrawGoods} commissionBrigantine={commissionBrigantine} takeBottomry={takeBottomry} />}
+          {tab === 'port' && <PortView gs={gs} buyGood={buyGood} sellGood={sellGood} refitShip={refitShip} arrivalProse={arrivalProse} setTab={setTab} lodgeGoods={lodgeGoods} withdrawGoods={withdrawGoods} commissionBrigantine={commissionBrigantine} takeBottomry={takeBottomry} liftContractOpium={liftContractOpium} runDutchCustoms={runDutchCustoms} />}
           {tab === 'outpost' && atHome && <OutpostView gs={gs} startBuild={startBuild} expediteBuild={expediteBuild} />}
           {tab === 'letters' && <LettersView gs={gs} setGs={setGs} onRespond={handleLetterResponse} openLetterId={openLetterId} setOpenLetterId={setOpenLetterId} />}
         </div>
@@ -6989,7 +7049,7 @@ function MapView({ gs, sailTo }) {
 
 // ─────────── PORT VIEW ───────────
 
-function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab, lodgeGoods, withdrawGoods, commissionBrigantine, takeBottomry }) {
+function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab, lodgeGoods, withdrawGoods, commissionBrigantine, takeBottomry, liftContractOpium, runDutchCustoms }) {
   const port = PORTS[gs.location];
   const sells = Object.keys(port.sells || {});
   const buys = Object.keys(port.buys || {});
@@ -7153,6 +7213,8 @@ function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab, lodg
         return <SublocationPanel gs={gs} sub={sub} buyGood={buyGood} taxRate={taxRate} />;
       })()}
 
+      <ContractRunPanel gs={gs} liftContractOpium={liftContractOpium} runDutchCustoms={runDutchCustoms} />
+
       {atHome && takeBottomry && (
         <BottomryPanel gs={gs} takeBottomry={takeBottomry} />
       )}
@@ -7313,6 +7375,81 @@ function SublocationPanel({ gs, sub, buyGood, taxRate }) {
       })}
     </div>
   );
+}
+
+// ─────────── CONTRACT RUN PANEL ───────────
+// Shown at the Pelican's Nest when the pale man's contract is active and
+// the opium hasn't yet been lifted; and at Eustace when the opium is in
+// the hold and waiting for the customs run.
+
+function ContractRunPanel({ gs, liftContractOpium, runDutchCustoms }) {
+  const stage = gs.flags?.paleManQuest;
+  const contractActive = stage === 'closed-contracted' || stage === 'closed-half-contract';
+  if (!contractActive && !gs.flags?.contractOpiumLifted) return null;
+  const cwt = gs.flags?.contractOpiumLifted;
+  const isHalf = stage === 'closed-half-contract';
+  const cargoSize = isHalf ? 2 : 4;
+
+  // At the Nest, ready to lift
+  if (gs.location === 'The Pelican’s Nest' && contractActive && !cwt && liftContractOpium) {
+    const w = COMMODITIES.opium.weight || 0.6;
+    const remaining = Math.max(0, cargoCap(gs) - cargoWeight(gs.goods));
+    const fits = remaining >= cargoSize * w;
+    return (
+      <div style={{ marginTop: '1.5rem', padding: '0.9rem 1rem', background: 'rgba(255,253,245,0.55)', borderLeft: '3px solid #5c1a08' }}>
+        <div className="display" style={{ fontSize: '0.9em', color: '#5c1a08', marginBottom: '0.3rem' }}>
+          THE CONTRACT — UNDER SAID BIN MAHMOOD'S NAME
+        </div>
+        <p className="italic" style={{ margin: '0 0 0.6rem 0', color: '#4a3220', fontSize: '0.92em' }}>
+          {cargoSize} cwt of opium are stored on the wharf at the Brotherhood's mark, under Said bin Mahmood's name. Lift them into yr. hold and the drop at Port St. Eustace remains.
+        </p>
+        <button
+          className="wax-button"
+          disabled={!fits}
+          onClick={liftContractOpium}
+        >
+          Lift the {cargoSize} cwt of opium
+        </button>
+        {!fits && (
+          <div style={{ fontSize: '0.85em', color: '#8b1a1a', fontStyle: 'italic', marginTop: '0.3rem' }}>
+            Yr. hold has not the room — clear cargo before lifting.
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // At Eustace, ready to drop
+  if (gs.location === 'Port St. Eustace' && cwt && runDutchCustoms) {
+    const passHeld = !!gs.flags?.dutchTradePass;
+    const dutchRep = gs.reputation?.dutch || 0;
+    const friendly = dutchRep >= 20;
+    return (
+      <div style={{ marginTop: '1.5rem', padding: '0.9rem 1rem', background: 'rgba(255,253,245,0.55)', borderLeft: '3px solid #5c1a08' }}>
+        <div className="display" style={{ fontSize: '0.9em', color: '#5c1a08', marginBottom: '0.3rem' }}>
+          THE DROP — RUNNING THE HOLLANDER'S CUSTOMS
+        </div>
+        <p className="italic" style={{ margin: '0 0 0.5rem 0', color: '#4a3220', fontSize: '0.92em' }}>
+          {cwt} cwt of unmanifested opium sit in yr. hold. The drop is at the back of the Hollander's wharf, by a runner who will know yr. ship. The customs clerks must not see what they are not paid to see.
+        </p>
+        <div style={{ fontSize: '0.85em', color: '#6b4423', marginBottom: '0.6rem' }}>
+          {passHeld
+            ? 'Yr. trade pass holds the customs at a glance — risk is low.'
+            : friendly
+              ? 'Yr. Dutch standing is cordial; the customs clerks will not press hard, but they will look.'
+              : 'No trade pass; standing is ordinary. The customs are a real risk.'}
+        </div>
+        <button
+          className="wax-button"
+          onClick={runDutchCustoms}
+        >
+          Run the customs and drop the cargo
+        </button>
+      </div>
+    );
+  }
+
+  return null;
 }
 
 function BottomryPanel({ gs, takeBottomry }) {

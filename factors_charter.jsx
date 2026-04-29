@@ -3891,116 +3891,45 @@ function GithubBackupModal({ gs, initialConfig, onClose }) {
 }
 
 // ─────────── IMAGINE PANEL ───────────
-// Optional illustration generated from any passage of prose. Tries the
-// Pollinations.ai public endpoint first (free, no auth, served as an
-// <img> so it bypasses the artifact's connect-src CSP — img-src is more
-// permissive). On failure (CSP block, network, the service is down), the
-// prompt is exposed for copy-paste into ChatGPT / DALL·E / Midjourney —
-// the manual bridge. Style template prefixed to keep visual consistency
-// across the charter.
+// Surfaces a prompt for an illustration of any passage of prose. Originally
+// also tried Pollinations.ai inline (img src bypasses connect-src CSP), but
+// that is blocked too in this artifact runtime. Now: a button opens the
+// proven ExportModal with the full prompt as content — auto-copied to
+// clipboard on open, big readable textarea, robust copy fallback for
+// long-press selection. The player pastes into ChatGPT / DALL·E /
+// Midjourney externally and saves the image to their own files.
+//
+// Style template prefixed to every prompt so the resulting illustrations
+// feel like the same hand made them all.
 
 const IMAGINE_STYLE_PREFIX =
   '1720s logbook engraving, period woodcut style, sepia line illustration, single-color brown ink on cream parchment, period 18th century book illustration. ';
 
 function ImaginePanel({ prose, label = 'Imagine this scene' }) {
-  const [requested, setRequested] = useState(false);
-  const [imgState, setImgState] = useState('loading'); // 'loading' | 'loaded' | 'failed'
-  const [copyFlash, setCopyFlash] = useState('');
-
-  const cleanProse = (prose || '').replace(/\s+/g, ' ').trim().slice(0, 320);
-  const fullPrompt = IMAGINE_STYLE_PREFIX + cleanProse;
-  // Stable seed from the prose so the same passage produces the same image.
-  const seed = Math.abs(
-    cleanProse.split('').reduce((h, c) => ((h << 5) - h) + c.charCodeAt(0), 0) || 1
-  );
-  const imgUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(fullPrompt)}?width=480&height=320&nologo=true&seed=${seed}&model=flux`;
-
-  const copyPrompt = async () => {
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(fullPrompt);
-        setCopyFlash('Prompt copied.');
-        setTimeout(() => setCopyFlash(''), 2200);
-        return;
-      }
-    } catch (e) { /* fall through */ }
-    setCopyFlash('Long-press the prompt to copy.');
-    setTimeout(() => setCopyFlash(''), 2500);
-  };
-
+  const [open, setOpen] = useState(false);
+  const cleanProse = (prose || '').replace(/\s+/g, ' ').trim();
   if (!cleanProse) return null;
-
-  if (!requested) {
-    return (
+  const fullPrompt = IMAGINE_STYLE_PREFIX + cleanProse.slice(0, 320);
+  return (
+    <>
       <button
         className="ghost-button-sm"
-        onClick={() => setRequested(true)}
+        onClick={() => setOpen(true)}
         style={{ marginTop: '0.5rem' }}
-        title="Generate an illustration from this passage"
+        title="Show an illustration prompt for this passage"
       >
         ✦ {label}
       </button>
-    );
-  }
-
-  return (
-    <div style={{
-      marginTop: '0.7rem', padding: '0.7rem 0.8rem',
-      background: 'rgba(255,255,255,0.25)',
-      border: '1px solid rgba(74,44,20,0.2)',
-    }}>
-      <div className="display" style={{ fontSize: '0.78em', color: '#6b4423', letterSpacing: '0.06em', marginBottom: '0.5rem' }}>
-        ⁂ AN ILLUSTRATION
-      </div>
-      {imgState !== 'failed' && (
-        <img
-          src={imgUrl}
-          alt="An illustration of the scene"
-          onLoad={() => setImgState('loaded')}
-          onError={() => setImgState('failed')}
-          style={{
-            width: '100%', maxWidth: '480px', height: 'auto',
-            display: imgState === 'loaded' ? 'block' : 'none',
-            border: '1px solid rgba(74,44,20,0.2)',
-            margin: '0 auto',
-          }}
+      {open && (
+        <ExportModal
+          title="An illustration prompt"
+          content={fullPrompt}
+          onClose={() => setOpen(false)}
+          wrap
+          helperText="The prompt has been copied to yr. clipboard. Paste it into ChatGPT, DALL·E, Midjourney, or any other image-rendering tool to render the scene."
         />
       )}
-      {imgState === 'loading' && (
-        <div className="italic" style={{ color: '#6b4423', fontSize: '0.85em' }}>
-          The hand sketches the scene… this can take half a minute.
-        </div>
-      )}
-      {imgState === 'failed' && (
-        <div style={{ fontSize: '0.85em', color: '#8b1a1a', fontStyle: 'italic' }}>
-          The illustration could not be reached. Copy the prompt below and use it in another tool.
-        </div>
-      )}
-      <details style={{ marginTop: '0.6rem' }}>
-        <summary style={{ cursor: 'pointer', fontSize: '0.82em', color: '#6b4423' }}>
-          Prompt {imgState === 'failed' ? '(copy and paste into ChatGPT / DALL·E / Midjourney)' : ''}
-        </summary>
-        <textarea
-          readOnly
-          value={fullPrompt}
-          onFocus={(e) => e.currentTarget.select()}
-          style={{
-            width: '100%', minHeight: '4rem', padding: '0.4rem', marginTop: '0.3rem',
-            fontFamily: 'monospace', fontSize: '0.78em',
-            background: 'rgba(255,255,255,0.4)',
-            border: '1px solid rgba(74,44,20,0.2)',
-            color: '#2a1a0a',
-            boxSizing: 'border-box',
-          }}
-        />
-        <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
-          <button className="ghost-button-sm" onClick={copyPrompt}>Copy prompt</button>
-          {copyFlash && (
-            <span style={{ fontSize: '0.78em', color: '#3a5c2a', fontStyle: 'italic' }}>{copyFlash}</span>
-          )}
-        </div>
-      </details>
-    </div>
+    </>
   );
 }
 
@@ -4010,7 +3939,7 @@ function ImaginePanel({ prose, label = 'Imagine this scene' }) {
 // with a copyable textarea + a Copy button that uses the clipboard API. Works
 // in any sandboxed iframe; falls back to manual long-press copying if the
 // clipboard is refused.
-function ExportModal({ title, content, filename, onClose }) {
+function ExportModal({ title, content, filename, onClose, helperText, wrap }) {
   const [flash, setFlash] = useState('');
   const taRef = useRef(null);
 
@@ -4078,7 +4007,7 @@ function ExportModal({ title, content, filename, onClose }) {
           </div>
         )}
         <p style={{ fontSize: '0.82em', color: '#4a3220', fontStyle: 'italic', marginTop: 0, marginBottom: '0.5rem' }}>
-          Copy this and save it where you keep your manuscripts. The artifact iframe cannot put files on disk for you.
+          {helperText || 'Copy this and save it where you keep your manuscripts. The artifact iframe cannot put files on disk for you.'}
         </p>
         <textarea
           ref={taRef}
@@ -4093,7 +4022,8 @@ function ExportModal({ title, content, filename, onClose }) {
             border: '1px solid rgba(74,44,20,0.3)',
             color: '#2a1a0a',
             resize: 'vertical',
-            whiteSpace: 'pre',
+            whiteSpace: wrap ? 'pre-wrap' : 'pre',
+            wordBreak: wrap ? 'break-word' : 'normal',
           }}
         />
         {flash && (

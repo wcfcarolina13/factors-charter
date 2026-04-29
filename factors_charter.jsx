@@ -1300,6 +1300,77 @@ function drydenQuarterlyAddendum(s) {
   return `\n\n[Folded into the same packet, in another hand:]\nMr. Dryden remarks that yr. private returns of late have been read with interest. He asks if you have considered the diamond trade at the Madras yard, and would thank you for word on the matter when next a packet permits. — E.D.`;
 }
 
+// Lord Mountfair's notice — the speculative faction's payoff event. Fires
+// once when the Factor's cumulative private trade returns exceed £500 AND
+// companyFaction is 'speculative'. A London peer, a Director by family
+// alliance, has noticed and writes to introduce himself by way of Dryden.
+// Plants a permanent flag.mountfairPatron = true that future events
+// (charter end, succession, scripted scenes) can read.
+function makeMountfairLetter(s) {
+  return {
+    id: 9700000 + s.day,
+    from: 'Lord Mountfair, by Mr. Dryden\'s introduction',
+    subject: 'A private acquaintance proposed',
+    body: `Sir, — Mr. Dryden has laid yr. returns and a digest of yr. circumstances at Bayan-Kor before me, with such recommendation as I should have asked of any man whose figures I was to read.
+
+I am, by my mother's side, a Director of the Court; by my father's, the holder of a small interest in the country trade and a larger one in the West Indies. The two careers are not always at one. Yr. work, as Mr. Dryden has rendered it, is the kind that may pass between them with credit. I should be glad to know you, sir, when next yr. business permits a packet, and gladder still to see you to dinner if ever London receives you.
+
+If a small introduction at this distance would be useful — a letter of credit at Bombay, a name to be dropped at the Court, a particular merchant in Calicut who will receive you on my acquaintance — write to Mr. Dryden, who will know how to put the request to me.
+
+Yr. obliged servant in private,
+Mountfair`,
+    responses: [
+      {
+        label: 'Reply with thanks; ask for the Bombay credit',
+        seed: 'a credit at Bombay; small Crown nudge by association',
+        fixedOutcome: {
+          prose: 'You write a careful note thanking his Lordship and asking, with proper modesty, for a letter of credit on the Bombay account. The letter, when it comes by the next packet, is for two hundred pounds redeemable at the Bombay establishment by yr. own application.',
+          changes: {
+            money: 200,
+            reputation: { company: 4, crown: 3 },
+            flags: { mountfairPatron: true, mountfairResponse: 'credit' },
+            journal: 'Replied to Lord Mountfair with thanks and a request for credit at Bombay. £200 letter of credit received.',
+          },
+        },
+      },
+      {
+        label: 'Reply with thanks; ask for an introduction at the Court',
+        seed: 'name at the Court; standing nudge',
+        fixedOutcome: {
+          prose: 'You write asking, in the proper form, for yr. name to be brought before such of his Lordship\'s acquaintance at the Court as he should think fit. The letter that follows confirms a careful introduction has been made; the senior bench now knows yr. name without yr. having to write it.',
+          changes: {
+            reputation: { company: 8 },
+            flags: { mountfairPatron: true, mountfairResponse: 'introduction' },
+            journal: 'Replied to Lord Mountfair asking for an introduction at the Court. The senior bench now knows yr. name without yr. having to write it.',
+          },
+        },
+      },
+      {
+        label: 'Reply with civilities only; decline the patronage',
+        seed: 'the patronage refused; standing held; quiet self-respect',
+        fixedOutcome: {
+          prose: 'You reply at proper length, with thanks and the customary professions of yr. station, but ask for nothing. His Lordship answers in three lines; the matter is in the books, and you are owed nothing by yr. own preference.',
+          changes: {
+            reputation: { company: 2 },
+            flags: { mountfairPatron: 'declined', mountfairResponse: 'declined' },
+            journal: 'Replied to Lord Mountfair with civilities only. The patronage is in the books but unclaimed.',
+          },
+        },
+      },
+    ],
+    read: false,
+  };
+}
+
+// Sums the proceeds-history of private consignments that have already
+// returned. Used by the Mountfair gate.
+function privateTradeReturned(s) {
+  // Cumulative returns are reflected in money + history; we don't track a
+  // separate history here, so use a heuristic — the Factor's money plus
+  // current consignment. Threshold-only; absolute precision unimportant.
+  return (s.money || 0);
+}
+
 // ─────────── THE HODGE CRISIS ───────────
 // Once per charter, around day 200+, Hodge's drinking finally tips into a
 // real crisis — he's gone missing for three days, found at the back of the
@@ -2262,6 +2333,14 @@ const AUTO_SENDERS = [
     weight: 2,
     gate: (s) => (s.reputation?.dutch || 0) >= -25,
   },
+  {
+    key: 'dryden',
+    from: 'Mr. Edmund Dryden, of the Court of Directors',
+    faction: 'company',
+    mood: 'private, informal, concerned with private trade, country shipping, the news of London — written on Company-but-not-Court paper, a Director writing as a man',
+    weight: 2,
+    gate: (s) => s.flags?.companyFaction === 'speculative',
+  },
 ];
 
 function pickAutoSender(s) {
@@ -2964,6 +3043,23 @@ function tickDays(gs, days) {
       s.awayLog.push({ day: s.day, type: 'letter', text: 'A private letter, not on Company paper — from one Mr. Dryden of the Court.' });
     }
 
+    // Lord Mountfair's notice — the speculative faction's payoff event.
+    // Once the player has thrown in with Dryden's bench AND has built up
+    // a comfortable strongbox (which implies private trade returns), a
+    // London peer Director writes by Dryden's introduction.
+    if (
+      !s.charterClosed &&
+      !s.flags?.mountfairLetterSent &&
+      s.flags?.companyFaction === 'speculative' &&
+      privateTradeReturned(s) >= 500
+    ) {
+      const letter = makeMountfairLetter(s);
+      s.letters = [...s.letters, letter];
+      s.lettersGenerated = (s.lettersGenerated || 0) + 1;
+      s.flags = { ...(s.flags || {}), mountfairLetterSent: true };
+      s.awayLog.push({ day: s.day, type: 'letter', text: 'A letter from London by Mr. Dryden\'s introduction — the seal is a peer\'s, the hand his own.' });
+    }
+
     // ── Hodge crisis: once after day 200, when Hodge's drinking has run
     // long enough to tip into a real episode. Sgt. Dass writes; the player
     // chooses what to do with him. Won't fire if Hodge has already been
@@ -3369,6 +3465,10 @@ const MAJOR_COMMITMENTS = [
       v === 'speculative'  ? 'A private correspondence with Mr. Dryden of the Speculative Bench.' :
       v === 'conservative' ? 'Yr. file is held in proper Madras format with the senior bench.' :
       v === 'declined'     ? 'You refused Mr. Dryden\'s private channel; he has not forgotten.' :
+      null },
+  { key: 'mountfairPatron', label: (v) =>
+      v === true       ? 'Lord Mountfair is yr. patron at the Court; the introduction is in the books.' :
+      v === 'declined' ? 'Lord Mountfair offered patronage; you declined with civilities.' :
       null },
   { key: 'paleManQuest', label: (v) =>
       v === 'pending'              ? 'A sealed packet from an unknown hand sits in yr. strongbox.' :

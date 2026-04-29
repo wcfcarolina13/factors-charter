@@ -1575,6 +1575,196 @@ Yr. servants, the Court of Directors.`;
   };
 }
 
+// ─────────── GENERATIONAL CONTINUATION ───────────
+// When a charter closes, the player can take up a successor's charter.
+// World state persists — outpost, brigantine, household, faction standings,
+// named acquaintances — but the clock resets, the quota begins fresh, the
+// strongbox suffers an executors' charge, and a fresh Director letter
+// announces the new appointment.
+
+function makeSuccessorDirectorLetter(prev, newName, moneyKept) {
+  const peppShipped = prev.quotas?.pepper?.have || 0;
+  const cinnShipped = prev.quotas?.cinnamon?.have || 0;
+  const charge = Math.max(0, (prev.money || 0) - moneyKept);
+  const tone = (peppShipped >= 400 && cinnShipped >= 200)
+    ? 'whose returns met his charter — a man the Court will speak of with respect'
+    : (peppShipped >= 200 || cinnShipped >= 100)
+      ? 'whose returns were partial; the matter is closed without commendation'
+      : 'whose returns were a disappointment, and on whose name we shall not dwell';
+  return {
+    id: 1,
+    from: 'The Court of Directors, London',
+    subject: 'Yr. Appointment to the Factory at Bayan-Kor',
+    body: `Sir, — These presents confirm yr. appointment, freely given by the Court, to the Factory at Bayan-Kor, in succession to ${prev.player.name}, ${tone}.
+
+You inherit the godown and yr. predecessor’s establishment as he left it. The brigantine on the slipway, if there is one, comes to yr. account; the household and the building works are yrs. to direct. £${charge} has been deducted from yr. opening accounts as the executors’ charge against ${prev.player.name}’s estate; £${moneyKept} stands to yr. credit at the strongbox.
+
+The terms are renewed: returns of pepper, no less than four hundredweight, and cinnamon, no less than two hundredweight, are to be lodged at our House by the close of yr. third year. The reckonings of yr. predecessor’s charter are closed. Yr. file at Leadenhall begins on this hand.
+
+Yr. obedt. servants, the Court of Directors, in London, &c.`,
+    responses: [
+      { label: 'Acknowledge with formal compliance', seed: 'company satisfied; no surprises' },
+      { label: 'Reply briefly; turn at once to the work', seed: 'no rep change; directors consider you efficient' },
+      { label: 'Reply at length; lay before them the state of yr. inheritance', seed: 'company notes a careful man' },
+    ],
+    read: false,
+  };
+}
+
+function makeSuccessorState(prev, newName) {
+  const moneyKept = Math.round((prev.money || 0) * 0.6);
+
+  // Predecessor becomes a permanent acquaintance — a memory the AI sees in
+  // future stateContext, so encounters can reference "the late Factor" by
+  // name. Persist alongside the existing acquaintances.
+  const peppShipped = prev.quotas?.pepper?.have || 0;
+  const cinnShipped = prev.quotas?.cinnamon?.have || 0;
+  const predecessorMemo = {
+    id: `predecessor-${(prev.player?.name || 'unknown').replace(/\s+/g, '_').toLowerCase()}`,
+    name: prev.player?.name || 'Yr. Predecessor',
+    role: 'former Factor at Bayan-Kor',
+    location: 'concluded — recalled to London',
+    notes: `Held the post day 1 to day ${prev.day}. Returned ${peppShipped}cwt pepper, ${cinnShipped}cwt cinnamon. The household remembers him.`,
+    introduced: 1,
+    lastSeen: prev.day,
+  };
+  const persistedAcquaintances = [...(prev.acquaintances || []), predecessorMemo];
+
+  // Most flags persist — they describe lasting world state. The per-charter
+  // letter-sent / quest-step gates reset so the new Factor gets fresh chances.
+  const carryFlags = {};
+  for (const [k, v] of Object.entries(prev.flags || {})) {
+    if (/LetterSent$/.test(k)) continue;            // letter triggers reset
+    if (/QuestStep$/.test(k)) continue;             // multi-step quests reset
+    if (k === 'firstLetterPresented') continue;
+    carryFlags[k] = v;
+  }
+
+  // Port stocks fully replenish over a 3-year gap — fresh world for the
+  // new Factor.
+  const freshPortStocks = {};
+  for (const [k, p] of Object.entries(PORTS)) {
+    freshPortStocks[k] = { ...(p.stockMax || {}) };
+  }
+
+  // Crew list reflects the current household: if Hodge was sent home, Tyler
+  // is the clerk now; if Dass was released, Anandan holds the watch.
+  const newCrew = [];
+  if (prev.flags?.hodgeCrisis === 'sent_home') {
+    newCrew.push({ name: 'Mr. Tyler', role: 'Clerk', trait: 'plodding' });
+  } else {
+    newCrew.push({ name: 'Mr. Hodge', role: 'Clerk', trait: prev.flags?.hodgeCrisis === 'reformed' ? 'reformed' : 'drunkard' });
+  }
+  if (prev.flags?.dassRecall === 'released') {
+    newCrew.push({ name: 'Lance Naik Anandan', role: 'Sepoy', trait: 'green' });
+  } else {
+    newCrew.push({ name: 'Sgt. Dass', role: 'Sepoy', trait: prev.flags?.dassRecall === 'commissioned' ? 'commissioned' : 'steady' });
+  }
+
+  return {
+    ...prev,
+    day: 1,
+    daysRemaining: 1095,
+    player: { name: newName, title: 'Factor' },
+    money: moneyKept,
+    crew: newCrew,
+    quotas: { pepper: { needed: 400, have: 0 }, cinnamon: { needed: 200, have: 0 } },
+    charterClosed: null,
+    indiaman: { lastVisit: 0, nextDay: 180, visits: 0, lastQuarterly: 0 },
+    lettersAuto: { nextDay: 35 },
+    pendingLetterRequests: [],
+    privateConsignment: null,
+    privateConsignmentOffered: false,
+    letters: [makeSuccessorDirectorLetter(prev, newName, moneyKept)],
+    hooks: [],
+    journal: [{ day: 1, entry: `Took up the Charter at Bayan-Kor in succession to ${prev.player?.name || 'the late Factor'}.` }],
+    awayLog: [],
+    seenOpening: true,        // skip the opening sequence
+    firstLetterPresented: false,
+    visited: ['Bayan-Kor'],   // the new Factor begins at home; foreign ports become first-visits again
+    aiLog: [],
+    acquaintances: persistedAcquaintances,
+    flags: carryFlags,
+    portStocks: freshPortStocks,
+    lettersGenerated: 0,
+    // Preserved as-is: outpost, ship, npcs, reputation
+  };
+}
+
+// ─────────── CHARTER RENEWAL ───────────
+// The same Factor accepts a second charter at Bayan-Kor. Most state persists
+// — name, money, household, outpost, ship, named figures, faction standings.
+// What resets is the clock, the quota, the Indiaman cycle, and the inbox.
+// Title becomes "Senior Factor" on the first renewal.
+
+function makeRenewalDirectorLetter(prev) {
+  const peppShipped = prev.quotas?.pepper?.have   || 0;
+  const cinnShipped = prev.quotas?.cinnamon?.have || 0;
+  const wasSuccess  = peppShipped >= 400 && cinnShipped >= 200;
+  const tone = wasSuccess
+    ? 'Yr. returns of pepper and cinnamon have been laid before the Court with proper credit; we are content to extend yr. office at terms more agreeable than the first.'
+    : 'Yr. returns were received with such regret as the matter justified; the Court has nevertheless determined to extend yr. office, on the understanding that the next reckoning will not be a second disappointment.';
+  return {
+    id: 1,
+    from: 'The Court of Directors, London',
+    subject: 'Yr. Charter Renewed',
+    body: `Sir, — These presents confirm the renewal of yr. charter at the Factory at Bayan-Kor for a further three years. ${tone}
+
+You inherit no man’s establishment now: yr. own godown stands as you left it, yr. household and the brigantine, if there is one, continue under yr. hand. We acknowledge you henceforward as Senior Factor of the Bayan-Kor station; conduct yrself accordingly.
+
+The terms are renewed: returns of pepper, no less than four hundredweight, and cinnamon, no less than two hundredweight, are to be lodged at our House by the close of yr. third year. Reckonings of the previous charter are closed; yr. file at Leadenhall opens on this hand.
+
+Yr. obedt. servants, the Court of Directors, in London, &c.`,
+    responses: [
+      { label: 'Acknowledge with formal compliance', seed: 'no surprises' },
+      { label: 'Reply with thanks and a steady promise', seed: 'small standing nudge' },
+      { label: 'Reply briefly; turn at once to the work', seed: 'no rep change' },
+    ],
+    read: false,
+  };
+}
+
+function makeRenewedState(prev) {
+  // Same Factor; per-charter triggers reset; the rest persists.
+  const carryFlags = {};
+  for (const [k, v] of Object.entries(prev.flags || {})) {
+    if (/LetterSent$/.test(k)) continue;
+    if (/QuestStep$/.test(k)) continue;
+    if (k === 'firstLetterPresented') continue;
+    carryFlags[k] = v;
+  }
+  const freshPortStocks = {};
+  for (const [k, p] of Object.entries(PORTS)) {
+    freshPortStocks[k] = { ...(p.stockMax || {}) };
+  }
+  return {
+    ...prev,
+    day: 1,
+    daysRemaining: 1095,
+    player: { name: prev.player?.name || 'The Factor', title: 'Senior Factor' },
+    // money kept as-is — same man, no executor's charge
+    quotas: { pepper: { needed: 400, have: 0 }, cinnamon: { needed: 200, have: 0 } },
+    charterClosed: null,
+    indiaman: { lastVisit: 0, nextDay: 180, visits: 0, lastQuarterly: 0 },
+    lettersAuto: { nextDay: 35 },
+    pendingLetterRequests: [],
+    privateConsignment: null,
+    privateConsignmentOffered: false,
+    letters: [makeRenewalDirectorLetter(prev)],
+    hooks: [],
+    journal: [{ day: 1, entry: `Charter renewed at Bayan-Kor for a second three years.` }],
+    awayLog: [],
+    seenOpening: true,
+    firstLetterPresented: false,
+    visited: prev.visited || ['Bayan-Kor'],
+    aiLog: [],
+    flags: carryFlags,
+    portStocks: freshPortStocks,
+    lettersGenerated: 0,
+    // Preserved as-is: outpost, ship, npcs, reputation, acquaintances, crew
+  };
+}
+
 // ─────────── HOME SIMULATION ───────────
 // Each day the Factor is away (or any day passes), the colony lives.
 // Construction progresses, NPCs act, small incidents accrue.
@@ -3706,7 +3896,7 @@ function OpeningSequence({ name, onComplete }) {
 
 // ─────────── GAME HUB ───────────
 
-function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
+function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRenewal }) {
   const [tab, setTab] = useState('journal');
   const [encounter, setEncounter] = useState(null);
   const [pending, _setPending] = useState(false);
@@ -4463,7 +4653,7 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
   return (
     <Page>
       <div style={{ maxWidth: '64rem', margin: '0 auto', padding: '1.25rem 1.0rem', width: '100%' }}>
-        <Header gs={gs} onReturnToTitle={onReturnToTitle} />
+        <Header gs={gs} onReturnToTitle={onReturnToTitle} onSuccession={onSuccession} onRenewal={onRenewal} />
         <Tabs tab={tab} setTab={setTab} unread={gs.letters.filter(l => !l.read).length} atHome={atHome} />
         <div className="parchment" style={{ padding: '1.25rem', minHeight: '24rem', background: 'rgba(255,253,245,0.4)' }}>
           {tab === 'journal' && <JournalView gs={gs} arrivalProse={arrivalProse} setTab={setTab} openLetterById={openLetterById} pursueThread={handlePursueThread} />}
@@ -5215,7 +5405,10 @@ function ExportModal({ title, content, filename, onClose, helperText, wrap }) {
 
 // ─────────── HEADER ───────────
 
-function Header({ gs, onReturnToTitle }) {
+function Header({ gs, onReturnToTitle, onSuccession, onRenewal }) {
+  const [confirmingSuccession, setConfirmingSuccession] = useState(false);
+  const [successorName, setSuccessorName] = useState('');
+  const [confirmingRenewal, setConfirmingRenewal] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [flash, setFlash] = useState('');
   const [exportPanel, setExportPanel] = useState(null); // { title, content, filename }
@@ -5345,6 +5538,101 @@ function Header({ gs, onReturnToTitle }) {
           <div className="display" style={{ fontSize: '0.75em', color: '#6b4423', letterSpacing: '0.08em', padding: '0 0.3rem', marginBottom: '0.4rem' }}>
             ⁂ NAVIGATE
           </div>
+
+          {gs.charterClosed && onRenewal && gs.charterClosed.outcome !== 'failure' && !confirmingRenewal && !confirmingSuccession && (
+            <button
+              className="wax-button"
+              style={{ width: '100%', textAlign: 'left', marginBottom: '0.4rem' }}
+              onClick={() => setConfirmingRenewal(true)}
+            >
+              Renew yr. charter — another three years
+            </button>
+          )}
+
+          {gs.charterClosed && onRenewal && confirmingRenewal && (
+            <div className="ink-fade-in" style={{
+              padding: '0.8rem 0.9rem', marginBottom: '0.5rem',
+              background: 'rgba(255,253,245,0.55)', borderLeft: '3px solid #5c1a08',
+            }}>
+              <div className="display" style={{ fontSize: '0.85em', color: '#5c1a08', letterSpacing: '0.06em', marginBottom: '0.3rem' }}>
+                ⁂ RENEW THE CHARTER
+              </div>
+              <p style={{ fontStyle: 'italic', color: '#4a3220', fontSize: '0.86em', margin: '0 0 0.6rem 0' }}>
+                The Court will renew yr. office for a further three years. The clock and the quota begin again at day 1; everything else &mdash; the godown, the {gs.ship?.name || 'ship'}, the household, yr. money, yr. standing &mdash; persists. The Court will style you Senior Factor henceforward.
+              </p>
+              <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                <button
+                  className="wax-button"
+                  onClick={() => {
+                    setConfirmingRenewal(false);
+                    setMenuOpen(false);
+                    onRenewal();
+                  }}
+                >
+                  Take the second charter
+                </button>
+                <button
+                  className="ghost-button"
+                  onClick={() => setConfirmingRenewal(false)}
+                >
+                  Not yet
+                </button>
+              </div>
+            </div>
+          )}
+
+          {gs.charterClosed && onSuccession && !confirmingSuccession && !confirmingRenewal && (
+            <button
+              className="ghost-button"
+              style={{ width: '100%', textAlign: 'left', marginBottom: '0.4rem' }}
+              onClick={() => { setConfirmingSuccession(true); setSuccessorName(''); }}
+            >
+              Take up the Charter — yr. successor
+            </button>
+          )}
+
+          {gs.charterClosed && onSuccession && confirmingSuccession && (
+            <div className="ink-fade-in" style={{
+              padding: '0.8rem 0.9rem', marginBottom: '0.5rem',
+              background: 'rgba(255,253,245,0.55)', borderLeft: '3px solid #5c1a08',
+            }}>
+              <div className="display" style={{ fontSize: '0.85em', color: '#5c1a08', letterSpacing: '0.06em', marginBottom: '0.3rem' }}>
+                ⁂ INSCRIBE YR. SUCCESSOR'S NAME
+              </div>
+              <p style={{ fontStyle: 'italic', color: '#4a3220', fontSize: '0.86em', margin: '0 0 0.6rem 0' }}>
+                The Court has appointed a new hand to follow {gs.player.name}. The world stands as he left it: the godown, the {gs.ship?.name || 'ship'}, the household, the standings with the powers. The strongbox is shorter by 40% (executors&rsquo; charge). Yr. own three years begin at day 1.
+              </p>
+              <input
+                className="parchment-input"
+                value={successorName}
+                onChange={(e) => setSuccessorName(e.target.value)}
+                placeholder="Yr. successor's name"
+                maxLength={32}
+                style={{ width: '100%', marginBottom: '0.5rem', boxSizing: 'border-box' }}
+              />
+              <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                <button
+                  className="wax-button"
+                  disabled={!successorName.trim()}
+                  onClick={() => {
+                    const nm = successorName.trim();
+                    setConfirmingSuccession(false);
+                    setMenuOpen(false);
+                    onSuccession(nm);
+                  }}
+                >
+                  Begin the Charter
+                </button>
+                <button
+                  className="ghost-button"
+                  onClick={() => setConfirmingSuccession(false)}
+                >
+                  Not yet
+                </button>
+              </div>
+            </div>
+          )}
+
           <button
             className="ghost-button"
             style={{ width: '100%', textAlign: 'left', marginBottom: '0.3rem' }}
@@ -7032,6 +7320,27 @@ export default function FactorsCharter() {
     setPhase('title');
   };
 
+  // The charter has closed; take up a successor's charter in the same slot.
+  // World state persists (outpost, brigantine, standings, household,
+  // acquaintances); clock + quota + Indiaman cycle reset; a fresh Director
+  // letter announces the appointment.
+  const handleSuccession = (name) => {
+    if (!gs || !gs.charterClosed) return;
+    const cleanName = (name || '').trim() || 'A New Hand';
+    setGs(prev => makeSuccessorState(prev, cleanName));
+    setPhase('game');
+  };
+
+  // Renew the same Factor's charter for another three years. Available when
+  // the charter closed in success or partial completion (failure → recall;
+  // no renewal). The Court promotes the Factor to Senior Factor.
+  const handleRenewal = () => {
+    if (!gs || !gs.charterClosed) return;
+    if (gs.charterClosed.outcome === 'failure') return;
+    setGs(prev => makeRenewedState(prev));
+    setPhase('game');
+  };
+
   if (phase === 'loading') {
     return <Page><Loading msg="Unrolling the chart" /></Page>;
   }
@@ -7068,5 +7377,5 @@ export default function FactorsCharter() {
     );
   }
 
-  return <GameHub gs={gs} setGs={setGs} lastSavedAt={lastSavedAt} onReturnToTitle={handleReturnToTitle} />;
+  return <GameHub gs={gs} setGs={setGs} lastSavedAt={lastSavedAt} onReturnToTitle={handleReturnToTitle} onSuccession={handleSuccession} onRenewal={handleRenewal} />;
 }

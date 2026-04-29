@@ -484,6 +484,9 @@ const ensureShape = (gs) => {
   if (next.privateConsignment === undefined) {
     next.privateConsignment = null;
   }
+  if (next.bottomry === undefined) {
+    next.bottomry = null;
+  }
   if (next.privateConsignmentOffered === undefined) {
     next.privateConsignmentOffered = false;
   }
@@ -652,6 +655,10 @@ Mr. W. died this morning at half past four. The Reverend will not come down from
   // the Factor's own account. Funds return at the next Indiaman call at a
   // London-market multiplier. While in flight, the consignment lives here.
   privateConsignment: null, // null | { commodities: { key: cwt }, shippedDay, returnDay, expectedPayout }
+  // A bottomry bond — period-accurate leverage. Loan secured against ship +
+  // cargo; repaid at +25% on the next return to Bayan-Kor; forgiven if the
+  // voyage suffers significant shipDamage (>= 25 hull or sails) before then.
+  bottomry: null, // null | { principal, repayment, takenDay, lender }
   journal: [],
   letters: [directorLetter, wilbrahamPapers],
   hooks: ['The inland teak concession \u2014 ter Borch wants it.'],
@@ -809,6 +816,42 @@ The Vizier`,
 // QUARTERLY_INTERVAL days, offset to fall halfway between Indiaman visits
 // (lastVisit + 90).
 
+// Mr. Hardacre at Bencoolen — a fictitious rival Factor whose tonnage the
+// Court sees and writes back about. Period-realistic: Company Factors at
+// different stations were held up against each other in private letters
+// from Leadenhall, and the comparison shaped careers. We deterministically
+// advance Hardacre's totals roughly on track.
+const HARDACRE = { name: 'Mr. Hardacre', station: 'Bencoolen' };
+function hardacreReckoning(visits) {
+  // Hardacre returns roughly on pace, slightly ahead — about 70/35 cwt
+  // per call. Six calls would carry him to 420/210, just over quota.
+  return {
+    pepper:   Math.round(70 * visits + visits * 5),
+    cinnamon: Math.round(35 * visits + visits * 2),
+  };
+}
+function rivalLine(s) {
+  const visits = s.indiaman?.visits || 0;
+  if (visits === 0) return '';
+  const h = hardacreReckoning(visits);
+  const ourPep = Math.floor(s.quotas?.pepper?.have || 0);
+  const ourCin = Math.floor(s.quotas?.cinnamon?.have || 0);
+  const aheadPep = h.pepper > ourPep + 30;
+  const aheadCin = h.cinnamon > ourCin + 15;
+  const muchAhead = h.pepper > ourPep + 80 || h.cinnamon > ourCin + 50;
+  if (muchAhead) {
+    return ` ${HARDACRE.name} at ${HARDACRE.station} reckons ${h.pepper} cwt of pepper and ${h.cinnamon} cwt of cinnamon to date — a comparison we shall not press, but which sits visibly upon the Court's table.`;
+  }
+  if (aheadPep || aheadCin) {
+    return ` ${HARDACRE.name} at ${HARDACRE.station} stands at ${h.pepper}/${h.cinnamon} cwt; the comparison is not yet flattering to yr. station.`;
+  }
+  // Player is at or above Hardacre
+  if (ourPep >= h.pepper && ourCin >= h.cinnamon) {
+    return ` ${HARDACRE.name} at ${HARDACRE.station} reckons ${h.pepper}/${h.cinnamon} cwt — yr. own returns, the Court is pleased to note, are no less.`;
+  }
+  return '';
+}
+
 function makeQuarterlyNagLetter(s) {
   const visits      = s.indiaman?.visits || 0;
   const totalPepper = (s.quotas?.pepper?.have   || 0);
@@ -823,6 +866,7 @@ function makeQuarterlyNagLetter(s) {
   const nothingYet   = visits === 0 && totalPepper === 0 && totalCinn === 0
                      && lodgedPep === 0 && lodgedCinn === 0;
   const reckoning    = `${totalPepper} of 400 pepper and ${totalCinn} of 200 cinnamon shipped, with ${lodgedPep} and ${lodgedCinn}cwt respectively in yr. godown awaiting the next call.`;
+  const rival = rivalLine(s);
 
   let subject, body;
   if (nothingYet) {
@@ -830,13 +874,13 @@ function makeQuarterlyNagLetter(s) {
     body = `Sir, — We open yr. file at the Court for the present charter. The first Indiaman is despatched in due course; we shall expect a return at her holds. We pray you have laid the ground.\n\nWe are mindful of the climate, the politics, and the price of plank. We are mindful also that the late Mr. Wilbraham held the post for two years on similar excuses.\n\nYr. obedt. servants, the Court of Directors.`;
   } else if (finalStretch && !onTrack) {
     subject = 'A Pointed Word';
-    body = `Sir, — A reckoning at this hand: ${reckoning} The third year is upon us, and the figures are not what we are owed. The Court has the names of two replacements before it. We trust you take our meaning.\n\nYr. servants, the Court of Directors.`;
+    body = `Sir, — A reckoning at this hand: ${reckoning}${rival} The third year is upon us, and the figures are not what we are owed. The Court has the names of two replacements before it. We trust you take our meaning.\n\nYr. servants, the Court of Directors.`;
   } else if (onTrack) {
     subject = 'Yr. Progress Noted';
-    body = `Sir, — Returns reckon ${reckoning} The Court is content with the present pace. Press on.\n\nYr. obedt. servants, the Court of Directors.`;
+    body = `Sir, — Returns reckon ${reckoning}${rival} The Court is content with the present pace. Press on.\n\nYr. obedt. servants, the Court of Directors.`;
   } else {
     subject = 'A Quarterly Reminder';
-    body = `Sir, — We have to remind you that the present hand finds the books at ${reckoning} The next Indiaman comes round in due course, and we shall watch what she brings.\n\nYr. servants, the Court of Directors.`;
+    body = `Sir, — We have to remind you that the present hand finds the books at ${reckoning}${rival} The next Indiaman comes round in due course, and we shall watch what she brings.\n\nYr. servants, the Court of Directors.`;
   }
   return {
     id: 3000000 + s.day,
@@ -1789,6 +1833,7 @@ function tickDays(gs, days) {
     charterClosed: gs.charterClosed ? { ...gs.charterClosed } : null,
     privateConsignment: gs.privateConsignment ? { ...gs.privateConsignment, commodities: { ...gs.privateConsignment.commodities } } : null,
     privateConsignmentOffered: !!gs.privateConsignmentOffered,
+    bottomry: gs.bottomry ? { ...gs.bottomry } : null,
   };
   const hasStockade = !!s.outpost.buildings.stockade?.built;
   const hasBarracks = !!s.outpost.buildings.barracks?.built;
@@ -4075,6 +4120,14 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
         hull:  Math.max(0, next.ship.hull  - hullHit),
         sails: Math.max(0, next.ship.sails - sailsHit),
       };
+      // Bottomry forgiveness: a voyage calamity (≥25 hull or sails damage)
+      // cancels the bond. The cargo and ship were the security; the lender
+      // takes the loss. Journal the forgiveness so the player sees it.
+      if (next.bottomry && (hullHit >= 25 || sailsHit >= 25)) {
+        const forgiven = next.bottomry.repayment;
+        next.bottomry = null;
+        next.journal = [...next.journal, { day: next.day, entry: `The bottomry bond stands forfeit. The voyage calamity cancels £${forgiven} owed to the bazaar.` }];
+      }
     }
     // New named characters introduced by the AI; persist into world state.
     if (Array.isArray(changes.newAcquaintances) && changes.newAcquaintances.length) {
@@ -4095,6 +4148,33 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
   const arriveAt = async (newGs, dest) => {
     const returningHome = dest === 'Bayan-Kor';
     const hasEvents = newGs.awayLog.length > 0;
+
+    // Bottomry: on return to Bayan-Kor with an outstanding bond, the bazaar
+    // collects. Deduct repayment from money; if short, the strongbox empties
+    // and the rest sits as bad debt (a hook the AI may pull on later).
+    if (returningHome && newGs.bottomry) {
+      const due = newGs.bottomry.repayment;
+      const have = newGs.money || 0;
+      const paid = Math.min(due, have);
+      const short = due - paid;
+      newGs = {
+        ...newGs,
+        money: have - paid,
+        bottomry: null,
+        journal: [
+          ...newGs.journal,
+          short > 0
+            ? { day: newGs.day, entry: `Mehmet Pasha called for the bottomry — £${due} due, £${paid} paid. £${short} stands against yr. name in the bazaar's books.` }
+            : { day: newGs.day, entry: `Mehmet Pasha called for the bottomry — £${due} paid in full. The bond is discharged.` },
+        ],
+      };
+      if (short > 0) {
+        newGs = {
+          ...newGs,
+          hooks: [...newGs.hooks, `An unpaid bottomry of £${short} stands against the household at the bazaar.`],
+        };
+      }
+    }
 
     if (returningHome && hasEvents) {
       setPending(true);
@@ -4557,6 +4637,30 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
     setGs(prev => ({ ...prev, privateConsignmentOffered: false }));
   };
 
+  // ─── BOTTOMRY ───
+  // Period-accurate leverage. Loan from a moneylender at Bayan-Kor against
+  // ship + cargo. Repaid at +25% on next return to Bayan-Kor; forgiven if
+  // a voyage encounter inflicts ≥25 hull or sails damage between then and
+  // now (the cargo was the security, and the voyage was a calamity).
+  const BOTTOMRY_RATE = 0.25;
+  const takeBottomry = (principal) => {
+    if (gs.location !== 'Bayan-Kor') return;
+    if (gs.bottomry) return;
+    if (gs.charterClosed) return;
+    const p = Math.max(50, Math.floor(principal || 0));
+    setGs(prev => ({
+      ...prev,
+      money: (prev.money || 0) + p,
+      bottomry: {
+        principal: p,
+        repayment: Math.round(p * (1 + BOTTOMRY_RATE)),
+        takenDay: prev.day,
+        lender: 'Mehmet Pasha, the moneylender at the bazaar',
+      },
+      journal: [...prev.journal, { day: prev.day, entry: `Took up a bottomry bond of £${p} at the bazaar; £${Math.round(p * (1 + BOTTOMRY_RATE))} due on return to Bayan-Kor, the bond cancelled if the voyage suffers a calamity.` }],
+    }));
+  };
+
   // ─────── RENDER ───────
 
   // Away-digest first — narrative news, including the Indiaman's call, is
@@ -4659,7 +4763,7 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
           {tab === 'journal' && <JournalView gs={gs} arrivalProse={arrivalProse} setTab={setTab} openLetterById={openLetterById} pursueThread={handlePursueThread} />}
           {tab === 'ledger' && <LedgerView gs={gs} />}
           {tab === 'map' && <MapView gs={gs} sailTo={sailTo} />}
-          {tab === 'port' && <PortView gs={gs} buyGood={buyGood} sellGood={sellGood} refitShip={refitShip} arrivalProse={arrivalProse} setTab={setTab} lodgeGoods={lodgeGoods} withdrawGoods={withdrawGoods} commissionBrigantine={commissionBrigantine} />}
+          {tab === 'port' && <PortView gs={gs} buyGood={buyGood} sellGood={sellGood} refitShip={refitShip} arrivalProse={arrivalProse} setTab={setTab} lodgeGoods={lodgeGoods} withdrawGoods={withdrawGoods} commissionBrigantine={commissionBrigantine} takeBottomry={takeBottomry} />}
           {tab === 'outpost' && atHome && <OutpostView gs={gs} startBuild={startBuild} expediteBuild={expediteBuild} />}
           {tab === 'letters' && <LettersView gs={gs} setGs={setGs} onRespond={handleLetterResponse} openLetterId={openLetterId} setOpenLetterId={setOpenLetterId} />}
         </div>
@@ -6257,7 +6361,7 @@ function MapView({ gs, sailTo }) {
 
 // ─────────── PORT VIEW ───────────
 
-function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab, lodgeGoods, withdrawGoods, commissionBrigantine }) {
+function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab, lodgeGoods, withdrawGoods, commissionBrigantine, takeBottomry }) {
   const port = PORTS[gs.location];
   const sells = Object.keys(port.sells || {});
   const buys = Object.keys(port.buys || {});
@@ -6415,6 +6519,10 @@ function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab, lodg
         </div>
       )}
 
+      {atHome && takeBottomry && (
+        <BottomryPanel gs={gs} takeBottomry={takeBottomry} />
+      )}
+
       {atHome && commissionBrigantine && (
         <CommissionPanel gs={gs} commissionBrigantine={commissionBrigantine} />
       )}
@@ -6512,6 +6620,55 @@ function GodownPanel({ gs, lodgeGoods, withdrawGoods }) {
 // ─────────── COMMISSION PANEL ───────────
 // Shown at the Wharf at home. Three states: gated (no Shipwright's Yard /
 // already on a brigantine), in-progress (build counting down), or available.
+
+// ─────────── BOTTOMRY PANEL ───────────
+// Mehmet Pasha's panel at the bazaar. Shows current bond if any (with the
+// outcome rules), or the available principals to borrow if not. Repayment
+// only happens automatically on return to Bayan-Kor — not from this panel.
+
+function BottomryPanel({ gs, takeBottomry }) {
+  const b = gs.bottomry;
+  const hasBond = !!b;
+  const charterClosed = !!gs.charterClosed;
+  const principals = [150, 300, 500];
+
+  if (charterClosed && !hasBond) return null;
+
+  return (
+    <div style={{ marginTop: '1.5rem', padding: '0.9rem 1rem', background: 'rgba(255,255,255,0.3)', borderLeft: '3px solid #5c1a08' }}>
+      <div className="display" style={{ fontSize: '0.9em', color: '#5c1a08', marginBottom: '0.3rem' }}>
+        THE BAZAAR — MEHMET PASHA, MONEYLENDER
+      </div>
+      {hasBond ? (
+        <>
+          <p className="italic" style={{ margin: '0 0 0.5rem 0', color: '#4a3220', fontSize: '0.92em' }}>
+            A bottomry bond of £{b.principal} stands against yr. ship. £{b.repayment} is due upon next return to Bayan-Kor; the bond is cancelled in full if the voyage suffers a calamity (≥25 hull or sails damage from an encounter).
+          </p>
+          <div style={{ fontSize: '0.85em', color: '#6b4423' }}>
+            Taken on day {b.takenDay}.
+          </div>
+        </>
+      ) : (
+        <>
+          <p className="italic" style={{ margin: '0 0 0.6rem 0', color: '#4a3220', fontSize: '0.92em' }}>
+            A bottomry bond — cash now against yr. ship and cargo. 25% on the principal, due on yr. next return to Bayan-Kor. If the voyage is calamitous, the bond is forgotten.
+          </p>
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+            {principals.map(p => (
+              <button
+                key={p}
+                className="ghost-button"
+                onClick={() => takeBottomry(p)}
+              >
+                Borrow £{p} <span style={{ fontSize: '0.82em', color: '#6b4423' }}>(repay £{Math.round(p * 1.25)})</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
 function CommissionPanel({ gs, commissionBrigantine }) {
   const [proposedName, setProposedName] = useState('Astrolabe');

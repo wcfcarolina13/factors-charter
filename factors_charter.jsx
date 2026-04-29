@@ -3523,6 +3523,7 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
           </div>
           <Fleuron />
           <p style={{ fontSize: '1.1em', whiteSpace: 'pre-line' }}>{outcome.prose}</p>
+          <ImaginePanel prose={outcome.prose} />
           <Fleuron char="❧" />
           <ChangesSummary changes={outcome.changes} />
           <div className="text-center" style={{ marginTop: '2rem' }}>
@@ -3842,6 +3843,120 @@ function GithubBackupModal({ gs, initialConfig, onClose }) {
           <button className="ghost-button" onClick={onClose}>Close</button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─────────── IMAGINE PANEL ───────────
+// Optional illustration generated from any passage of prose. Tries the
+// Pollinations.ai public endpoint first (free, no auth, served as an
+// <img> so it bypasses the artifact's connect-src CSP — img-src is more
+// permissive). On failure (CSP block, network, the service is down), the
+// prompt is exposed for copy-paste into ChatGPT / DALL·E / Midjourney —
+// the manual bridge. Style template prefixed to keep visual consistency
+// across the charter.
+
+const IMAGINE_STYLE_PREFIX =
+  '1720s logbook engraving, period woodcut style, sepia line illustration, single-color brown ink on cream parchment, period 18th century book illustration. ';
+
+function ImaginePanel({ prose, label = 'Imagine this scene' }) {
+  const [requested, setRequested] = useState(false);
+  const [imgState, setImgState] = useState('loading'); // 'loading' | 'loaded' | 'failed'
+  const [copyFlash, setCopyFlash] = useState('');
+
+  const cleanProse = (prose || '').replace(/\s+/g, ' ').trim().slice(0, 320);
+  const fullPrompt = IMAGINE_STYLE_PREFIX + cleanProse;
+  // Stable seed from the prose so the same passage produces the same image.
+  const seed = Math.abs(
+    cleanProse.split('').reduce((h, c) => ((h << 5) - h) + c.charCodeAt(0), 0) || 1
+  );
+  const imgUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(fullPrompt)}?width=480&height=320&nologo=true&seed=${seed}&model=flux`;
+
+  const copyPrompt = async () => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(fullPrompt);
+        setCopyFlash('Prompt copied.');
+        setTimeout(() => setCopyFlash(''), 2200);
+        return;
+      }
+    } catch (e) { /* fall through */ }
+    setCopyFlash('Long-press the prompt to copy.');
+    setTimeout(() => setCopyFlash(''), 2500);
+  };
+
+  if (!cleanProse) return null;
+
+  if (!requested) {
+    return (
+      <button
+        className="ghost-button-sm"
+        onClick={() => setRequested(true)}
+        style={{ marginTop: '0.5rem' }}
+        title="Generate an illustration from this passage"
+      >
+        ✦ {label}
+      </button>
+    );
+  }
+
+  return (
+    <div style={{
+      marginTop: '0.7rem', padding: '0.7rem 0.8rem',
+      background: 'rgba(255,255,255,0.25)',
+      border: '1px solid rgba(74,44,20,0.2)',
+    }}>
+      <div className="display" style={{ fontSize: '0.78em', color: '#6b4423', letterSpacing: '0.06em', marginBottom: '0.5rem' }}>
+        ⁂ AN ILLUSTRATION
+      </div>
+      {imgState !== 'failed' && (
+        <img
+          src={imgUrl}
+          alt="An illustration of the scene"
+          onLoad={() => setImgState('loaded')}
+          onError={() => setImgState('failed')}
+          style={{
+            width: '100%', maxWidth: '480px', height: 'auto',
+            display: imgState === 'loaded' ? 'block' : 'none',
+            border: '1px solid rgba(74,44,20,0.2)',
+            margin: '0 auto',
+          }}
+        />
+      )}
+      {imgState === 'loading' && (
+        <div className="italic" style={{ color: '#6b4423', fontSize: '0.85em' }}>
+          The hand sketches the scene… this can take half a minute.
+        </div>
+      )}
+      {imgState === 'failed' && (
+        <div style={{ fontSize: '0.85em', color: '#8b1a1a', fontStyle: 'italic' }}>
+          The illustration could not be reached. Copy the prompt below and use it in another tool.
+        </div>
+      )}
+      <details style={{ marginTop: '0.6rem' }}>
+        <summary style={{ cursor: 'pointer', fontSize: '0.82em', color: '#6b4423' }}>
+          Prompt {imgState === 'failed' ? '(copy and paste into ChatGPT / DALL·E / Midjourney)' : ''}
+        </summary>
+        <textarea
+          readOnly
+          value={fullPrompt}
+          onFocus={(e) => e.currentTarget.select()}
+          style={{
+            width: '100%', minHeight: '4rem', padding: '0.4rem', marginTop: '0.3rem',
+            fontFamily: 'monospace', fontSize: '0.78em',
+            background: 'rgba(255,255,255,0.4)',
+            border: '1px solid rgba(74,44,20,0.2)',
+            color: '#2a1a0a',
+            boxSizing: 'border-box',
+          }}
+        />
+        <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
+          <button className="ghost-button-sm" onClick={copyPrompt}>Copy prompt</button>
+          {copyFlash && (
+            <span style={{ fontSize: '0.78em', color: '#3a5c2a', fontStyle: 'italic' }}>{copyFlash}</span>
+          )}
+        </div>
+      </details>
     </div>
   );
 }
@@ -4205,6 +4320,7 @@ function JournalView({ gs, arrivalProse, setTab, openLetterById }) {
         <div style={{ marginBottom: '1.5rem', padding: '1rem', borderLeft: '3px solid #5c1a08', background: 'rgba(255,255,255,0.3)' }}>
           <div className="display" style={{ fontSize: '0.8em', color: '#6b4423' }}>UPON ARRIVAL AT {gs.location.toUpperCase()}</div>
           <p className="italic" style={{ marginTop: '0.5rem', marginBottom: 0 }}>{arrivalProse.prose}</p>
+          <ImaginePanel prose={arrivalProse.prose} label="Imagine the harbour" />
         </div>
       )}
 
@@ -4618,6 +4734,7 @@ function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab, lodg
       {arrivalProse?.port === gs.location && (
         <div style={{ padding: '0.8rem', borderLeft: '3px solid #5c1a08', background: 'rgba(255,255,255,0.3)', marginBottom: '1.5rem' }}>
           <p className="italic" style={{ margin: 0 }}>{arrivalProse.prose}</p>
+          <ImaginePanel prose={arrivalProse.prose} label="Imagine the harbour" />
         </div>
       )}
 
@@ -5233,6 +5350,7 @@ function LettersView({ gs, setGs, onRespond, openLetterId, setOpenLetterId }) {
           <div className="italic" style={{ marginBottom: '1rem' }}>{letter.subject}</div>
           <Fleuron char="❧" />
           <p style={{ whiteSpace: 'pre-line', fontSize: '1.05em' }}>{letter.body}</p>
+          <ImaginePanel prose={letter.body} label="Imagine the sender's hand" />
           <Fleuron />
           {letter.replied ? (
             <div className="italic" style={{ color: '#6b4423' }}>You replied: &ldquo;{letter.replyLabel}&rdquo;</div>

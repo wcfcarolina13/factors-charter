@@ -2315,6 +2315,149 @@ Pyke`,
 
   return null;
 }
+
+// Wilbraham step 3 — ter Borch answers back. Fires 30 days after the
+// player's pursuit (closed-pursuing-dutch or closed-confronted-dutch).
+// He has had time to weigh the options. Three forms his answer takes,
+// chosen here by the existing Dutch standing — the colder it is, the
+// more openly hostile his reply.
+
+function makeWilbrahamStep3Letter(s) {
+  const dutchRep = s.reputation?.dutch || 0;
+  // Hot, cool, or cold — three tone variants. Player gets a letter that
+  // matches their existing standing with the Dutch.
+  if (dutchRep >= 0) {
+    // He answers civilly, even half-conceding; the matter can be settled
+    // at the trade pass's renewal.
+    return {
+      id: 9630000 + s.day,
+      from: 'Mynheer ter Borch, of the Dutch House at Eustace',
+      subject: 'A reply, after due consideration',
+      body: `Sir, — I have weighed yr. letter and the implications you do not put plainly. The matter of Mr. Wilbraham's last days was, by report, a fever; and the Mission, by report, did not come down to the bedside. These facts I take from common knowledge; nothing in them is mine to write or yours to address to me.
+
+That said, sir, I have read carefully and I am not insensible. There is, in my private books, a draft of a paper from yr. predecessor that I have never put forward to the late Mr. Wilbraham's executors, and shall not. If yr. office wishes, the draft can be destroyed at the next packet; if not, it remains in my keeping and goes no further.
+
+I shall expect an acknowledgement.
+
+Yr. obedt. servt.,
+ter Borch`,
+      responses: [
+        {
+          label: 'Thank him; ask the draft be destroyed',
+          seed: 'closes the chapter; small Dutch standing',
+          fixedOutcome: {
+            prose: 'You write a brief acknowledgement and ask, in proper form, for the draft to be destroyed at the next packet. Ter Borch sends back a single line: "It is done." The matter is closed.',
+            changes: {
+              reputation: { dutch: 4 },
+              flags: { wilbrahamMystery: 'closed-settled' },
+              journal: 'Settled the matter of Mr. Wilbraham\'s gambling draft with ter Borch. The paper is destroyed; the Hollander\'s books are clean.',
+            },
+          },
+        },
+        {
+          label: 'Ask for the draft itself; don\'t trust the Hollander',
+          seed: 'evidence in hand; small Dutch loss',
+          fixedOutcome: {
+            prose: 'You write asking for the draft itself, by the next safe packet. Ter Borch obliges with cooler grace than is usual. The folded paper arrives in yr. strongbox a fortnight later — a draft signed in Wilbraham\'s hand, dated three weeks before his death. You hold the evidence; the matter, on yr. side, may be made of what you wish.',
+            changes: {
+              reputation: { dutch: -3 },
+              flags: { wilbrahamMystery: 'closed-evidence-held', wilbrahamDraftHeld: true },
+              journal: 'Asked ter Borch for the draft itself. He sent it. The Wilbraham gambling draft sits in yr. strongbox.',
+              hook: 'Wilbraham\'s draft, in his own hand, sits in yr. strongbox. It is evidence enough for the Court if the Factor cared to use it.',
+            },
+          },
+        },
+      ],
+      read: false,
+    };
+  }
+
+  if (dutchRep >= -20) {
+    // Cool — he denies all, takes offense, but doesn't escalate. The matter
+    // closes with an open door slamming shut.
+    return {
+      id: 9631000 + s.day,
+      from: 'Mynheer ter Borch, of the Dutch House at Eustace',
+      subject: 'A formal reply',
+      body: `Sir, — I have read yr. letter once and shall not read it twice. There were no papers from Mr. Wilbraham. There were no kitchen jars. The Hollander does not, sir, employ poisoners.
+
+If yr. office wishes a continued commercial acquaintance with this house, you will see fit not to write again on this matter. We have, after this hand, no further business but the customs at the wharf.
+
+Yr. obedt. servt.,
+ter Borch`,
+      responses: [
+        {
+          label: 'Acknowledge; let the matter rest',
+          seed: 'closes; small Dutch repair',
+          fixedOutcome: {
+            prose: 'You write a brief note acknowledging the receipt and the rebuke, and let the matter rest. Ter Borch does not reply, which on his terms is a reply.',
+            changes: {
+              reputation: { dutch: 2 },
+              flags: { wilbrahamMystery: 'closed-rebuked' },
+              journal: 'Ter Borch took offense at yr. letter and rebuked you; you let the matter rest. The Hollander\'s door is the cooler for it but not closed.',
+            },
+          },
+        },
+        {
+          label: 'Press the matter; there is too much smoke for no fire',
+          seed: 'further hostility; reputation cost',
+          fixedOutcome: {
+            prose: 'You write again, more pointedly. Ter Borch does not answer in writing this time. A small but pointed obstruction begins at the Eustace customs the next month — extra forms, longer waits. The matter is, for now, his to handle without you.',
+            changes: {
+              reputation: { dutch: -8 },
+              flags: { wilbrahamMystery: 'closed-pressed' },
+              journal: 'Pressed ter Borch on the Wilbraham matter. He stopped writing; the customs at Eustace grew slower for some months.',
+              hook: 'The Hollander has dug in. Yr. business at Eustace will move at the customs clerks\' pace, and the clerks know what is wanted of them.',
+            },
+          },
+        },
+      ],
+      read: false,
+    };
+  }
+
+  // Cold (Dutch standing < -20) — he proposes a duel, period-plausible.
+  return {
+    id: 9632000 + s.day,
+    from: 'Mynheer ter Borch, of the Dutch House at Eustace',
+    subject: 'A demand',
+    body: `Sir, — I have had enough. The implication you have laid against this house is not one I shall answer in writing twice. I have laid yr. correspondence before two Dutch gentlemen of Batavia who were of Mr. Wilbraham\'s acquaintance; they are content that the matter be settled at twelve paces.
+
+I shall expect a second to call upon mine — Mr. Vossius, of the same establishment — at the earliest convenience. Pistols are to my preference, if it is yours. Otherwise the customs at Eustace shall in future be closed against yr. ship by my own application to the Senior Factor.
+
+Yr. servt., on this point precisely as long as it requires,
+ter Borch`,
+    responses: [
+      {
+        label: 'Accept; meet him at twelve paces',
+        seed: 'high-stakes duel: ship damage or kill or be killed; faction shifts',
+        fixedOutcome: {
+          prose: 'You appoint Sgt. Dass as yr. second and the meeting is set on a coral spit at low tide. Ter Borch is the worse shot; you meet at twelve paces and he falls at the first exchange, in the leg. He survives, with a limp, and writes you no more on any subject. The Crown is, when news reaches Madras, quietly content.',
+          changes: {
+            reputation: { dutch: -25, crown: 6 },
+            flags: { wilbrahamMystery: 'closed-duelled' },
+            journal: 'Met ter Borch at twelve paces on a coral spit. He fell at the first exchange — wounded in the leg, his correspondence ended forever.',
+            hook: 'The duel will be remarked upon. The Hollander\'s door is shut against yr. ship at Eustace; the Crown is, in private, content.',
+          },
+        },
+      },
+      {
+        label: 'Refuse the duel; accept the customs penalty',
+        seed: 'Dutch close their door; small standing for refusing violence',
+        fixedOutcome: {
+          prose: 'You write a careful refusal; a man of yr. office does not meet pistols on the say-so of the Hollander. The customs at Eustace are closed against yr. ship by formal application to the Senior Factor; ter Borch sees you no more at his desk.',
+          changes: {
+            reputation: { dutch: -15, mission: 5 },
+            flags: { wilbrahamMystery: 'closed-refused-duel', dutchPortClosed: true },
+            journal: 'Refused ter Borch\'s challenge. The Eustace customs are closed against yr. ship; the Mission is, on this point, with you.',
+            hook: 'The Eustace customs are closed against yr. ship. The Hollander has, on his terms, won.',
+          },
+        },
+      },
+    ],
+    read: false,
+  };
+}
 // Senders gated by reputation / flags so the post reflects the Factor's
 // standing. The Director and the Vizier have dedicated cadences elsewhere
 // (Indiaman + quarterly nags; teak concession) and are excluded here so we
@@ -3413,6 +3556,25 @@ function tickDays(gs, days) {
         s.awayLog.push({ day: s.day, type: 'letter', text });
       }
     }
+    // Wilbraham step 3 — ter Borch answers back, 30 days after the Factor
+    // pursued or confronted him. The tone of his reply branches by the
+    // existing Dutch standing (cordial, cool, or cold).
+    const wStep3Sent = !!s.flags?.wilbrahamStep3Sent;
+    const wPursuingDutch = wStep === 'closed-pursuing-dutch' || wStep === 'closed-confronted-dutch';
+    if (
+      !s.charterClosed &&
+      !wStep3Sent &&
+      wPursuingDutch &&
+      s.day >= ((s.flags?.wilbrahamStep1Day || 0) + 60)  // step 2 set the pursuit, then 30 more
+    ) {
+      const letter = makeWilbrahamStep3Letter(s);
+      if (letter) {
+        s.letters = [...s.letters, letter];
+        s.lettersGenerated = (s.lettersGenerated || 0) + 1;
+        s.flags = { ...(s.flags || {}), wilbrahamStep3Sent: true };
+        s.awayLog.push({ day: s.day, type: 'letter', text: 'A reply from Mynheer ter Borch by the next Dutch packet — the tone is what yr. standing has earned.' });
+      }
+    }
 
     // ── Raid: opportunists at the godown. Stockade halves the chance, the
     // Barracks halves it again. The Magazine caps any single loss at 10%.
@@ -3657,6 +3819,12 @@ const MAJOR_COMMITMENTS = [
       v === 'closed-confronted-dutch'  ? 'You confronted ter Borch on the kitchen jar; the Hollander\'s door is the colder for it.' :
       v === 'closed-vizier'            ? 'The Vizier handled ter Borch\'s clerk for you. The favour is yrs. to be reminded of.' :
       v === 'closed-buried'            ? 'You burned Hodge\'s note on Mr. Wilbraham; the matter died with the morning.' :
+      v === 'closed-settled'           ? 'Ter Borch destroyed Wilbraham\'s gambling draft at yr. word; the matter is closed.' :
+      v === 'closed-evidence-held'     ? 'Wilbraham\'s draft, in his own hand, sits in yr. strongbox. Evidence enough.' :
+      v === 'closed-rebuked'           ? 'Ter Borch rebuked yr. letter; the Hollander\'s door is the cooler for it.' :
+      v === 'closed-pressed'           ? 'You pressed ter Borch; the Eustace customs grow slower for it.' :
+      v === 'closed-duelled'           ? 'Met ter Borch at twelve paces on a coral spit; he fell at the first exchange.' :
+      v === 'closed-refused-duel'      ? 'Refused ter Borch\'s challenge; the Eustace customs are closed against yr. ship.' :
       null },
   { key: 'cylinderQuest', label: (v) =>
       v === 'pending'              ? 'Idris\'s cylinder lies under yr. weights; he has written.' :

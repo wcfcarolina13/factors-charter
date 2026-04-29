@@ -554,11 +554,38 @@ const ensureShape = (gs) => {
   if (next.bottomry === undefined) {
     next.bottomry = null;
   }
+  if (typeof next.privateTradeProceeds !== 'number') {
+    next.privateTradeProceeds = 0;
+  }
   if (next.privateConsignmentOffered === undefined) {
     next.privateConsignmentOffered = false;
   }
   if (!Array.isArray(next.pendingLetterRequests)) {
     next.pendingLetterRequests = [];
+  }
+  // Defensive ensureShape additions — fields that have always existed in
+  // makeInitialState but old / corrupted saves may have lost.
+  if (!Array.isArray(next.hooks)) next.hooks = [];
+  if (!Array.isArray(next.journal)) next.journal = [];
+  if (!Array.isArray(next.letters)) next.letters = [];
+  if (!Array.isArray(next.crew)) next.crew = [];
+  if (!Array.isArray(next.visited)) next.visited = ['Bayan-Kor'];
+  if (!Array.isArray(next.awayLog)) next.awayLog = [];
+  if (!next.npcs || typeof next.npcs !== 'object') {
+    next.npcs = {
+      hodge:  { name: 'Mr. Hodge',          role: 'Clerk',  sobriety: 60, loyalty: 50, lastDrunk: 0, note: '' },
+      dass:   { name: 'Sgt. Dass',          role: 'Sepoy',  loyalty: 75, morale: 65, health: 80, note: '' },
+      vizier: { name: 'The Rajah’s Vizier', role: 'Vizier', friendliness: 30, scheming: 0, note: '' },
+    };
+  }
+  if (!next.reputation || typeof next.reputation !== 'object') {
+    next.reputation = { company: 0, crown: 0, rajah: 0, pirates: 0, mission: 0, dutch: 0 };
+  }
+  if (!next.quotas || typeof next.quotas !== 'object') {
+    next.quotas = { pepper: { needed: 400, have: 0 }, cinnamon: { needed: 200, have: 0 } };
+  }
+  if (!next.player || typeof next.player !== 'object' || !next.player.name) {
+    next.player = next.player || { name: 'The Factor', title: 'Factor' };
   }
   return next;
 };
@@ -722,6 +749,7 @@ Mr. W. died this morning at half past four. The Reverend will not come down from
   // the Factor's own account. Funds return at the next Indiaman call at a
   // London-market multiplier. While in flight, the consignment lives here.
   privateConsignment: null, // null | { commodities: { key: cwt }, shippedDay, returnDay, expectedPayout }
+  privateTradeProceeds: 0,  // cumulative £ proceeds from private trade returns; gates Mountfair
   // A bottomry bond — period-accurate leverage. Loan secured against ship +
   // cargo; repaid at +25% on the next return to Bayan-Kor; forgiven if the
   // voyage suffers significant shipDamage (>= 25 hull or sails) before then.
@@ -1362,13 +1390,12 @@ Mountfair`,
   };
 }
 
-// Sums the proceeds-history of private consignments that have already
-// returned. Used by the Mountfair gate.
+// Real cumulative private trade proceeds — incremented each Indiaman
+// payout. Used by the Mountfair gate. Resets on charter transitions
+// (succession or renewal) so each Factor earns the patronage on his
+// own returns.
 function privateTradeReturned(s) {
-  // Cumulative returns are reflected in money + history; we don't track a
-  // separate history here, so use a heuristic — the Factor's money plus
-  // current consignment. Threshold-only; absolute precision unimportant.
-  return (s.money || 0);
+  return s.privateTradeProceeds || 0;
 }
 
 // ─────────── THE HODGE CRISIS ───────────
@@ -2516,6 +2543,8 @@ function makeSuccessorState(prev, newName) {
     pendingLetterRequests: [],
     privateConsignment: null,
     privateConsignmentOffered: false,
+    bottomry: null,                      // any outstanding bond is the predecessor's; the new Factor inherits no debt at the bazaar
+    privateTradeProceeds: 0,             // cumulative private trade income, fresh per Factor
     letters: [makeSuccessorDirectorLetter(prev, newName, moneyKept)],
     hooks: [],
     journal: [{ day: 1, entry: `Took up the Charter at Bayan-Kor in succession to ${prev.player?.name || 'the late Factor'}.` }],
@@ -2591,6 +2620,8 @@ function makeRenewedState(prev) {
     pendingLetterRequests: [],
     privateConsignment: null,
     privateConsignmentOffered: false,
+    bottomry: null,                  // outstanding bond from the previous charter is settled with the bazaar; the renewed Factor begins clear
+    privateTradeProceeds: 0,         // cumulative private trade income resets per charter
     letters: [makeRenewalDirectorLetter(prev)],
     hooks: [],
     journal: [{ day: 1, entry: `Charter renewed at Bayan-Kor for a second three years.` }],
@@ -2885,6 +2916,7 @@ function tickDays(gs, days) {
         }
         if (payout > 0) {
           s.money = (s.money || 0) + payout;
+          s.privateTradeProceeds = (s.privateTradeProceeds || 0) + payout;
           s.awayLog.push({
             day: s.day,
             type: 'private_trade',
@@ -3217,20 +3249,34 @@ function tickDays(gs, days) {
     }
 
     // ── Wilbraham mystery questline. Step 1: Sgt. Dass writes about the
-    // night Wilbraham died. Gates: day 100, dass loyalty >= 70, !sent.
+    // night Wilbraham died. Gates: day 100, dass loyalty >= 70 (he's still
+    // there and trusts the Factor) — but if Dass is gone (released), Mr.
+    // Hodge carries the message instead, in his cups, after day 150 if his
+    // sobriety has stabilised. Either path uses the same Step 1 letter
+    // (we just adjust the framing); the questline doesn't strand.
     const wStep = s.flags?.wilbrahamMystery;
+    const dassPresent = s.flags?.dassRecall !== 'released';
+    const dassTrusts = (s.npcs?.dass?.loyalty || 0) >= 70;
+    const hodgeRecovered = (s.npcs?.hodge?.sobriety || 0) >= 50;
+    const dassGate = dassPresent && dassTrusts && s.day >= 100;
+    const hodgeGate = !dassPresent && hodgeRecovered && s.day >= 150;
     if (
       !s.charterClosed &&
       !wStep &&
-      s.day >= 100 &&
-      (s.npcs?.dass?.loyalty || 0) >= 70 &&
-      s.flags?.dassRecall !== 'released'  // can't write if he's gone
+      (dassGate || hodgeGate)
     ) {
       const letter = makeWilbrahamStep1Letter(s);
+      // If Hodge is the carrier, retitle the letter — he writes differently.
+      if (hodgeGate) {
+        letter.from = 'Mr. Hodge, after a Friday evening';
+        letter.subject = 'A matter from the year of Mr. Wilbraham';
+      }
       s.letters = [...s.letters, letter];
       s.lettersGenerated = (s.lettersGenerated || 0) + 1;
       s.flags = { ...(s.flags || {}), wilbrahamMystery: 'pending' };
-      s.awayLog.push({ day: s.day, type: 'letter', text: 'Sgt. Dass came in his own time, with a folded note in his careful hand — concerning the late Mr. Wilbraham.' });
+      s.awayLog.push({ day: s.day, type: 'letter', text: dassGate
+        ? 'Sgt. Dass came in his own time, with a folded note in his careful hand — concerning the late Mr. Wilbraham.'
+        : 'Mr. Hodge in his cups Friday evening — a matter from the year of Mr. Wilbraham.' });
     }
     const wStep2Sent = !!s.flags?.wilbrahamStep2Sent;
     const wActive = wStep === 'asked-reverend' || wStep === 'asked-hodge';
@@ -3482,6 +3528,7 @@ const MAJOR_COMMITMENTS = [
       v === 'closed-delivered'     ? 'The contract is fulfilled. Opium delivered at Eustace under cover; £400 paid.' :
       v === 'closed-delivered-half'? 'The reduced contract is fulfilled. £200 paid by the trusted runner.' :
       v === 'closed-caught'        ? 'Caught at the Eustace customs. The cargo is gone, the Dutch know yr. face.' :
+      v === 'closed-cargo-lost'    ? 'The pale man\'s contract is void; the opium was not in yr. hold for the drop.' :
       null },
   { key: 'wilbrahamMystery', label: (v) =>
       v === 'pending'                  ? 'Sgt. Dass has written on the matter of Mr. Wilbraham\'s last night.' :
@@ -5665,10 +5712,16 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
   // capture voids the contract and crashes Dutch standing.
   const liftContractOpium = () => {
     if (gs.location !== 'The Pelican’s Nest') return;
+    if (gs.charterClosed) return;
     const stage = gs.flags?.paleManQuest;
     if (stage !== 'closed-contracted' && stage !== 'closed-half-contract') return;
     if (gs.flags?.contractOpiumLifted) return;
     const cwt = stage === 'closed-half-contract' ? 2 : 4;
+    // Hold space check — must fit. Caller's UI also disables the button
+    // when this fails, but defensive double-check.
+    const w = COMMODITIES.opium.weight || 0.6;
+    const remaining = Math.max(0, cargoCap(gs) - cargoWeight(gs.goods));
+    if (remaining < cwt * w) return;
     setGs(prev => ({
       ...prev,
       goods: { ...prev.goods, opium: (prev.goods.opium || 0) + cwt },
@@ -5679,9 +5732,27 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
 
   const runDutchCustoms = () => {
     if (gs.location !== 'Port St. Eustace') return;
+    if (gs.charterClosed) return;
     const lifted = gs.flags?.contractOpiumLifted;
     if (!lifted) return;
     if (gs.flags?.paleManQuest !== 'closed-contracted' && gs.flags?.paleManQuest !== 'closed-half-contract') return;
+    // Validate the player still has the opium cargo. If they sold it
+    // elsewhere first, the contract is void and the lifted flag clears.
+    const opiumOnHand = Math.floor(gs.goods?.opium || 0);
+    if (opiumOnHand < lifted) {
+      setGs(prev => {
+        const flags = { ...(prev.flags || {}) };
+        delete flags.contractOpiumLifted;
+        flags.paleManQuest = 'closed-cargo-lost';
+        return {
+          ...prev,
+          flags,
+          journal: [...prev.journal, { day: prev.day, entry: `The pale man's contract is void. The opium is no longer in yr. hold; there is nothing to drop.` }],
+          hooks: [...prev.hooks, 'The pale man\'s contract is void; the cargo was not delivered. He is not the kind of man who explains his disappointment in writing.'],
+        };
+      });
+      return;
+    }
     const isHalf = gs.flags.paleManQuest === 'closed-half-contract';
     // Catch chance: 30% base; trade pass cuts to 5%; Dutch standing >= +20 trims further.
     let catchChance = 0.30;

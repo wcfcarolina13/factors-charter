@@ -2398,44 +2398,153 @@ function evalCharterOutcome(s) {
   return 'failure';
 }
 
+// The Factor's destiny at the close of his charter, drawn from accumulated
+// state: which factions were served, which patrons earned, which paths
+// chosen. Returns one of seven keys. Priority rules:
+//
+//   brotherhood-retirement: pirates >= +30, brotherhoodCompact held, Crown
+//     standing burned (<= 0). The Factor has thrown in with the company
+//     he kept.
+//   crown-knighthood: Crown >= +30, outcome >= partial, no compact. His
+//     Majesty notices an enterprising Factor.
+//   country-estate: Mountfair patron held, outcome >= partial. Lord
+//     Mountfair has set aside an estate.
+//   bayan-kor-seat: Rajah >= +30, outcome >= partial. The Vizier offers
+//     the post of English Resident at the palace.
+//   senior-factor: outcome === 'success' default — a second charter at
+//     more agreeable terms.
+//   quiet-retirement: outcome === 'partial' default — the Factor goes
+//     home with what he has.
+//   recall-disgrace: outcome === 'failure' — the Court calls him back.
+function evalCharterDestiny(s) {
+  const outcome  = evalCharterOutcome(s);
+  const crown    = s.reputation?.crown  || 0;
+  const pirates  = s.reputation?.pirates || 0;
+  const rajah    = s.reputation?.rajah  || 0;
+  const compact  = !!s.flags?.brotherhoodCompact;
+  const mountfair = s.flags?.mountfairPatron === true;
+
+  // Brotherhood retirement: the strongest pirate-aligned ending. Beats all
+  // others if the Factor has fully thrown in with the Brotherhood. Quota
+  // outcome doesn't apply — they don't care about the Court's books.
+  if (pirates >= 30 && compact && crown <= 0) return { outcome, destiny: 'brotherhood-retirement' };
+
+  // Knighthood requires Crown standing AND no compact (His Majesty does not
+  // confer honours upon men who have privately treated with the Brotherhood).
+  if (crown >= 30 && !compact && outcome !== 'failure') return { outcome, destiny: 'crown-knighthood' };
+
+  // Country estate via Mountfair's patronage.
+  if (mountfair && outcome !== 'failure') return { outcome, destiny: 'country-estate' };
+
+  // Bayan-Kor seat — the Resident posting via the Vizier.
+  if (rajah >= 30 && outcome !== 'failure') return { outcome, destiny: 'bayan-kor-seat' };
+
+  // Defaults by outcome.
+  if (outcome === 'success') return { outcome, destiny: 'senior-factor' };
+  if (outcome === 'partial') return { outcome, destiny: 'quiet-retirement' };
+  return { outcome, destiny: 'recall-disgrace' };
+}
+
 function makeCharterEndLetter(s) {
-  const outcome   = evalCharterOutcome(s);
+  const { outcome, destiny } = evalCharterDestiny(s);
   const totalPep  = Math.floor(s.quotas?.pepper?.have   || 0);
   const totalCin  = Math.floor(s.quotas?.cinnamon?.have || 0);
+  const reckoning = `${totalPep} cwt of pepper and ${totalCin} cwt of cinnamon stand to yr. account`;
 
-  let subject, body;
-  if (outcome === 'success') {
-    subject = 'Yr. Charter Honourably Concluded';
-    body = `Sir, — The third year is upon us, and the file at this House is closed in yr. favour. ${totalPep} cwt of pepper and ${totalCin} cwt of cinnamon stand to yr. account, the obligation discharged in full.
+  let subject, body, from;
+  switch (destiny) {
+    case 'crown-knighthood':
+      from = 'The Court of Directors, with His Majesty\'s pleasure';
+      subject = 'Yr. Charter Concluded — and a Notice from the King';
+      body = `Sir, — The third year is upon us. ${reckoning}, the obligation discharged with credit and the file at this House closed in yr. favour.
+
+We are instructed by the Standing Committee, with His Majesty\'s pleasure, to advise you that you are appointed Knight Bachelor by His Royal pen, in recognition of yr. services to the Crown in matters of intelligence and the suppression of the Brotherhood in the strait. The patent will be conferred upon yr. arrival at Whitehall.
+
+A second charter is at yr. discretion. We hope, as the Court hopes, that yr. next venture is at the harder yardstick of a man who has shown what may be done at Bayan-Kor.
+
+Yr. obedt. servants, the Court of Directors.`;
+      break;
+
+    case 'country-estate':
+      from = 'The Court of Directors, by Lord Mountfair\'s arrangement';
+      subject = 'Yr. Charter Concluded — and a Hellingly note enclosed';
+      body = `Sir, — The third year is up. ${reckoning}; the obligation is met at the figure the Court has hoped for, and yr. file is closed in yr. favour.
+
+His Lordship Mountfair has, by separate cover, enclosed terms of an estate at Hellingly in Sussex which he has set aside upon yr. account. The lease is yrs. on landing; the rents from the home farm shall come to yr. own steward. The Court extends its concurrence to the arrangement, in such terms as the Standing Committee can frame in writing.
+
+A second charter will be offered should you wish, but the country gentleman\'s life is by all accounts the kinder one.
+
+Yr. obedt. servants, the Court of Directors.`;
+      break;
+
+    case 'bayan-kor-seat':
+      from = 'The Court of Directors, with the Rajah\'s petition enclosed';
+      subject = 'Yr. Charter Concluded — and an Offer from the Palace';
+      body = `Sir, — The third year is closed. ${reckoning}. The reckoning is honourable, the office well held.
+
+There is an unusual matter laid before the Standing Committee in yr. case. His Highness the Rajah has formally petitioned the Court that you be permitted to remain at Bayan-Kor as English Resident, with letters patent and a stipend of one hundred and fifty pounds per annum on the Company\'s account. The Vizier has appended a separate memorial of yr. service to the Rajah\'s establishment.
+
+This is irregular but not unprecedented. The Court is content to let you decide. A second charter is the alternative.
+
+Yr. obedt. servants, the Court of Directors.`;
+      break;
+
+    case 'brotherhood-retirement':
+      from = 'Capt. Gerrit Maas, of the Brotherhood';
+      subject = 'No Indiaman this season';
+      body = `Sir, — There is no Indiaman, sir. There has not been one expected for some time, and the Court of Directors will, at this hand, be writing to a successor and not to you.
+
+You have chosen yr. company. The Pelican\'s Nest has a small house above the cove, presently empty, that we shall make over to you upon application. The Brotherhood does not pretend to confer titles, but it does extend a roof and a name and what passes among the captains for hospitality.
+
+The Court will think you dead, in due course; we shall not contradict them.
+
+Yr. obedt. servant in yr. new station,
+Gerrit Maas`;
+      break;
+
+    case 'senior-factor':
+      from = 'The Court of Directors, London';
+      subject = 'Yr. Charter Honourably Concluded';
+      body = `Sir, — The third year is upon us, and the file at this House is closed in yr. favour. ${reckoning}, the obligation discharged in full.
 
 The Court is well pleased. A second charter will be offered to you in the next packet, with terms more agreeable to a man who has shown what may be done at Bayan-Kor. Yr. tenth of net returns shall be lodged with yr. London agent by Lady Day.
 
 Yr. obedt. servants, the Court of Directors.`;
-  } else if (outcome === 'partial') {
-    subject = 'On the Closing of Yr. Charter';
-    body = `Sir, — The third year is up. The reckoning stands at ${totalPep}/400 pepper and ${totalCin}/200 cinnamon. The obligation is not discharged in full and we cannot pretend it is.
+      break;
+
+    case 'quiet-retirement':
+      from = 'The Court of Directors, London';
+      subject = 'On the Closing of Yr. Charter';
+      body = `Sir, — The third year is up. The reckoning stands at ${totalPep}/400 pepper and ${totalCin}/200 cinnamon. The obligation is not discharged in full and we cannot pretend it is.
 
 We do not propose to despatch a successor at present. There are, in this latitude, harder posts than yours and easier; you are now of an age to know which is which. We expect a written account of the difficulties, of yr. own pen, by the next homeward Indiaman.
 
 Yr. servants, the Court of Directors.`;
-  } else {
-    subject = 'Yr. Recall, by the Next Packet';
-    body = `Sir, — The third year is closed. We have ${totalPep} cwt of pepper and ${totalCin} cwt of cinnamon out of yr. station against an obligation we set in plain terms three years gone. The Court will not pretend at further patience.
+      break;
+
+    case 'recall-disgrace':
+    default:
+      from = 'The Court of Directors, London';
+      subject = 'Yr. Recall, by the Next Packet';
+      body = `Sir, — The third year is closed. We have ${totalPep} cwt of pepper and ${totalCin} cwt of cinnamon out of yr. station against an obligation we set in plain terms three years gone. The Court will not pretend at further patience.
 
 A successor is despatched by the Indiaman next outbound. You will deliver yr. books, yr. keys, and yr. seals to him upon his landing, and take passage home in his place. The matter of yr. tenth is referred to the Standing Committee. Mr. Wilbraham's bones are in the chapel-yard at Bayan-Kor; you have at least the option of the next packet.
 
 Yr. servants, the Court of Directors.`;
+      break;
   }
+
   return {
     outcome,
+    destiny,
     letter: {
       id: 5000000 + s.day,
-      from: 'The Court of Directors, London',
+      from,
       subject,
       body,
       responses: [
         { label: 'Acknowledge in plain terms', seed: 'no rep change' },
-        { label: 'Reply with a measured account of difficulties', seed: 'company notes the case' },
+        { label: 'Reply with a measured account', seed: 'company notes the case' },
         { label: 'Set the letter aside, write nothing', seed: 'silence' },
       ],
       read: false,
@@ -2677,11 +2786,18 @@ function tickDays(gs, days) {
     // events (Indiaman, quarterly nag, auto-letters) are gated on
     // !s.charterClosed in their own conditions, so they go quiet.
     if (s.daysRemaining === 0 && !s.charterClosed) {
-      const { letter, outcome } = makeCharterEndLetter(s);
+      const { letter, outcome, destiny } = makeCharterEndLetter(s);
       s.letters = [...s.letters, letter];
       s.lettersGenerated = (s.lettersGenerated || 0) + 1;
-      s.charterClosed = { day: s.day, outcome };
-      s.awayLog.push({ day: s.day, type: 'charter-end', text: 'The third year is up. A packet from the Court closes the file.' });
+      s.charterClosed = { day: s.day, outcome, destiny };
+      const destinyText = (
+        destiny === 'crown-knighthood'      ? ' His Majesty has been pleased to confer a knighthood.' :
+        destiny === 'country-estate'        ? ' Lord Mountfair has set aside an estate.' :
+        destiny === 'bayan-kor-seat'        ? ' The Rajah has petitioned the Court for yr. continued post.' :
+        destiny === 'brotherhood-retirement'? ' No Indiaman this season; a different roof above the cove.' :
+        ''
+      );
+      s.awayLog.push({ day: s.day, type: 'charter-end', text: 'The third year is up. A packet from the Court closes the file.' + destinyText });
     }
 
     // ── port stocks replenish toward their cap. Sublocation stocks live
@@ -4809,7 +4925,15 @@ function TitleScreen({ saves, onNewGame, onContinue, onRestore, onDeleteSlot }) 
                     </div>
                     <div style={{ fontSize: '0.82em', color: '#6b4423', letterSpacing: '0.04em' }}>
                       {s.charterClosed
-                        ? <>Charter closed{s.charterClosed.outcome ? ` — ${s.charterClosed.outcome}` : ''} &middot; {fmtAgo(s.lastSavedAt)}</>
+                        ? <>Charter closed{s.charterClosed.destiny ? ` — ${({
+                            'crown-knighthood':       'knighted',
+                            'country-estate':         'a country estate',
+                            'bayan-kor-seat':         'Resident at Bayan-Kor',
+                            'brotherhood-retirement': 'with the Brotherhood',
+                            'senior-factor':          'honourable',
+                            'quiet-retirement':       'partial',
+                            'recall-disgrace':        'recalled',
+                          })[s.charterClosed.destiny] || s.charterClosed.outcome}` : (s.charterClosed.outcome ? ` — ${s.charterClosed.outcome}` : '')} &middot; {fmtAgo(s.lastSavedAt)}</>
                         : <>Day {s.day}{totalDays ? ` of ${totalDays}` : ''} &middot; {fmtAgo(s.lastSavedAt)}</>}
                     </div>
                   </div>
@@ -8625,7 +8749,7 @@ const summariseSlot = (id, gs, savedAt) => ({
   daysRemaining: gs.daysRemaining,
   location: gs.location,
   lastSavedAt: savedAt,
-  charterClosed: gs.charterClosed ? { outcome: gs.charterClosed.outcome, day: gs.charterClosed.day } : null,
+  charterClosed: gs.charterClosed ? { outcome: gs.charterClosed.outcome, destiny: gs.charterClosed.destiny, day: gs.charterClosed.day } : null,
 });
 
 async function loadSavesIndex() {

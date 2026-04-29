@@ -3890,45 +3890,232 @@ function GithubBackupModal({ gs, initialConfig, onClose }) {
   );
 }
 
-// ─────────── IMAGINE PANEL ───────────
-// Surfaces a prompt for an illustration of any passage of prose. Originally
-// also tried Pollinations.ai inline (img src bypasses connect-src CSP), but
-// that is blocked too in this artifact runtime. Now: a button opens the
-// proven ExportModal with the full prompt as content — auto-copied to
-// clipboard on open, big readable textarea, robust copy fallback for
-// long-press selection. The player pastes into ChatGPT / DALL·E /
-// Midjourney externally and saves the image to their own files.
+// ─────────── IMAGINE PANEL + ILLUSTRATION MODAL ───────────
+// A button opens a fullscreen modal that:
+//   - Auto-copies the prompt to the clipboard via the robust path
+//     (clipboard.writeText → document.execCommand('copy') on a hidden
+//     textarea → in-place selection of the visible textarea).
+//   - Optionally attempts an inline image via Pollinations.ai when the
+//     player taps "Try in-game illustration." Pollinations is blocked in
+//     the artifact runtime (img-src CSP), but the button is kept so the
+//     option is there when the runtime allows it — silent failure does
+//     not interfere with copying the prompt.
+//   - Has multiple exit paths: ✕ icon top right, Close button, click
+//     outside the modal.
 //
-// Style template prefixed to every prompt so the resulting illustrations
-// feel like the same hand made them all.
+// The IMAGINE_STYLE_PREFIX keeps illustrations consistent across the
+// charter — the same hand made them all.
 
 const IMAGINE_STYLE_PREFIX =
   '1720s logbook engraving, period woodcut style, sepia line illustration, single-color brown ink on cream parchment, period 18th century book illustration. ';
+
+// Robust copy: try modern clipboard API first; if it throws or is missing,
+// inject a hidden textarea and execCommand('copy'), which is permitted in
+// many sandboxed iframe contexts where clipboard.writeText isn't. Returns
+// true on success.
+async function robustCopy(text) {
+  try {
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch (e) { /* fall through */ }
+  try {
+    if (typeof document === 'undefined') return false;
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.top = '0';
+    ta.style.left = '0';
+    ta.style.opacity = '0';
+    ta.style.pointerEvents = 'none';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    ta.setSelectionRange(0, text.length);
+    const ok = document.execCommand && document.execCommand('copy');
+    document.body.removeChild(ta);
+    if (ok) return true;
+  } catch (e) { /* fall through */ }
+  return false;
+}
+
+function IllustrationModal({ prose, onClose }) {
+  const [tryImage, setTryImage] = useState(false);
+  const [imgState, setImgState] = useState('idle'); // 'idle' | 'loading' | 'loaded' | 'failed'
+  const [copyFlash, setCopyFlash] = useState('');
+  const taRef = useRef(null);
+
+  const cleanProse = (prose || '').replace(/\s+/g, ' ').trim().slice(0, 320);
+  const fullPrompt = IMAGINE_STYLE_PREFIX + cleanProse;
+  const seed = Math.abs(
+    cleanProse.split('').reduce((h, c) => ((h << 5) - h) + c.charCodeAt(0), 0) || 1
+  );
+  const imgUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(fullPrompt)}?width=480&height=320&nologo=true&seed=${seed}&model=flux`;
+
+  // Auto-copy on open. If both modern and legacy paths fail, leave the
+  // user with a clear instruction to manually select.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const ok = await robustCopy(fullPrompt);
+      if (cancelled) return;
+      setCopyFlash(ok
+        ? 'Prompt copied to clipboard.'
+        : 'Auto-copy was refused. Tap "Copy to clipboard" or select the text below manually.');
+      if (!ok && taRef.current) {
+        // At least pre-select so the player can long-press a single handle.
+        taRef.current.focus();
+        taRef.current.select();
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [fullPrompt]);
+
+  const onCopyClick = async () => {
+    const ok = await robustCopy(fullPrompt);
+    if (ok) {
+      setCopyFlash('Copied to clipboard.');
+    } else {
+      setCopyFlash('Copy was refused. Long-press the text below and choose Copy.');
+      if (taRef.current) {
+        taRef.current.focus();
+        taRef.current.select();
+      }
+    }
+    setTimeout(() => setCopyFlash(''), 3500);
+  };
+
+  const onGenerateClick = () => {
+    setTryImage(true);
+    setImgState('loading');
+  };
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 100,
+        background: 'rgba(20,12,4,0.55)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '1rem',
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="parchment"
+        style={{
+          background: '#f0e3c4',
+          maxWidth: '40rem', width: '100%', maxHeight: '90vh',
+          padding: '1rem',
+          display: 'flex', flexDirection: 'column',
+          boxShadow: '0 4px 16px rgba(20,12,4,0.5)',
+          border: '1px solid rgba(74,44,20,0.4)',
+          overflow: 'auto',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.4rem' }}>
+          <div className="display" style={{ fontSize: '1em', color: '#5c1a08' }}>
+            An illustration prompt
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              background: 'transparent', border: '1px solid #6b4423',
+              color: '#5c1a08', padding: '0.2rem 0.5rem', cursor: 'pointer',
+              fontFamily: '"IM Fell English SC", serif', fontSize: '0.9em',
+              minWidth: '2rem',
+            }}
+          >
+            ✕
+          </button>
+        </div>
+        <p style={{ fontSize: '0.85em', color: '#4a3220', fontStyle: 'italic', marginTop: 0, marginBottom: '0.5rem' }}>
+          The prompt has been copied to yr. clipboard. Paste it into ChatGPT, DALL·E, Midjourney, or any image-rendering tool. The in-game generator may also be tried below — it does not always reach this runtime.
+        </p>
+        <textarea
+          ref={taRef}
+          readOnly
+          value={fullPrompt}
+          onFocus={(e) => e.currentTarget.select()}
+          style={{
+            minHeight: '8rem', width: '100%',
+            fontFamily: 'monospace', fontSize: '0.82em',
+            padding: '0.5rem',
+            background: 'rgba(255,255,255,0.5)',
+            border: '1px solid rgba(74,44,20,0.3)',
+            color: '#2a1a0a',
+            resize: 'vertical',
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            boxSizing: 'border-box',
+          }}
+        />
+        {copyFlash && (
+          <div className="ink-fade-in" style={{ marginTop: '0.5rem', padding: '0.4rem 0.7rem', background: 'rgba(92,26,8,0.08)', borderLeft: '2px solid #5c1a08', fontSize: '0.85em', color: '#5c1a08' }}>
+            {copyFlash}
+          </div>
+        )}
+        <div style={{ marginTop: '0.7rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          {!tryImage && (
+            <button className="ghost-button" onClick={onGenerateClick}>
+              Try in-game illustration
+            </button>
+          )}
+          <button className="ghost-button" onClick={onCopyClick}>⎘ Copy to clipboard</button>
+          <button className="wax-button" onClick={onClose}>Close</button>
+        </div>
+        {tryImage && (
+          <div style={{ marginTop: '0.8rem', paddingTop: '0.6rem', borderTop: '1px dashed rgba(74,44,20,0.25)' }}>
+            <div className="display" style={{ fontSize: '0.78em', color: '#6b4423', letterSpacing: '0.06em', marginBottom: '0.4rem' }}>
+              ⁂ IN-GAME ILLUSTRATION
+            </div>
+            {imgState === 'loading' && (
+              <div className="italic" style={{ color: '#6b4423', fontSize: '0.85em', marginBottom: '0.4rem' }}>
+                Sketching… this can take half a minute. If nothing appears, the runtime has refused the call.
+              </div>
+            )}
+            {imgState === 'failed' && (
+              <div style={{ fontSize: '0.85em', color: '#8b1a1a', fontStyle: 'italic', marginBottom: '0.4rem' }}>
+                The in-game generator could not be reached. Use the prompt above with an external tool.
+              </div>
+            )}
+            <img
+              src={imgUrl}
+              alt="An illustration of the scene"
+              onLoad={() => setImgState('loaded')}
+              onError={() => setImgState('failed')}
+              style={{
+                width: '100%', maxWidth: '480px', height: 'auto',
+                display: imgState === 'loaded' ? 'block' : 'none',
+                border: '1px solid rgba(74,44,20,0.2)',
+                margin: '0 auto',
+              }}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function ImaginePanel({ prose, label = 'Imagine this scene' }) {
   const [open, setOpen] = useState(false);
   const cleanProse = (prose || '').replace(/\s+/g, ' ').trim();
   if (!cleanProse) return null;
-  const fullPrompt = IMAGINE_STYLE_PREFIX + cleanProse.slice(0, 320);
   return (
     <>
       <button
         className="ghost-button-sm"
         onClick={() => setOpen(true)}
         style={{ marginTop: '0.5rem' }}
-        title="Show an illustration prompt for this passage"
+        title="Open an illustration prompt for this passage"
       >
         ✦ {label}
       </button>
-      {open && (
-        <ExportModal
-          title="An illustration prompt"
-          content={fullPrompt}
-          onClose={() => setOpen(false)}
-          wrap
-          helperText="The prompt has been copied to yr. clipboard. Paste it into ChatGPT, DALL·E, Midjourney, or any other image-rendering tool to render the scene."
-        />
-      )}
+      {open && <IllustrationModal prose={prose} onClose={() => setOpen(false)} />}
     </>
   );
 }

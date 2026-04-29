@@ -1999,6 +1999,194 @@ Edward Whitcombe`,
 
   return null;
 }
+
+// ─────────── THE WILBRAHAM MYSTERY (2 STEPS, BRANCHED) ───────────
+// Investigating the predecessor's death. Wilbraham's papers (in every save
+// from day 1) describe his fever, Hodge weeping, and the Reverend's refusal
+// to come down from the Mission. Sgt. Dass kicks the matter open by writing
+// what he didn't tell at the time.
+//
+// Trigger chain:
+//   - Step 1 fires after day 100 with Dass loyalty >= 70 (he trusts the
+//     Factor enough to write). Sets wilbrahamMystery = 'asked-reverend' |
+//     'asked-hodge' | 'closed-rested'.
+//   - Step 2 fires 30 days later, branched by step 1.
+
+function makeWilbrahamStep1Letter(s) {
+  return {
+    id: 9600000 + s.day,
+    from: 'Sgt. Dass, on a private matter',
+    subject: 'Concerning the late Mr. Wilbraham',
+    body: `Sir, — I write upon a matter I never put to him whose place you now hold, and have not put to any man since. The household has settled to yr. hand and you may judge it best, having heard, that nothing should be made of it; but I would not have the matter die in my keeping.
+
+I kept the watch the night Mr. Wilbraham went. The fever was on him, and the Reverend Pyke was sent for at the second hour. I saw the Reverend leave the Mission gate by the lamp, and I saw the Reverend return to the Mission gate by the lamp, and there was no time in between for him to have come to the godown. I thought nothing of it at the time. I have come, since, to think of it.
+
+Mr. Hodge was at the bedside the whole hour. The fever, sir, was real. But the Reverend did not come down. And Mr. Wilbraham, by the morning, did not get up.
+
+I leave the matter to yr. hand. — Dass.`,
+    responses: [
+      {
+        label: 'Ask the Reverend why he did not come down',
+        seed: 'investigation; Reverend will write back',
+        fixedOutcome: {
+          prose: 'You walk to the Mission at first light next morning and ask Pyke a careful question, in the careful way one asks. He looks at you, says nothing, and writes you a letter the following Sunday in his small upright hand.',
+          changes: {
+            flags: { wilbrahamMystery: 'asked-reverend', wilbrahamStep1Day: s.day },
+            journal: 'Asked the Reverend why he did not come down to Mr. Wilbraham\'s bedside. He looked at me long and said nothing. A letter is to follow.',
+          },
+        },
+      },
+      {
+        label: 'Ask Hodge what he remembers',
+        seed: 'investigation; Hodge will speak in his cups',
+        fixedOutcome: {
+          prose: 'You wait for an evening Hodge is in his cups and the conversation has run upon old days. He is unguarded; he tells you something he has never told a soul. You write down what he says before sleep, in case the morning takes it from him.',
+          changes: {
+            flags: { wilbrahamMystery: 'asked-hodge', wilbrahamStep1Day: s.day },
+            journal: 'Asked Hodge what he remembered of Mr. Wilbraham\'s last night. He told me, in drink, something he had never told. The detail must be set down before he forgets.',
+          },
+        },
+      },
+      {
+        label: 'Let the dead rest',
+        seed: 'matter closes; small Mission standing nudge for the gesture',
+        fixedOutcome: {
+          prose: 'You write Dass a brief note thanking him for his confidence and asking him to keep his peace. The Sergeant agrees; the matter is set aside. The Reverend Pyke is at supper that Sunday, and inquires politely after yr. health.',
+          changes: {
+            reputation: { mission: 2 },
+            flags: { wilbrahamMystery: 'closed-rested' },
+            journal: 'Asked Dass to keep the matter of Mr. Wilbraham\'s last night to himself. The dead, on yr. office\'s judgement, may rest.',
+          },
+        },
+      },
+    ],
+    read: false,
+  };
+}
+
+function makeWilbrahamStep2Letter(s) {
+  const path = s.flags?.wilbrahamMystery;
+
+  if (path === 'asked-reverend') {
+    return {
+      id: 9610000 + s.day,
+      from: 'Reverend Pyke, of the Mission at Bayan-Kor',
+      subject: 'A matter of conscience long held',
+      body: `Sir, — I have prayed upon yr. question and shall give you the answer I should have given Mr. Hodge that night, had he asked it.
+
+Mr. Wilbraham came to the Mission six weeks before his death and asked me to put my name to a paper concerning the inland teak. The paper, in his own hand, would have transferred the concession to one Mynheer ter Borch upon his decease, in exchange for the discharge of a personal debt of thirty-eight pounds. He had been losing at cards.
+
+I refused. I told him what I thought of a Factor who would sell what was the Company's to a Hollander to settle his cards. He left in such a state as I have not seen since.
+
+When the messenger came to fetch me to his bedside, I confess I prayed first, and then I made it my business not to come. The fever was real, sir; the abandonment was mine. He had been my brother in the work and I let him die alone. I have not preached on Christian charity since.
+
+Yr. servt. in lower spirits than usual,
+Pyke`,
+      responses: [
+        {
+          label: 'Pray with him; let the matter rest',
+          seed: 'mission gain; the Reverend\'s contrition becomes a bond',
+          fixedOutcome: {
+            prose: 'You attend Sunday service that week and stay after for a private prayer with Pyke. He is, by all accounts, a different man at the lectern thereafter.',
+            changes: {
+              reputation: { mission: 8 },
+              flags: { wilbrahamMystery: 'closed-prayed' },
+              journal: 'Prayed with Pyke after his confession on Mr. Wilbraham. The Reverend is, by all accounts, a different man at the lectern.',
+            },
+          },
+        },
+        {
+          label: 'Break with the Mission; this will not stand',
+          seed: 'mission collapse; rajah small gain (notice the schism)',
+          fixedOutcome: {
+            prose: 'You write Pyke a careful note severing the Factor\'s personal acquaintance with the Mission. Sunday service goes on without yr. attendance and the chapel will not see yr. shadow again. The Vizier, hearing of it, sends a parcel of mangoes by way of comment.',
+            changes: {
+              reputation: { mission: -25, rajah: 4 },
+              flags: { wilbrahamMystery: 'closed-broken' },
+              journal: 'Broke with the Mission over the Reverend\'s confession on Mr. Wilbraham. The chapel will not see yr. shadow again.',
+              hook: 'The Mission has been broken with. The Reverend\'s standing will not return; the household feels it.',
+            },
+          },
+        },
+        {
+          label: 'Pursue ter Borch on the matter of the cards',
+          seed: 'dutch hostility; rajah neutral; new thread opens',
+          fixedOutcome: {
+            prose: 'You compose a careful letter to Mynheer ter Borch at Eustace, asking what he knows of certain papers Mr. Wilbraham may have given him concerning the inland teak. His reply, when it comes, is brief and acid: he knows of no such papers and is offended at the imputation. The matter, on yr. side, opens.',
+            changes: {
+              reputation: { dutch: -10 },
+              flags: { wilbrahamMystery: 'closed-pursuing-dutch' },
+              journal: 'Wrote to ter Borch on the matter of Wilbraham\'s gambling debts and the teak papers. His reply is acid; he denies all.',
+              hook: 'Ter Borch knows of papers Wilbraham may have given him on the teak. He denies it; the matter is open in yr. hand.',
+            },
+          },
+        },
+      ],
+      read: false,
+    };
+  }
+
+  if (path === 'asked-hodge') {
+    return {
+      id: 9620000 + s.day,
+      from: 'Mr. Hodge, after a Friday evening',
+      subject: '[A note in yr. own hand, transcribed before sleep]',
+      body: `[Hodge in his cups, evening of the third Friday after yr. question. The household is asleep. Hodge is at the godown door, weeping. What follows is what he said; I have set it down before sleep, lest morning take it from him.]
+
+— I brought him water that night, sir. He could not keep down the rum and the fever made him cry out for water. I went to the well and the well was foul with the night-rain and so I went to the kitchen jar.
+
+— The kitchen jar was the one Mr. ter Borch's clerk had been at the day before. I had thought nothing of it. The clerk had come asking after sandalwood and Wilbraham had not seen him; he sat in the kitchen and was given a cup of tea by Mariam.
+
+— I gave him the water from that jar, sir. He drank it. He did not stop crying out, but he did not cry out the same way after.
+
+— I have never told this to anyone. I have prayed about it and I have drunk about it and I have never told it.
+
+[Hodge slept in the godown that night. By morning he did not remember telling me. The note above is mine, signed and sealed.]`,
+      responses: [
+        {
+          label: 'Confront ter Borch directly',
+          seed: 'dutch hostility; thread opens',
+          fixedOutcome: {
+            prose: 'You compose a letter to ter Borch by the next Bombay packet — careful, formal, leaving the matter unsaid but plain. His reply is acid: yr. household runs on a drunkard\'s testimony, his clerk was on lawful business, the matter is not for his pen. He does not, however, write it off.',
+            changes: {
+              reputation: { dutch: -12 },
+              flags: { wilbrahamMystery: 'closed-confronted-dutch' },
+              journal: 'Wrote to ter Borch on what Hodge described. His reply is acid; he does not, however, write it off.',
+              hook: 'Ter Borch knows you suspect his clerk. The Hollander\'s door at Eustace will be the colder for it.',
+            },
+          },
+        },
+        {
+          label: 'Take it to the Vizier; let him handle it',
+          seed: 'rajah gain; dutch loss; a hook with the palace',
+          fixedOutcome: {
+            prose: 'You attend the palace at the next audience and lay Hodge\'s account before the Vizier in confidence. He listens with a face that does not move. Within the month, ter Borch\'s clerk has been quietly turned away from the household kitchen at Bayan-Kor by the Rajah\'s direct order.',
+            changes: {
+              reputation: { rajah: 8, dutch: -10 },
+              flags: { wilbrahamMystery: 'closed-vizier' },
+              journal: 'Laid Hodge\'s account before the Vizier. Ter Borch\'s clerk has been turned away from the household kitchen.',
+              hook: 'The Vizier handled the ter Borch clerk for you. The favour is yrs. to be reminded of.',
+            },
+          },
+        },
+        {
+          label: 'Bury it; Hodge is suggestible, and the matter is old',
+          seed: 'closed; small standing nudge',
+          fixedOutcome: {
+            prose: 'You burn the note before Hodge can wake to remember it. The matter, on yr. judgement, dies between the two of you.',
+            changes: {
+              flags: { wilbrahamMystery: 'closed-buried' },
+              journal: 'Burned Hodge\'s drunken account of the kitchen jar. The matter dies with the morning.',
+            },
+          },
+        },
+      ],
+      read: false,
+    };
+  }
+
+  return null;
+}
 // Senders gated by reputation / flags so the post reflects the Factor's
 // standing. The Director and the Vizier have dedicated cadences elsewhere
 // (Indiaman + quarterly nags; teak concession) and are excluded here so we
@@ -2902,6 +3090,42 @@ function tickDays(gs, days) {
       }
     }
 
+    // ── Wilbraham mystery questline. Step 1: Sgt. Dass writes about the
+    // night Wilbraham died. Gates: day 100, dass loyalty >= 70, !sent.
+    const wStep = s.flags?.wilbrahamMystery;
+    if (
+      !s.charterClosed &&
+      !wStep &&
+      s.day >= 100 &&
+      (s.npcs?.dass?.loyalty || 0) >= 70 &&
+      s.flags?.dassRecall !== 'released'  // can't write if he's gone
+    ) {
+      const letter = makeWilbrahamStep1Letter(s);
+      s.letters = [...s.letters, letter];
+      s.lettersGenerated = (s.lettersGenerated || 0) + 1;
+      s.flags = { ...(s.flags || {}), wilbrahamMystery: 'pending' };
+      s.awayLog.push({ day: s.day, type: 'letter', text: 'Sgt. Dass came in his own time, with a folded note in his careful hand — concerning the late Mr. Wilbraham.' });
+    }
+    const wStep2Sent = !!s.flags?.wilbrahamStep2Sent;
+    const wActive = wStep === 'asked-reverend' || wStep === 'asked-hodge';
+    if (
+      !s.charterClosed &&
+      !wStep2Sent &&
+      wActive &&
+      s.day >= ((s.flags?.wilbrahamStep1Day || 0) + 30)
+    ) {
+      const letter = makeWilbrahamStep2Letter(s);
+      if (letter) {
+        s.letters = [...s.letters, letter];
+        s.lettersGenerated = (s.lettersGenerated || 0) + 1;
+        s.flags = { ...(s.flags || {}), wilbrahamStep2Sent: true };
+        const text = wStep === 'asked-reverend'
+          ? 'A long letter from the Reverend Pyke in his small upright hand — the matter of Mr. Wilbraham.'
+          : 'A note in yr. own hand, transcribed from Hodge\'s evening — the matter of Mr. Wilbraham.';
+        s.awayLog.push({ day: s.day, type: 'letter', text });
+      }
+    }
+
     // ── Raid: opportunists at the godown. Stockade halves the chance, the
     // Barracks halves it again. The Magazine caps any single loss at 10%.
     const raidPool = ['pepper', 'cinnamon', 'silver', 'opium', 'sandalwood']
@@ -3128,6 +3352,18 @@ const MAJOR_COMMITMENTS = [
       v === 'closed-delivered'     ? 'The contract is fulfilled. Opium delivered at Eustace under cover; £400 paid.' :
       v === 'closed-delivered-half'? 'The reduced contract is fulfilled. £200 paid by the trusted runner.' :
       v === 'closed-caught'        ? 'Caught at the Eustace customs. The cargo is gone, the Dutch know yr. face.' :
+      null },
+  { key: 'wilbrahamMystery', label: (v) =>
+      v === 'pending'                  ? 'Sgt. Dass has written on the matter of Mr. Wilbraham\'s last night.' :
+      v === 'asked-reverend'           ? 'You have asked the Reverend why he did not come down that night.' :
+      v === 'asked-hodge'              ? 'You have a note in yr. own hand from Hodge\'s confession on Mr. Wilbraham.' :
+      v === 'closed-rested'            ? 'Mr. Wilbraham\'s last night, on yr. office\'s judgement, may rest.' :
+      v === 'closed-prayed'            ? 'You and the Reverend Pyke prayed together on Mr. Wilbraham; the Mission is closer.' :
+      v === 'closed-broken'            ? 'You broke with the Mission over the Reverend\'s confession; the chapel will not see yr. shadow.' :
+      v === 'closed-pursuing-dutch'    ? 'You wrote to ter Borch on Mr. Wilbraham\'s gambling debts; he denies all.' :
+      v === 'closed-confronted-dutch'  ? 'You confronted ter Borch on the kitchen jar; the Hollander\'s door is the colder for it.' :
+      v === 'closed-vizier'            ? 'The Vizier handled ter Borch\'s clerk for you. The favour is yrs. to be reminded of.' :
+      v === 'closed-buried'            ? 'You burned Hodge\'s note on Mr. Wilbraham; the matter died with the morning.' :
       null },
   { key: 'cylinderQuest', label: (v) =>
       v === 'pending'              ? 'Idris\'s cylinder lies under yr. weights; he has written.' :

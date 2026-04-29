@@ -221,6 +221,68 @@ const BUILDINGS = {
   },
 };
 
+// Each completed building brings a person — Raven Rock pattern. Named figure
+// added to gs.acquaintances on completion (via upsertAcquaintance) and then
+// surfaces in stateContext for the AI to reference in later scenes.
+const BUILDING_ARRIVALS = {
+  stockade: {
+    name: 'Lal',
+    role: 'Watchman',
+    location: 'Bayan-Kor',
+    notes: 'A wiry Tamil man of perhaps forty; engaged to keep the night watch from the new tower. Sleeps badly, sees everything.',
+    arrivalText: 'A watchman, Lal, has been engaged to keep the new stockade tower at night. He sleeps in the day and walks in the dark.',
+  },
+  counting_house: {
+    name: 'Mr. Penhaligon',
+    role: 'Apprentice Clerk',
+    location: 'Bayan-Kor',
+    notes: 'A Cornish boy of seventeen, nephew to a Madras factor; sent to learn the trade under Mr. Hodge.',
+    arrivalText: 'Mr. Penhaligon, an apprentice clerk of seventeen, has come down from Madras to learn the trade in the new Counting House. Hodge is, by his own report, gratified.',
+  },
+  chapel: {
+    name: 'Catechist Joseph',
+    role: 'Catechist of the Mission',
+    location: 'Bayan-Kor',
+    notes: 'A Tamil convert in his thirties; teaches the children the Creed in three languages. Quiet, patient, devoted to the Reverend.',
+    arrivalText: 'A catechist named Joseph has come to the new chapel — a Tamil convert who teaches the Creed in three languages. The Reverend is conspicuously pleased.',
+  },
+  plantation: {
+    name: 'Aman Singh',
+    role: 'Plantation Overseer',
+    location: 'inland of Bayan-Kor',
+    notes: 'A Sikh from the Punjab, soldier-turned-farmer; engaged to oversee the pepper rows. Knows soil and discipline equally.',
+    arrivalText: 'Aman Singh, a Sikh of the Punjab and once a soldier, has been engaged as overseer of the new pepper plantation. The first rows go in at the next monsoon.',
+  },
+  barracks: {
+    name: 'Naik Ramaswamy',
+    role: 'Sepoy Corporal',
+    location: 'Bayan-Kor',
+    notes: 'A Madras-establishment veteran of the Carnatic; arrived with two privates to occupy the new barracks. Reports to Sgt. Dass.',
+    arrivalText: 'Naik Ramaswamy of the Madras lines has come to take charge of the barracks, with two privates under him. Sgt. Dass took the salute and made no comment.',
+  },
+  shipwright: {
+    name: 'Mr. Gow',
+    role: 'Master Shipwright',
+    location: 'Bayan-Kor',
+    notes: 'A Scotsman from the Clyde, one-eyed, his wife died at Madras. Builds and refits with a sourness that earns no friends and few complaints.',
+    arrivalText: 'A shipwright, Mr. Gow of the Clyde, has come to take the new yard. One-eyed, sour, expensive — and the work, by report, immaculate.',
+  },
+  great_godown: {
+    name: 'Tau Beng',
+    role: 'Godown-keeper',
+    location: 'Bayan-Kor',
+    notes: 'A Hokkien Chinese of fifty-five; ran a godown at Malacca for thirty years before the Dutch put him out.',
+    arrivalText: 'A new godown-keeper, Tau Beng of Malacca, has been engaged to take charge of the Great Godown. Thirty years at his trade; the rats are by his account already retreating.',
+  },
+  magazine: {
+    name: 'Gunner Trant',
+    role: 'Master Gunner',
+    location: 'Bayan-Kor',
+    notes: 'An Anglo-Irishman; deserted a Madras battery once, was found again, was forgiven. Keeps the new magazine.',
+    arrivalText: 'A master gunner, one Trant of Madras, has been engaged for the new Magazine. Anglo-Irish, surly, sound on his charges.',
+  },
+};
+
 // ─────────── HELPERS ───────────
 
 const hashCode = (s) => {
@@ -1136,6 +1198,136 @@ Dass`,
   };
 }
 
+// ─────────── THE DASS RECALL ───────────
+// Once per charter, around day 240+, Sgt. Dass receives a recall to the
+// Madras establishment — a routine reposting from his old colonel, who
+// wants him back at the parade ground. Three resolutions:
+
+function makeDassRecallLetter(s) {
+  return {
+    id: 9100000 + s.day,
+    from: 'Sgt. Dass, formally',
+    subject: 'A letter from Madras',
+    body: `Sir, — A letter has come from Col. Whitelaw at Fort St. George, recalling me to the establishment for the next field season. I am to report at Madras within the year.
+
+I do not say I wish to go. The household at Bayan-Kor is mine in such a way as the parade ground at Madras was never; and the Bugis trader who watches the godown by night will not watch for a green sepoy as he watches for me. I write upon the matter only because the Court are owed an answer, and the answer must come from yr. office.
+
+There is, I am told, a way of buying the recall — fifty pounds, paid to the establishment account at Madras, secures my discharge for the duration of yr. charter. The Vizier mentioned a third path, which I shall write below in his words and not my own.
+
+Yr. obedt. servant,
+Dass`,
+    responses: [
+      {
+        label: 'Pay the £50; I will not lose Dass',
+        seed: 'dass kept; standing nudge with crown for the discreet handling',
+        fixedOutcome: {
+          prose: 'You write Madras a draft for fifty pounds and a note in the careful language of an Englishman who has the Court behind him. Col. Whitelaw answers in three lines: the matter is settled, Dass is yrs. for the duration. Dass takes the news at supper, says nothing, and the next day cleans his musket twice.',
+          changes: {
+            money: -50,
+            reputation: { crown: 2 },
+            flags: { dassRecall: 'paid' },
+            journal: 'Paid £50 to Madras to keep Sgt. Dass for the rest of the charter. The household is whole.',
+          },
+        },
+      },
+      {
+        label: 'Let him go; the establishment must have its men',
+        seed: 'dass leaves; a green sepoy replaces him; standing modest with crown for compliance',
+        fixedOutcome: {
+          prose: 'Dass is given his orders and his discharge from yr. household. He embarks on the next Indiaman for Madras with a small box, a worn musket, and the writ in his sleeve. Six weeks later Lance Naik Anandan arrives — twenty, recently of the Madras lines, eager and untested. The household feels lighter and the strait feels darker.',
+          changes: {
+            reputation: { crown: 4 },
+            flags: { dassRecall: 'released' },
+            journal: 'Released Sgt. Dass to the Madras establishment. Lance Naik Anandan replaces him.',
+            hook: 'A green sepoy on the night-watch — the Bugis prahu will test him before the season is out.',
+            newAcquaintances: [
+              { name: 'Lance Naik Anandan', role: 'Sepoy', location: 'Bayan-Kor', notes: 'Replaced Sgt. Dass on the Madras establishment\'s recall. Twenty years old, eager, untested.' },
+            ],
+          },
+        },
+      },
+      {
+        label: 'Take the Vizier’s path: have him commissioned to the Rajah’s service',
+        seed: 'dass commissioned in rajah service; rajah +12, crown -8; complex',
+        fixedOutcome: {
+          prose: 'You attend the palace. The Vizier writes the commission himself — a captaincy of twelve men in the Rajah’s personal guard, with permission for Dass to remain at Bayan-Kor as the household’s sepoy in fact if not in form. The Crown’s recall lapses. Col. Whitelaw is, by all accounts, displeased.',
+          changes: {
+            reputation: { rajah: 12, crown: -8 },
+            flags: { dassRecall: 'commissioned' },
+            journal: 'Sgt. Dass commissioned by the Rajah. The Crown recall lapses; Madras grumbles; the Vizier has done a favour the household will be expected to remember.',
+            hook: 'The Vizier did not commission Dass for nothing. The favour will be called.',
+          },
+        },
+      },
+    ],
+    read: false,
+  };
+}
+
+// ─────────── THE VIZIER'S MARRIAGE GAMBIT ───────────
+// Once per charter, around day 280+, the Vizier proposes a marriage alliance
+// for his clerk. The choice is purely political; mechanical effects fall on
+// faction standings and a hook for future events.
+
+function makeVizierMarriageLetter(s) {
+  return {
+    id: 9200000 + s.day,
+    from: 'The Rajah’s Vizier',
+    subject: 'A small matter of family',
+    body: `Sir, — There is a small matter to which I beg yr. attention.
+
+My clerk, Subhan, has come of an age to be married. There is a daughter of a Bugis trading family who would suit, and the family would rejoice in an Englishman’s witness at the contract. The dowry is between the families. The witness is between us.
+
+The Hollander ter Borch has offered to stand for the family — a match he has long preferred, for reasons of his own. I prefer that you stand. The Rajah, as you may suppose, has expressed no preference, which is to say he has expressed his preference clearly.
+
+This is not a request to which a refusal is offensive, only — perhaps — disappointing.
+
+Yr. obedt. servant,
+The Vizier`,
+    responses: [
+      {
+        label: 'Stand for the family at the contract',
+        seed: 'vizier favour; rajah +; dutch -; hook of obligation later',
+        fixedOutcome: {
+          prose: 'You attend the signing in the courtyard of the Bugis trader’s house — a quiet ceremony of cups, paper, and the Vizier’s small personal stamp. Subhan is grateful in the manner of the young; the Bugis father is grateful in the manner of his trade. The Hollander, who came as the second witness, leaves before the cups are emptied.',
+          changes: {
+            reputation: { rajah: 8, dutch: -6 },
+            flags: { vizierMarriage: 'stood' },
+            journal: 'Stood as Englishman’s witness at Subhan’s marriage. Ter Borch left early. The Vizier has noted the favour.',
+            hook: 'The Vizier owes you a favour by the courtesies of the contract. He is not the man who forgets such things.',
+          },
+        },
+      },
+      {
+        label: 'Decline politely; plead the press of trade',
+        seed: 'rajah small loss; dutch small gain (terborch will stand); no hook',
+        fixedOutcome: {
+          prose: 'You decline by note, with thanks for the honour. The Vizier accepts the refusal with the smallest motion of his head. Ter Borch stands at the contract instead, and is seen at the palace twice the following week.',
+          changes: {
+            reputation: { rajah: -3, dutch: 3 },
+            flags: { vizierMarriage: 'declined' },
+            journal: 'Declined the Vizier’s invitation to stand at Subhan’s marriage. Ter Borch is now the Englishman of choice at the palace, which is to say no Englishman at all.',
+          },
+        },
+      },
+      {
+        label: 'Counter-propose: stand, but ask the Vizier name the favour',
+        seed: 'rajah +; dutch -; explicit obligation in the Factor\'s favour',
+        fixedOutcome: {
+          prose: 'You write back accepting the witness, and asking — gently, by the mercantile habits of yr. office — what the Vizier might consider doing in return. He answers in person at the next audience: a small boon, his to grant in the matter of the inland teak yard, or — if you do not need the teak — in the matter of the Bugis pilots, who are his by influence if not by right.',
+          changes: {
+            reputation: { rajah: 5, dutch: -6 },
+            flags: { vizierMarriage: 'counter', vizierBoonOwed: true },
+            journal: 'Stood at Subhan’s marriage in exchange for a boon. The Vizier offered teak or pilots; the matter is held open.',
+            hook: 'The Vizier owes you a boon — teak or Bugis pilots. The boon is to be called when the Factor names the matter.',
+          },
+        },
+      },
+    ],
+    read: false,
+  };
+}
+
 // ─────────── BROTHERHOOD OPERATIVE QUESTLINE (3 STEPS) ───────────
 // First multi-step plot in the game. Pattern: each step is a letter with
 // fixedOutcome responses. Each response sets a flag that gates the next
@@ -1459,6 +1651,14 @@ function tickDays(gs, days) {
             s.reputation.mission = Math.min(100, s.reputation.mission + 20);
             s.reputation.rajah = Math.max(-100, s.reputation.rajah - 10);
           }
+          // A person arrives with each completed building — Raven Rock pattern.
+          // The named figure is added to acquaintances and surfaces in the AI's
+          // state context, so future encounters and letters can reference them.
+          const arrival = BUILDING_ARRIVALS[item.key];
+          if (arrival) {
+            s.acquaintances = upsertAcquaintance(s.acquaintances || [], s.day, arrival);
+            s.awayLog.push({ day: s.day, type: 'arrival', text: arrival.arrivalText });
+          }
         } else {
           newQueue.push({ ...item, daysLeft: newDaysLeft });
         }
@@ -1548,9 +1748,16 @@ function tickDays(gs, days) {
       if (Math.random() < recoverChance) s.npcs.hodge.sobriety = Math.min(100, s.npcs.hodge.sobriety + 1);
     }
 
-    // ── Dass: occasional report
+    // ── Dass / Anandan: occasional report. After Dass is released, Lance
+    // Naik Anandan takes the watch — green and not yet trusted.
     if (Math.random() < 0.025) {
-      const lines = [
+      const released = s.flags?.dassRecall === 'released';
+      const lines = released ? [
+        'Lance Naik Anandan reports the Bugis prahu was seen in the strait at dusk; he was uncertain whether to fire.',
+        'Lance Naik Anandan apprehended a small theft and has not yet learned what to do with the man.',
+        'Lance Naik Anandan stood the night watch and fell asleep at his post by the third hour.',
+        'Lance Naik Anandan asked permission to fire upon a stray fishing prahu and was refused.',
+      ] : [
         'Sgt. Dass apprehended a man pilfering rice. Released after a beating.',
         'Sgt. Dass reports that the Bugis prahu was seen in the strait at dusk.',
         'Sgt. Dass purchased fish at the wharf and shared it with the household.',
@@ -1797,6 +2004,36 @@ function tickDays(gs, days) {
       s.lettersGenerated = (s.lettersGenerated || 0) + 1;
       s.flags = { ...(s.flags || {}), hodgeCrisisLetterSent: true };
       s.awayLog.push({ day: s.day, type: 'letter', text: 'A note in Sgt. Dass’s careful hand — concerning Mr. Hodge.' });
+    }
+
+    // ── Dass recall: the Madras establishment writes once after day 240.
+    if (
+      !s.charterClosed &&
+      !s.flags?.dassRecallLetterSent &&
+      !s.flags?.dassRecall &&
+      s.day >= 240
+    ) {
+      const letter = makeDassRecallLetter(s);
+      s.letters = [...s.letters, letter];
+      s.lettersGenerated = (s.lettersGenerated || 0) + 1;
+      s.flags = { ...(s.flags || {}), dassRecallLetterSent: true };
+      s.awayLog.push({ day: s.day, type: 'letter', text: 'Sgt. Dass with a paper in his hand and a face yr. office has not seen on him before.' });
+    }
+
+    // ── Vizier marriage gambit: once after day 280, Vizier proposes the
+    // Factor stand at his clerk's marriage.
+    if (
+      !s.charterClosed &&
+      !s.flags?.vizierMarriageLetterSent &&
+      !s.flags?.vizierMarriage &&
+      s.day >= 280 &&
+      (s.reputation?.rajah || 0) >= 0
+    ) {
+      const letter = makeVizierMarriageLetter(s);
+      s.letters = [...s.letters, letter];
+      s.lettersGenerated = (s.lettersGenerated || 0) + 1;
+      s.flags = { ...(s.flags || {}), vizierMarriageLetterSent: true };
+      s.awayLog.push({ day: s.day, type: 'letter', text: 'A folded note from the palace, the Vizier’s small personal seal upon it.' });
     }
 
     // ── Brotherhood operative questline (Faulke).
@@ -5562,9 +5799,27 @@ function LedgerView({ gs }) {
                 )}
               </>}
               {key === 'dass' && <>
-                {stateBar('Loyalty', n.loyalty)}
-                {stateBar('Morale', n.morale)}
-                {stateBar('Health', n.health)}
+                {gs.flags?.dassRecall === 'released' ? (
+                  <div className="italic" style={{ color: '#6b4423', fontSize: '0.88em' }}>
+                    Returned to Madras. Lance Naik Anandan holds the watch now.
+                  </div>
+                ) : (
+                  <>
+                    {stateBar('Loyalty', n.loyalty)}
+                    {stateBar('Morale', n.morale)}
+                    {stateBar('Health', n.health)}
+                    {gs.flags?.dassRecall === 'commissioned' && (
+                      <div className="italic" style={{ color: '#3a5c2a', fontSize: '0.82em', marginTop: '0.2rem' }}>
+                        — commissioned in the Rajah’s guard.
+                      </div>
+                    )}
+                    {gs.flags?.dassRecall === 'paid' && (
+                      <div className="italic" style={{ color: '#6b4423', fontSize: '0.82em', marginTop: '0.2rem' }}>
+                        — recall bought off, by yr. £50.
+                      </div>
+                    )}
+                  </>
+                )}
               </>}
               {key === 'vizier' && <>
                 {stateBar('Friendliness', n.friendliness)}

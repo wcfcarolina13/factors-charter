@@ -1835,6 +1835,170 @@ A man at the gate`,
 
   return null;
 }
+
+// ─────────── THE PALE MAN'S SEALED LETTER (2 STEPS, 3 BRANCHES) ───────────
+// Second multi-step questline, parallel to the cylinder. The pale man with
+// the missing finger-joint — an AI-invented figure from prior playthroughs,
+// here promoted to a fixed scripted character. He carries a sealed contract
+// for off-the-books opium between the Pelican's Nest and Eustace, profiting
+// the Factor by working between English and Dutch markets without the
+// Hollander's customs clerks knowing.
+//
+// Trigger chain:
+//   - Step 1 fires once after day 130 if the Factor has visited Kota Pinang.
+//     Sets paleManQuest = 'opened' | 'declined' | 'crown' on response.
+//   - Step 2 fires 30 days later, branched by the step 1 flag.
+
+function makePaleManStep1Letter(s) {
+  return {
+    id: 9500000 + s.day,
+    from: 'An unknown hand, by an unmarked Bugis runner',
+    subject: 'A sealed packet, no return',
+    body: `[The seal is plain wax, no insignia. The runner did not stay long enough to be questioned. The letter is in a careful, even Englishman\'s hand.]
+
+Sir, — A man who knows yr. quality but not yr. office writes. There is a contract that profits an English Factor by working between the English and Dutch markets in a particular cargo, without the Hollander\'s customs clerks knowing. Two hundred pounds advance, four hundred upon delivery, both sums in unmarked silver.
+
+The cargo is opium. The lift is at the Pelican\'s Nest, the drop at Port St. Eustace, the route by yr. own discretion. I will be at Kota Pinang the morning of the next moon, missing a piece of my left index finger and carrying nothing in my hands. If you mean to take the matter up, find me there.
+
+If you mean to refuse, do not write back. The runner is the only man who knows you have read this.
+
+Yr. servt., who would not give his name.`,
+    responses: [
+      {
+        label: 'Open the door; mean to meet him at Kota Pinang',
+        seed: 'opened; the offer stands; resolution at next contact',
+        fixedOutcome: {
+          prose: 'You set the letter aside in yr. own strongbox. Hodge does not see it; Sgt. Dass is told only that a Bugis runner came and went. The next moon is two weeks away.',
+          changes: {
+            money: 0,
+            flags: { paleManQuest: 'opened', paleManStep1Day: s.day },
+            journal: 'Read the unmarked letter; mean to meet the pale man at Kota Pinang the next moon. The matter is, for now, in yr. strongbox.',
+            hook: 'The pale man with the missing finger-joint; a contract under no Hollander\'s customs.',
+          },
+        },
+      },
+      {
+        label: 'Refuse to engage; the matter is not yrs.',
+        seed: 'declined; matter rests',
+        fixedOutcome: {
+          prose: 'You burn the letter in yr. own grate at supper. The runner does not return; the next moon comes and goes without consequence.',
+          changes: {
+            flags: { paleManQuest: 'declined' },
+            journal: 'Burned the unmarked letter from the unknown correspondent. The matter is, on yr. side, closed.',
+          },
+        },
+      },
+      {
+        label: 'Pass the letter to the Crown',
+        seed: 'crown gain; the unknown hand will not write again',
+        fixedOutcome: {
+          prose: 'You forward the letter under yr. own cover to Capt. Whitcombe at Madras, with a note explaining the means of its delivery. The reply, when it comes, is brief and approving. The Royal Navy will, in due course, pay the man a visit at Kota Pinang.',
+          changes: {
+            reputation: { crown: 8, pirates: -3 },
+            flags: { paleManQuest: 'crown', paleManStep1Day: s.day },
+            journal: 'Forwarded the unmarked letter to Capt. Whitcombe at Madras. The Crown will, in due course, take an interest in the pale man at Kota Pinang.',
+            hook: 'The Crown will follow the pale man\'s trail. What they find — and how it returns to yr. hand — yet to be known.',
+          },
+        },
+      },
+    ],
+    read: false,
+  };
+}
+
+function makePaleManStep2Letter(s) {
+  const path = s.flags?.paleManQuest;
+
+  if (path === 'opened') {
+    return {
+      id: 9510000 + s.day,
+      from: 'The pale man, in person at the Kota Pinang wharf',
+      subject: 'Yr. answer to the contract',
+      body: `[At the Kota Pinang wharf at first light. He is precisely as the letter described — pale, the left index finger short of one joint, no parcel in his hands.]
+
+— Yr. moon is on time, sir. I have a hundred and eighty pounds in unmarked silver here for you. Two cwt of opium are stored at the Pelican\'s Nest under the name of one Said bin Mahmood; another two on the way. Lift the four cwt and put them in yr. own godown at Bayan-Kor for now. I shall write to you in a fortnight upon the matter of the drop at Eustace.
+
+— The remaining twenty pounds I shall pay when the contract is fulfilled.
+
+— If you change yr. mind now, the silver is in this purse and you may take it. The contract closes; I shall not write again.`,
+      responses: [
+        {
+          label: 'Accept; take the silver; lift the opium at the Nest',
+          seed: 'contract begins; £180 advance; flag for the run',
+          fixedOutcome: {
+            prose: 'You take the purse — one hundred and eighty pounds in unmarked silver. The pale man writes nothing down; he nods once and turns inland. Yr. next port at the Nest will lift his opium, by Said bin Mahmood\'s name. The Hollander\'s customs at Eustace will not know.',
+            changes: {
+              money: 180,
+              reputation: { pirates: 3 },
+              flags: { paleManQuest: 'closed-contracted' },
+              journal: 'Accepted the pale man\'s contract. £180 in unmarked silver. The lift is to be at the Pelican\'s Nest, the drop at Eustace, by yr. own discretion.',
+              hook: 'The pale man\'s contract is in motion. The drop at Eustace remains; the Hollander\'s customs must not know.',
+            },
+          },
+        },
+        {
+          label: 'Decline at the wharf; refund the offer',
+          seed: 'closed; small standing nudge',
+          fixedOutcome: {
+            prose: 'You decline at the wharf, civilly. The pale man receives it without comment. He pockets the purse and walks away inland; he does not write again.',
+            changes: {
+              flags: { paleManQuest: 'closed-declined-late' },
+              journal: 'Declined the pale man\'s contract at the wharf. The matter is closed.',
+            },
+          },
+        },
+        {
+          label: 'Counter-propose: opium at half the rate',
+          seed: 'risky negotiation; either accepts or walks',
+          fixedOutcome: {
+            prose: 'You ask for half the figure on the cargo and the same advance — eighty pounds for two cwt rather than one-eighty for four. He looks once, considers a moment, then nods. Eighty pounds in unmarked silver passes to yr. hand. The lift is at the Nest under Said\'s name; the drop yet to be set.',
+            changes: {
+              money: 80,
+              reputation: { pirates: 4 },
+              flags: { paleManQuest: 'closed-half-contract' },
+              journal: 'Counter-proposed; the pale man accepted at half the cargo. £80 in unmarked silver received.',
+              hook: 'The reduced contract sits in motion. The drop at Eustace yet to come; less cargo, less risk.',
+            },
+          },
+        },
+      ],
+      read: false,
+    };
+  }
+
+  if (path === 'crown') {
+    return {
+      id: 9520000 + s.day,
+      from: 'Capt. Whitcombe, by the Madras packet',
+      subject: 'Concerning yr. correspondent at Kota Pinang',
+      body: `Sir, — Yr. forward of the unmarked letter has been laid before the Madras office. The Adventure put a small party into Kota Pinang under cover, found yr. man, and made an arrest in due form. He is one Mr. Holcombe, formerly of the Bombay establishment, struck off two years past for a similar matter elsewhere.
+
+The Court has noted yr. forward with proper credit. A bounty of one hundred and twenty pounds is paid to yr. Bombay account against the matter. The Brotherhood, if Holcombe was their hand, will know of yr. part.
+
+Yr. obedt. servt.,
+Edward Whitcombe`,
+      responses: [
+        {
+          label: 'Acknowledge with formal compliance',
+          seed: 'closed; bounty paid; Crown standing',
+          fixedOutcome: {
+            prose: 'You write a brief note of acknowledgement. The bounty is, in due course, posted to yr. account at Bombay. Mr. Holcombe is, by report, on his way to Calcutta in irons.',
+            changes: {
+              money: 120,
+              reputation: { crown: 6, pirates: -2 },
+              flags: { paleManQuest: 'closed-crown-bounty' },
+              journal: 'Capt. Whitcombe arrested the pale man (Mr. Holcombe of the Bombay establishment, struck off). £120 bounty paid to Bombay.',
+              hook: 'The Brotherhood, if Mr. Holcombe was their hand, will hear how he was taken.',
+            },
+          },
+        },
+      ],
+      read: false,
+    };
+  }
+
+  return null;
+}
 // Senders gated by reputation / flags so the post reflects the Factor's
 // standing. The Director and the Vizier have dedicated cadences elsewhere
 // (Indiaman + quarterly nags; teak concession) and are excluded here so we
@@ -2702,6 +2866,42 @@ function tickDays(gs, days) {
       }
     }
 
+    // ── Pale man's sealed letter questline. Step 1: an unknown hand
+    // delivers a sealed offer at day 130, gated on having visited Kota
+    // Pinang. Step 2 fires 30 days later, branched.
+    const pStep = s.flags?.paleManQuest;
+    if (
+      !s.charterClosed &&
+      !pStep &&
+      s.day >= 130 &&
+      (s.visited || []).includes('Kota Pinang')
+    ) {
+      const letter = makePaleManStep1Letter(s);
+      s.letters = [...s.letters, letter];
+      s.lettersGenerated = (s.lettersGenerated || 0) + 1;
+      s.flags = { ...(s.flags || {}), paleManQuest: 'pending' };
+      s.awayLog.push({ day: s.day, type: 'letter', text: 'A sealed packet from an unknown hand — left at the godown by an unmarked Bugis runner, who did not stay.' });
+    }
+    const pStep2Sent = !!s.flags?.paleManStep2Sent;
+    const pActive = pStep && !pStep.startsWith('closed') && pStep !== 'pending' && pStep !== 'declined';
+    if (
+      !s.charterClosed &&
+      !pStep2Sent &&
+      pActive &&
+      s.day >= ((s.flags?.paleManStep1Day || 0) + 30)
+    ) {
+      const letter = makePaleManStep2Letter(s);
+      if (letter) {
+        s.letters = [...s.letters, letter];
+        s.lettersGenerated = (s.lettersGenerated || 0) + 1;
+        s.flags = { ...(s.flags || {}), paleManStep2Sent: true };
+        const text = pStep === 'opened'
+          ? 'The pale man at the Kota Pinang wharf, a fortnight on. Yr. answer is asked for.'
+          : 'A packet from the Madras office on the pale man\'s arrest.';
+        s.awayLog.push({ day: s.day, type: 'letter', text });
+      }
+    }
+
     // ── Raid: opportunists at the godown. Stockade halves the chance, the
     // Barracks halves it again. The Magazine caps any single loss at 10%.
     const raidPool = ['pepper', 'cinnamon', 'silver', 'opium', 'sandalwood']
@@ -2915,6 +3115,16 @@ const MAJOR_COMMITMENTS = [
       v === 'speculative'  ? 'A private correspondence with Mr. Dryden of the Speculative Bench.' :
       v === 'conservative' ? 'Yr. file is held in proper Madras format with the senior bench.' :
       v === 'declined'     ? 'You refused Mr. Dryden\'s private channel; he has not forgotten.' :
+      null },
+  { key: 'paleManQuest', label: (v) =>
+      v === 'pending'              ? 'A sealed packet from an unknown hand sits in yr. strongbox.' :
+      v === 'opened'               ? 'You mean to meet the pale man at Kota Pinang the next moon.' :
+      v === 'declined'             ? 'The pale man\'s letter was burned; the matter is closed.' :
+      v === 'crown'                ? 'The pale man\'s letter was forwarded to the Crown.' :
+      v === 'closed-contracted'    ? 'A contraband contract with the pale man — opium from the Nest to Eustace.' :
+      v === 'closed-half-contract' ? 'A reduced contract with the pale man — half the cargo, less the risk.' :
+      v === 'closed-declined-late' ? 'You declined the pale man\'s offer at the Kota Pinang wharf.' :
+      v === 'closed-crown-bounty'  ? 'The Crown took the pale man (Mr. Holcombe of the Bombay establishment); £120 bounty paid.' :
       null },
   { key: 'cylinderQuest', label: (v) =>
       v === 'pending'              ? 'Idris\'s cylinder lies under yr. weights; he has written.' :

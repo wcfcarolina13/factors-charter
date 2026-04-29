@@ -1499,6 +1499,223 @@ Thos. Faulke`,
     read: false,
   };
 }
+
+// ─────────── THE OILSKIN CYLINDER QUESTLINE (2 STEPS, 3 BRANCHES) ───────────
+// The AI's habit of inventing memorable MacGuffins (the cylinder from Idris,
+// the pale man's sealed letter, etc.) usually has no follow-up machinery.
+// This is the cylinder version: a 2-step quest seeded by Idris's character
+// that turns the unopened oilskin into a real fork in the road.
+//
+// Trigger chain:
+//   - Step 1 fires once Idris is in acquaintances + day >= 50.
+//     Sets cylinderQuest = 'opened' | 'returning' | 'held' + step1Day.
+//   - Step 2 fires 30 days later, branched by the step 1 flag:
+//       'opened'    → Said bin Mahmood letter (Bugis pilot wants the names)
+//       'returning' → Hamzah's thanks (deterministic gift, single ack response)
+//       'held'      → Brotherhood pressure letter
+//   - Step 2 responses set cylinderQuest = 'closed-X' on resolution.
+
+function makeCylinderStep1Letter(s) {
+  return {
+    id: 9300000 + s.day,
+    from: 'Idris bin Salleh, by a Bugis runner',
+    subject: 'Concerning the cylinder you carry',
+    body: `Sir, — I write to you in the matter of the oilskin cylinder I left in yr. care when the pinnace lifted me from the strange island. The reckoning of the cylinder is a private one between two Bugis houses and one fishery; its contents are not for the Honourable Company nor the Hollander, nor — I will say — for me to declare in writing.
+
+It would be best, if you can do it, to put the cylinder into the hands of one Hamzah at Kota Pinang — he is my cousin, and the matter rests properly with him. If that is not in yr. way, the cylinder may be opened by yr. own hand, in which case knowledge of certain prahu schedules will pass to you, useful or troublesome by yr. discretion.
+
+If neither course suits, no matter; let it lie under yr. weights, and I shall ask after it again when I am next in yr. waters.
+
+Yr. servt.,
+Idris bin Salleh`,
+    responses: [
+      {
+        label: 'Open the cylinder; the knowledge is yrs.',
+        seed: 'opened; useful to traders or to the Crown',
+        fixedOutcome: {
+          prose: 'You break the seal in yr. own counting-room. Inside: three folded sheets, in the Jawi script Hodge does not read, with neat columns of dates, latitudes, and prahu names. Hodge looks once and does not look again.',
+          changes: {
+            flags: { cylinderQuest: 'opened', cylinderStep1Day: s.day },
+            journal: 'Opened Idris\'s oilskin cylinder. Three sheets of Bugis prahu schedules in Jawi. Hodge will not read them.',
+            hook: 'The Bugis schedules in the cylinder — saleable to the right hand; dangerous in the wrong one.',
+          },
+        },
+      },
+      {
+        label: 'Carry it to Hamzah at Kota Pinang',
+        seed: 'returning; honour kept',
+        fixedOutcome: {
+          prose: 'You set the cylinder aside for the next voyage to Kota Pinang. You will hand it to Hamzah unopened, as Idris asks. The matter is, on yr. part, an honourable one.',
+          changes: {
+            flags: { cylinderQuest: 'returning', cylinderStep1Day: s.day },
+            journal: 'Set Idris\'s cylinder aside for the next voyage to Kota Pinang, to be delivered to his cousin Hamzah unopened.',
+          },
+        },
+      },
+      {
+        label: 'Hold it; yr. weights are heavy enough',
+        seed: 'held; the matter sits, but pressure may grow',
+        fixedOutcome: {
+          prose: 'You write back asking Idris\'s grace; the cylinder will be in yr. weights for the present. The runner takes the note without comment.',
+          changes: {
+            flags: { cylinderQuest: 'held', cylinderStep1Day: s.day },
+            journal: 'Set Idris\'s cylinder under yr. weights for the present. The matter rests.',
+          },
+        },
+      },
+    ],
+    read: false,
+  };
+}
+
+// Step 2 — branches on the path taken at step 1. Returns null for paths that
+// don't apply or have already resolved.
+function makeCylinderStep2Letter(s) {
+  const path = s.flags?.cylinderQuest;
+
+  if (path === 'opened') {
+    return {
+      id: 9310000 + s.day,
+      from: 'Said bin Mahmood, a Bugis pilot, by a runner',
+      subject: 'A small offer concerning paper',
+      body: `Sir, — A pilot is told things he is not told why. I am told you have come into the keeping of certain papers I should very much wish to read. I am not in a position to ask Mr. Salleh directly; he is, by report, away in the lower islands.
+
+Forty pounds in coin lies at yr. discretion if the papers come to my hand. The Hollanders have offered more, but their hand has been slow and their tongue is not mine.
+
+Yr. servt., the runner gives no name; ask for me at the prahu stockade by the south wharf.`,
+      responses: [
+        {
+          label: 'Sell the schedules to Said for £80',
+          seed: 'cash; pirate standing nudge; cylinder closed',
+          fixedOutcome: {
+            prose: 'You meet Said at the south wharf at low tide. He counts out eighty pounds in unmarked silver and takes the sheets without ceremony. The Bugis schedules pass into a wider trade; you are no longer the only Englishman who knows them.',
+            changes: {
+              money: 80,
+              reputation: { pirates: 5 },
+              flags: { cylinderQuest: 'closed-sold-bugis' },
+              journal: 'Sold Idris\'s schedules to Said bin Mahmood for £80. The Bugis houses have what they wanted.',
+            },
+          },
+        },
+        {
+          label: 'Pass them to the Crown for the bounty',
+          seed: 'larger reward; pirate hostility',
+          fixedOutcome: {
+            prose: 'You compose a sealed packet for Capt. Whitcombe, with translations Hodge has procured at no small expense. Whitcombe answers within the month: a hundred and fifty pounds is paid to yr. Bombay account against the schedules. The Brotherhood will know who informed.',
+            changes: {
+              money: 150,
+              reputation: { crown: 12, pirates: -10, company: 3 },
+              flags: { cylinderQuest: 'closed-sold-crown' },
+              journal: 'Forwarded Idris\'s schedules to the Crown via Capt. Whitcombe. £150 paid to Bombay; the Brotherhood will hear in time.',
+              hook: 'The Brotherhood will know who informed on the Bugis schedules. Said bin Mahmood is not a forgiving man.',
+            },
+          },
+        },
+        {
+          label: 'Burn them; the matter is not yrs.',
+          seed: 'no cash; small honour standing',
+          fixedOutcome: {
+            prose: 'You burn the three sheets in yr. own grate at first light. The ash is swept and the matter is closed. Said calls once at the godown and is told the truth; he leaves without comment.',
+            changes: {
+              reputation: { pirates: 3 },
+              flags: { cylinderQuest: 'closed-burned' },
+              journal: 'Burned Idris\'s Bugis schedules. Said came and went with no answer to give him.',
+            },
+          },
+        },
+      ],
+      read: false,
+    };
+  }
+
+  if (path === 'returning') {
+    return {
+      id: 9320000 + s.day,
+      from: 'Hamzah, cousin to Idris bin Salleh',
+      subject: 'Yr. cylinder, received with thanks',
+      body: `Sir, — Hodge has put into my hand the oilskin cylinder you carried from my cousin. The seal is whole, the contents private, the matter as it should be.
+
+Yr. courtesy in this is owed a return. I send by the bearer six strings of pearls of the Sulu coast — not extravagant, but yr. own, and on no books that touch the Hollander. Idris knows you have done this, and the news will travel where it travels.
+
+Yr. obliged servt.,
+Hamzah`,
+      responses: [
+        {
+          label: 'Acknowledge with formal thanks',
+          seed: 'closed; pearls received; small Bugis goodwill',
+          fixedOutcome: {
+            prose: 'You write to Hamzah a brief note in proper form. The bearer leaves the parcel of pearls upon yr. desk and does not stay for refreshments. The matter is, on every side, well concluded.',
+            changes: {
+              reputation: { pirates: 4 },
+              goods: { pearls: 6 },
+              flags: { cylinderQuest: 'closed-honor' },
+              journal: 'Hamzah received the cylinder unopened. Six strings of pearls came in return — yr. honour\'s reward.',
+              hook: 'The Bugis houses have noted yr. word. A Bugis-aligned hand may yet do you a turn.',
+            },
+          },
+        },
+      ],
+      read: false,
+    };
+  }
+
+  if (path === 'held') {
+    return {
+      id: 9330000 + s.day,
+      from: 'A man at the gate, who would not give his name',
+      subject: 'Concerning a cylinder yr. weights protect',
+      body: `Sir, — I am sent on a matter you will know. There is a cylinder under yr. seal that has been promised to my house, and the term of the courtesy is past. The contents are private and the contents are needed.
+
+I shall come again in seven days. By that hand, the matter may be settled with no Englishman the worse.
+
+By yr. leave,
+A man at the gate`,
+      responses: [
+        {
+          label: 'Hand it over unopened',
+          seed: 'pirate gain; matter closes',
+          fixedOutcome: {
+            prose: 'You give the cylinder to Sgt. Dass to set on the dock at the appointed hour. It is taken away by the same hand and yr. household sees neither giver nor recipient again.',
+            changes: {
+              reputation: { pirates: 8 },
+              flags: { cylinderQuest: 'closed-handed-over' },
+              journal: 'Handed Idris\'s cylinder to the unnamed Bugis caller as asked. The matter is closed.',
+            },
+          },
+        },
+        {
+          label: 'Refuse plainly; let them come',
+          seed: 'pirate cost; tension',
+          fixedOutcome: {
+            prose: 'You write a brief refusal and put the cylinder in yr. own strongbox. The man does not return; for the present. Sgt. Dass keeps the night watch under arms for some time after.',
+            changes: {
+              reputation: { pirates: -6 },
+              flags: { cylinderQuest: 'closed-refused' },
+              journal: 'Refused the unnamed caller\'s claim on Idris\'s cylinder. The household keeps a tighter watch for a season.',
+              hook: 'The unnamed Bugis caller will not let the matter rest. The night watch is, accordingly, the heavier.',
+            },
+          },
+        },
+        {
+          label: 'Present a forged copy; keep the original',
+          seed: 'risky duplicity; outcome unknown until later',
+          fixedOutcome: {
+            prose: 'Hodge spends three nights making a fair copy in his best Jawi imitation — passable to a glance, not to a reader. The copy is left at the gate at the appointed hour. The original sleeps in yr. strongbox.',
+            changes: {
+              reputation: { pirates: 4 },
+              flags: { cylinderQuest: 'closed-forged' },
+              journal: 'Hodge forged a copy of the cylinder; left at the gate. The original sits in yr. strongbox.',
+              hook: 'The forgery may be detected. The original is in yr. keeping; the consequences yet to be felt.',
+            },
+          },
+        },
+      ],
+      read: false,
+    };
+  }
+
+  return null;
+}
 // Senders gated by reputation / flags so the post reflects the Factor's
 // standing. The Director and the Vizier have dedicated cadences elsewhere
 // (Indiaman + quarterly nags; teak concession) and are excluded here so we
@@ -2300,6 +2517,47 @@ function tickDays(gs, days) {
       s.lettersGenerated = (s.lettersGenerated || 0) + 1;
       s.flags = { ...(s.flags || {}), faulkeQuestStep: 'awaiting-decision' };
       s.awayLog.push({ day: s.day, type: 'letter', text: 'Capt. Faulke is back at Eustace; a sealed packet from him by the same boat.' });
+    }
+
+    // ── Cylinder questline (Idris). Step 1: Idris writes once the Factor
+    // has met him + day >= 50. Step 2 fires 30 days after step 1, branched
+    // by the player's choice (Said bin Mahmood / Hamzah / Brotherhood man).
+    const knowsIdris = (s.acquaintances || []).some(a => /idris/i.test(a.name || ''));
+    const cStep = s.flags?.cylinderQuest;
+    if (
+      !s.charterClosed &&
+      !cStep &&
+      s.day >= 50 &&
+      knowsIdris
+    ) {
+      const letter = makeCylinderStep1Letter(s);
+      s.letters = [...s.letters, letter];
+      s.lettersGenerated = (s.lettersGenerated || 0) + 1;
+      s.flags = { ...(s.flags || {}), cylinderQuest: 'pending' };
+      s.awayLog.push({ day: s.day, type: 'letter', text: 'A Bugis runner came down to the godown with a folded note from Idris bin Salleh — concerning the cylinder.' });
+    }
+    // Step 2: fires 30 days after step 1's resolution day. Skips if the
+    // path is already resolved (closed-X) or still pending step 1 ('pending').
+    const cylinderS2Sent = !!s.flags?.cylinderStep2Sent;
+    const cylinderActive = cStep && !cStep.startsWith('closed') && cStep !== 'pending';
+    if (
+      !s.charterClosed &&
+      !cylinderS2Sent &&
+      cylinderActive &&
+      s.day >= ((s.flags?.cylinderStep1Day || 0) + 30)
+    ) {
+      const letter = makeCylinderStep2Letter(s);
+      if (letter) {
+        s.letters = [...s.letters, letter];
+        s.lettersGenerated = (s.lettersGenerated || 0) + 1;
+        s.flags = { ...(s.flags || {}), cylinderStep2Sent: true };
+        const text = cStep === 'opened'
+          ? 'A Bugis runner at the gate, with no name, asking for Said bin Mahmood\'s answer.'
+          : cStep === 'returning'
+            ? 'A small parcel from Hamzah at Kota Pinang — the cylinder\'s acknowledgement.'
+            : 'A man at the gate concerning the cylinder yr. weights protect.';
+        s.awayLog.push({ day: s.day, type: 'letter', text });
+      }
     }
 
     // ── Raid: opportunists at the godown. Stockade halves the chance, the

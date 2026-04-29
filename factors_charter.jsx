@@ -1619,6 +1619,49 @@ function loreForState(gs) {
   }).slice(0, 3); // cap to keep prompt budget under control
 }
 
+// ─────────── STANDING ARRANGEMENTS (curated flag display) ───────────
+// gs.flags accumulates many keys over a charter — some are scripted
+// commitments the player chose deliberately, most are AI-set narrative
+// state used internally by stateContext. Only the curated ones below are
+// surfaced to the player as "Standing Arrangements." The label function
+// receives the flag value and returns the readable line, or null to hide.
+
+const MAJOR_COMMITMENTS = [
+  { key: 'teakConcession', label: (v) =>
+      v === 'self'     ? 'The inland teak concession — held by the Company.' :
+      v === 'dutch'    ? 'The inland teak concession — sold on to ter Borch.' :
+      v === 'declined' ? 'The inland teak concession — declined; the matter rests.' :
+      null },
+  { key: 'dutchTradePass',     label: (v) => v ? 'A Dutch writ of free trade — in the strongbox.' : null },
+  { key: 'dutchPassDeclined',  label: (v) => v ? 'Mynheer Boom’s offer of a writ — refused.' : null },
+  { key: 'carryingDutchPacket',label: (v) => v ? 'A sealed packet for Mynheer Boom — yet to be delivered.' : null },
+  { key: 'dutchLedgerSeen',    label: (v) => v ? 'You have seen what was in the Dutchman’s seal.' : null },
+  { key: 'dutchPacketJettisoned', label: (v) => v ? 'You cast the Dutchman’s packet into the harbour. Boom does not yet know.' : null },
+  { key: 'brotherhoodCompact', label: (v) => v ? 'The Brotherhood compact — yr. ships safe in the strait.' : null },
+  { key: 'brotherhoodDeclined',label: (v) => v ? 'Capt. Maas’s compact — declined.' : null },
+  { key: 'brotherhoodRefused', label: (v) => v ? 'Capt. Maas’s compact — refused plainly. The strait is meaner.' : null },
+  { key: 'subscribedToSchool', label: (v) =>
+      v === 'generous' ? 'The Mission school — generously subscribed (£100).' :
+      v === 'modest'   ? 'The Mission school — subscribed at the modest figure (£30).' :
+      null },
+  { key: 'pykeSchoolDeclined', label: (v) => v ? 'The Mission school subscription — declined.' : null },
+  { key: 'gaveCrownIntelligence', label: (v) => v ? 'Crown — passed intelligence on the Brotherhood to HMS Adventure.' : null },
+  { key: 'advancedCrownCredit',label: (v) => v ? 'Crown — £100 advanced to HMS Adventure against the Bombay credit.' : null },
+  { key: 'declinedCrownService', label: (v) => v ? 'Capt. Whitcombe’s requests — declined.' : null },
+];
+
+function commitmentsFor(gs) {
+  if (!gs.flags) return [];
+  const out = [];
+  for (const c of MAJOR_COMMITMENTS) {
+    const v = gs.flags[c.key];
+    if (v === undefined || v === null || v === false) continue;
+    const line = c.label(v);
+    if (line) out.push({ key: c.key, line });
+  }
+  return out;
+}
+
 // ─────────── SCRIPTED ARRIVAL ENCOUNTERS ───────────
 // Curated, choice-driven moments that fire on arrival at a non-home port,
 // when a trigger condition (flag, location, standing) matches. Each choice
@@ -4517,16 +4560,20 @@ function LedgerView({ gs }) {
         </div>
       )}
 
-      {gs.flags && Object.keys(gs.flags).length > 0 && (
-        <div style={{ marginTop: '1rem' }}>
-          <div className="display" style={{ fontSize: '0.85em', color: '#6b4423', marginBottom: '0.4rem' }}>OPEN MATTERS</div>
-          <div style={{ fontSize: '0.85em', color: '#4a3220', fontStyle: 'italic' }}>
-            {Object.entries(gs.flags).map(([k, v], i) => (
-              <span key={k}>{i > 0 ? ' · ' : ''}{k}{v === true ? '' : `: ${typeof v === 'string' ? v : JSON.stringify(v)}`}</span>
-            ))}
+      {(() => {
+        const items = commitmentsFor(gs);
+        if (items.length === 0) return null;
+        return (
+          <div style={{ marginTop: '1rem' }}>
+            <div className="display" style={{ fontSize: '0.85em', color: '#6b4423', marginBottom: '0.4rem' }}>STANDING ARRANGEMENTS</div>
+            <div style={{ fontSize: '0.92em', color: '#4a3220' }}>
+              {items.map(it => (
+                <div key={it.key} className="italic" style={{ marginBottom: '0.25rem' }}>{it.line}</div>
+              ))}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       <div style={{ marginTop: '2rem' }}>
         <div className="display" style={{ fontSize: '0.9em', color: '#6b4423', marginBottom: '0.7rem' }}>THE HOUSEHOLD</div>

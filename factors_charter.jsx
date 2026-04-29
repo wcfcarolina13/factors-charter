@@ -5254,11 +5254,13 @@ function OutpostView({ gs, startBuild, expediteBuild }) {
               const canRush = q.daysLeft > 1 && gs.money >= cost && expediteBuild;
               return (
                 <div key={i} className="parchment" style={{ padding: '0.7rem 1rem', marginBottom: '0.5rem', background: 'rgba(255,253,245,0.5)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '0.3rem' }}>
                     <span className="display" style={{ color: '#5c1a08' }}>{b.name}</span>
                     <span className="display" style={{ fontSize: '0.85em', color: '#6b4423' }}>{q.daysLeft} day{q.daysLeft !== 1 ? 's' : ''} remaining</span>
                   </div>
-                  <div style={{ height: '5px', background: 'rgba(74,44,20,0.15)', marginTop: '0.4rem', borderRadius: '2px' }}>
+                  <div style={{ fontSize: '0.92em', color: '#4a3220', fontStyle: 'italic', marginTop: '0.25rem' }}>{b.blurb}</div>
+                  <div style={{ fontSize: '0.82em', color: '#6b4423', marginTop: '0.2rem' }}>{b.effect}</div>
+                  <div style={{ height: '5px', background: 'rgba(74,44,20,0.15)', marginTop: '0.5rem', borderRadius: '2px' }}>
                     <div style={{ width: `${pct}%`, height: '100%', background: '#5c1a08', borderRadius: '2px' }} />
                   </div>
                   {q.daysLeft > 1 && expediteBuild && (

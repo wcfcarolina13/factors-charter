@@ -57,6 +57,9 @@ const PORTS = {
     restock:  { calico: 0.5, opium: 0.15, saltpetre: 0.3 },
     buys:  { pepper: 1.4, cinnamon: 1.5, sandalwood: 1.2, silver: 1.05 },
     faction: 'dutch', rivalRisk: true,
+    // Port duty levied on every transaction. Modulated by Dutch standing
+    // through portTaxRate(). The Calvinist clerks miss nothing.
+    taxBase: 0.10,
     yard: 'fine',
     yardBlurb: 'The Dutch yard is the finest east of the Cape \u2014 and they will charge a Calvinist\u2019s price.',
   },
@@ -71,6 +74,20 @@ const PORTS = {
     faction: 'pirates',
     yard: 'rough',
     yardBlurb: 'The Brotherhood\u2019s wreckers can patch a hull in a hurry \u2014 with what timber they have lifted from elsewhere.',
+  },
+  'Tanjung Cermin': {
+    name: 'Tanjung Cermin',
+    blurb: 'A deep lagoon further east, shown on no chart. Seven shades of blue water, an old Portuguese fort gone to the trees.',
+    daysFromHome: 14,
+    requiresRep: { pirates: 25 },
+    requiresVisited: 'The Pelican\u2019s Nest',
+    sells: { silver: 0.55, opium: 0.6, saltpetre: 0.55 },
+    stockMax: { silver: 220, opium: 24, saltpetre: 32 },
+    restock:  { silver: 1.7, opium: 0.25, saltpetre: 0.35 },
+    buys:  { rum: 1.9, calico: 1.5, rice: 1.6 },
+    faction: 'pirates',
+    yard: 'rough',
+    yardBlurb: 'A wreckers\u2019 slip among the palms \u2014 driftwood, prize timber, and what the lagoon will give up.',
   },
 };
 
@@ -193,6 +210,29 @@ const priceFor = (portKey, commodity, day) => {
   const mult = port.sells?.[commodity] ?? port.buys?.[commodity] ?? 1;
   const fluct = ((hashCode(`${day}-${portKey}-${commodity}`) % 21) - 10) / 100;
   return Math.max(1, Math.round(base * mult * (1 + fluct)));
+};
+
+// Port duty (Dutch tax at Port St. Eustace) — proportion of transaction value.
+// Standing fine-tunes (cordial -25%, warm -10%, cool +25%, hostile +60%);
+// holding a Dutch trade pass (gs.flags.dutchTradePass) halves the rate
+// outright, on top of the standing modifier — that's the load-bearing lever
+// above standing. Returns 0 for ports without a taxBase.
+const portTaxRate = (gs, portKey) => {
+  const port = PORTS[portKey];
+  const base = port?.taxBase || 0;
+  if (!base) return 0;
+  const rep = (gs.reputation?.[port.faction] ?? 0);
+  let mult = 1;
+  if (rep >= 50) mult = 0.75;
+  else if (rep >= 20) mult = 0.90;
+  else if (rep >= -5) mult = 1.0;
+  else if (rep >= -20) mult = 1.25;
+  else mult = 1.6;
+  // The pass is a Dutch instrument; only honoured at Dutch ports.
+  if (port.faction === 'dutch' && gs.flags?.dutchTradePass) {
+    mult *= 0.5;
+  }
+  return base * mult;
 };
 
 const repTone = (n) => {
@@ -347,6 +387,16 @@ const ensureShape = (gs) => {
   if (next.shipCommission === undefined) {
     next.shipCommission = null;
   }
+  if (next.charterClosed === undefined) {
+    next.charterClosed = null;
+  }
+  if (!next.lettersAuto || typeof next.lettersAuto !== 'object') {
+    // Returning saves: schedule the next letter ~30–55 days out from today.
+    next.lettersAuto = { nextDay: (next.day || 1) + 30 + Math.floor(Math.random() * 25) };
+  }
+  if (!Array.isArray(next.pendingLetterRequests)) {
+    next.pendingLetterRequests = [];
+  }
   return next;
 };
 
@@ -493,8 +543,17 @@ Mr. W. died this morning at half past four. The Reverend will not come down from
   awayLog: [],          // events accrued while away from Bayan-Kor; cleared on digest
   quotas: { pepper: { needed: 400, have: 0 }, cinnamon: { needed: 200, have: 0 } },
   daysRemaining: 1095,
+  // The charter is for three years. When daysRemaining hits 0, the Court
+  // closes the file: a final letter lands, the day stops counting toward the
+  // quota, and the title roster slot is marked closed.
+  charterClosed: null, // null while running; { day, outcome } when closed
   indiaman: { lastVisit: 0, nextDay: 180, visits: 0, lastQuarterly: 0 },
   shipCommission: null, // { type, name, daysLeft, paid, tradeIn } when laying down a new vessel
+  // Auto-delivered AI letters from the wider world (sister, captains, factions).
+  // The Director (Indiaman + quarterly) and the Vizier (teak letter) have their
+  // own dedicated cadences; this is for everyone else.
+  lettersAuto: { nextDay: 35 },
+  pendingLetterRequests: [],
   journal: [],
   letters: [directorLetter, wilbrahamPapers],
   hooks: ['The inland teak concession \u2014 ter Borch wants it.'],
@@ -672,6 +731,382 @@ function makeQuarterlyNagLetter(s) {
   };
 }
 
+// ─────────── DUTCH TRADE PASS ───────────
+// Period mechanism: VOC factors at Asian outposts privately granted "passes
+// of free trade" to selected English Company servants in exchange for
+// favours, discretion, or a tribute. Held quietly in a strongbox; halved
+// the port duty in practice. The flag gs.flags.dutchTradePass enables the
+// reduction in portTaxRate. Granted via this letter from a junior Dutch
+// Factor — fired once after the Factor has put into Port St. Eustace and
+// established at least minimal standing with the Dutch.
+
+function makeDutchPassLetter(s) {
+  return {
+    id: 4000000 + s.day,
+    from: 'Mynheer Hendrik Boom, Junior Factor at Port St. Eustace',
+    subject: 'A writ of free trade',
+    body: `Sir, — I write upon the matter of yr. recent calls at this port. The Senior Factor has noted yr. business and finds it neither offensive nor of present consequence. There is, however, a writ of free trade which yr. countrymen of the Honourable Company sometimes obtain from this House at a personal arrangement, by which the duty falls to half what is otherwise levied.
+
+The arrangement is not transacted in the open ledger.
+
+I shd. be pleased to discuss the matter when next you put in. The terms admit of three forms: a sum laid at my discretion; a small office discreetly performed for the Dutch interest; or yr. silence and a continuance of the present rate.
+
+I am, sir, yr. obedt. servant in commercial matters,
+Hendrik Boom`,
+    responses: [
+      {
+        label: 'Pay the tribute and take the pass',
+        seed: 'cash bought; pass granted',
+        fixedOutcome: {
+          prose: 'A draft for two hundred and fifty pounds is laid in Boom’s hand at his counting-room behind the Dutch quay. He produces a folded writ on stiff paper, his name and a seal at the foot, and slides it across without further word. The duty falls to half from this hour.',
+          changes: {
+            money: -250,
+            reputation: { dutch: 3 },
+            flags: { dutchTradePass: true },
+            journal: 'Paid £250 to Mynheer Boom for a writ of free trade at Port St. Eustace. The duty is halved.',
+          },
+        },
+      },
+      {
+        label: 'Take the packet, ask no questions',
+        seed: 'discreet errand for the Dutch; pass granted; pirate cost',
+        fixedOutcome: {
+          prose: 'Boom hands over a small sealed packet, bound in Dutch wax, addressed to no name. It is to find a particular hand on yr. next leg east. He produces the writ in the same motion. You do not ask whose hand; the prudent do not ask.',
+          changes: {
+            reputation: { dutch: 3, pirates: -5 },
+            flags: { dutchTradePass: true, carryingDutchPacket: true },
+            journal: 'Took a sealed packet from Mynheer Boom for delivery on the next eastern leg. The writ of free trade is in the strongbox.',
+            hook: 'The packet for Boom — its recipient and its consequence yet to be felt.',
+          },
+        },
+      },
+      {
+        label: 'Decline; the price is too dear',
+        seed: 'a refusal noted',
+        fixedOutcome: {
+          prose: 'You return Boom’s clerk with a courteous note professing satisfaction with the present arrangement. The clerk\'s expression does not move. The matter is closed; the duty stands at the published rate.',
+          changes: {
+            reputation: { dutch: -1 },
+            flags: { dutchPassDeclined: true },
+            journal: 'Declined Mynheer Boom\'s offer of a writ of free trade. The Dutch duty stands at the open rate.',
+          },
+        },
+      },
+    ],
+    read: false,
+  };
+}
+
+// ─────────── REVEREND PYKE: A MISSION SCHOOL ───────────
+// Parallels the Vizier's teak letter and Boom's Dutch pass — a third
+// faction (Mission) gets a one-off scripted hook with three deterministic
+// responses. The subscription lays the ground for a recurring child of the
+// school as a future minor character. Pyke's tone: pious Anglican, dry,
+// not unkind, capable of small reproach.
+
+function makePykeSchoolLetter(s) {
+  return {
+    id: 6000000 + s.day,
+    from: 'Reverend Pyke of the Mission at Bayan-Kor',
+    subject: 'A subscription for a small school',
+    body: `Sir, — The chapel stands, by yr. agency and the Rajah's permission, and I am sensible of the obligation. There is now in the village a number of children for whom letters and the catechism are alike out of reach. I propose to set up a small school in the south wing, with one of the Madras boys at fifty pounds the year as master, and the slates and primers found from London at no further charge to yrself.
+
+I shd. be obliged for yr. notice on the matter. The school will be of the size, dignity, and persistence yr. subscription will allow. I am, sir, &c.,
+
+J. Pyke`,
+    responses: [
+      {
+        label: 'Subscribe generously — let it be a proper school',
+        seed: 'large subscription; lasting credit with the Mission',
+        fixedOutcome: {
+          prose: 'You write a draft for one hundred pounds upon yr. London agent and add a note that primers are to be sent by the next outbound. The Reverend\'s reply is brief and not warm, but it is the warmth he is capable of. Within the month a Madras boy named Cornelius is engaged at the chapel; the village brings six children the first week, twelve the second.',
+          changes: {
+            money: -100,
+            reputation: { mission: 10, crown: 3 },
+            flags: { subscribedToSchool: 'generous', pykeLetterSent: true },
+            journal: 'Subscribed £100 to the Reverend\'s school at the Mission. A Madras boy named Cornelius engaged as master. Twelve children by the second week.',
+            hook: 'The Mission school — a Madras boy, twelve children at the start. Some among them may yet prove of consequence to the household.',
+          },
+        },
+      },
+      {
+        label: 'A modest subscription, in the present circumstances',
+        seed: 'small subscription; warm enough but no enthusiasm',
+        fixedOutcome: {
+          prose: 'You write a draft for thirty pounds with apologies framed in the language of trade. The Reverend\'s receipt is courteous and characteristically brief. The school opens in the south wing at half the proposed scale; six children attend. Pyke makes no comment beyond the formal acknowledgment.',
+          changes: {
+            money: -30,
+            reputation: { mission: 3 },
+            flags: { subscribedToSchool: 'modest', pykeLetterSent: true },
+            journal: 'Subscribed £30 to the Reverend\'s school. He noted it without comment.',
+          },
+        },
+      },
+      {
+        label: 'Decline; the strongbox cannot bear it at present',
+        seed: 'a refusal, civilly framed',
+        fixedOutcome: {
+          prose: 'You return the Reverend\'s clerk with a courteous declination, citing the present pressure of trade and a hope that the matter may be revisited in better times. The clerk inclines his head. The Reverend has, since Wilbraham\'s death, learned not to be surprised at much.',
+          changes: {
+            reputation: { mission: -3 },
+            flags: { pykeLetterSent: true, pykeSchoolDeclined: true },
+            journal: 'Declined the Reverend\'s subscription proposal for a Mission school.',
+          },
+        },
+      },
+    ],
+    read: false,
+  };
+}
+
+// ─────────── THE BROTHERHOOD COMPACT ───────────
+// The Brotherhood faction one-off, parallels Vizier/Boom/Pyke. Capt. Gerrit
+// Maas — a Bugis-Dutch renegado, formerly VOC — writes after the Factor has
+// put into the Pelican's Nest with at least minimal standing. He proposes
+// a private compact: a small annual tribute, in return for which the
+// Brotherhood will not molest the Factor's ships in the strait. Mechanical
+// effect: gs.flags.brotherhoodCompact halves the voyage encounter chance
+// (60% → 40%) — the Brotherhood's word holds.
+
+function makeBrotherhoodLetter(s) {
+  return {
+    id: 7000000 + s.day,
+    from: 'Capt. Gerrit Maas, of the Brotherhood',
+    subject: 'A private arrangement, in plain words',
+    body: `Sir, — I write upon paper that has not crossed the Dutch House at Eustace and shall not. We have remarked yr. business at the Nest and find it neither timid nor stupid; the latter being the more useful in a Factor.
+
+There is an arrangement we offer to those whose dealings have been straight. A sum laid down once, by yr. discretion, and yr. ships are remarked but not molested in this strait or the next. The arrangement is not in writing beyond this letter, which I shall ask you to burn after reading. The names of the captains who took it in earlier years prosper.
+
+Yr. obedt. servant in the trade we both keep,
+Gerrit Maas`,
+    responses: [
+      {
+        label: 'Accept the compact; pay the tribute',
+        seed: 'compact in force; safe passage; standing shifts felt by all parties',
+        fixedOutcome: {
+          prose: 'You disburse two hundred pounds to a Bugis pilot at the head of the strait, in coin and a bolt of fine calico, and the matter is done. Yr. master tells you within the week that a Bugis prahu lay to windward for two hours and made off without closing — the first time of many. The compact holds.',
+          changes: {
+            money: -200,
+            reputation: { pirates: 20, crown: -10, dutch: -5 },
+            flags: { brotherhoodCompact: true, brotherhoodLetterSent: true },
+            journal: 'Paid £200 to enter into Capt. Maas\'s compact. The Brotherhood will not molest yr. ships in the strait. The Crown is not to know.',
+            hook: 'The Brotherhood compact — its protection is real, its discovery would be grave.',
+          },
+        },
+      },
+      {
+        label: 'Decline, but courteously',
+        seed: 'no compact; small standing nudge with the Brotherhood',
+        fixedOutcome: {
+          prose: 'You return Maas\'s clerk with a brief note professing satisfaction with the present state of affairs. The clerk takes it without comment. The matter is closed; yr. ships continue to keep their watch in the strait.',
+          changes: {
+            reputation: { pirates: -3 },
+            flags: { brotherhoodLetterSent: true, brotherhoodDeclined: true },
+            journal: 'Declined Capt. Maas\'s compact, civilly. The strait remains the strait it was.',
+          },
+        },
+      },
+      {
+        label: 'Refuse plainly; the Director would have my skin',
+        seed: 'open refusal; cost with the Brotherhood; small Crown gain',
+        fixedOutcome: {
+          prose: 'You write the refusal in plain terms and add a sentence on the obligations of yr. office. Maas does not reply. Within the month, a small English brig out of Madras is taken in the strait and her cargo never accounted for — perhaps related, perhaps not. The strait is a colder place from this hour.',
+          changes: {
+            reputation: { pirates: -10, crown: 5 },
+            flags: { brotherhoodLetterSent: true, brotherhoodRefused: true },
+            journal: 'Refused Capt. Maas\'s compact in plain terms. The strait is, by the next news of it, a meaner one.',
+            hook: 'The Brotherhood remembers a refusal. Yr. ships in the strait should keep a sharper watch.',
+          },
+        },
+      },
+    ],
+    read: false,
+  };
+}
+
+// ─────────── THE CROWN: HMS ADVENTURE ───────────
+// Captain Whitcombe of the Royal Navy calls at Bayan-Kor on a patrol of
+// the strait. The Crown faction's one-off — period-plausible, since RN
+// frigates did call at Company stations for refits and intelligence in
+// the 1720s. He asks the Factor for one of three things.
+
+function makeCrownLetter(s) {
+  return {
+    id: 8000000 + s.day,
+    from: 'Capt. Edward Whitcombe, HMS Adventure',
+    subject: 'Compliments from the Royal Navy',
+    body: `Sir, — HMS Adventure is putting into Bayan-Kor next week for a fortnight\'s refit. I have the honour to write in advance with a request, that you may consider in due time.
+
+The Adventure is here on a patrol of the strait under standing orders to remark Brotherhood movements and to extend the King\'s peace where the Company\'s flag does not. There are particulars on which a Factor of yr. station might lend assistance: intelligence of the strait, a small advance against the Bombay credit, or such other service as occurs to you.
+
+The Crown is not without memory in these matters. I am, sir, yr. obedt. servant,
+Edward Whitcombe, Captain.`,
+    responses: [
+      {
+        label: 'Pass on what I know of the Brotherhood',
+        seed: 'intelligence given; Crown gains; pirates lose',
+        fixedOutcome: {
+          prose: 'You compose a careful letter naming what you have heard at the Pelican\'s Nest and what was said in the Vizier\'s clerk\'s presence at Bayan-Kor. Whitcombe receives it with proper thanks and a token of cinnamon for yr. trouble. The Adventure sails three days later. The Brotherhood\'s ear in the strait is not nothing; somewhere yr. words are remarked.',
+          changes: {
+            reputation: { crown: 15, pirates: -10, company: 3 },
+            flags: { crownLetterSent: true, gaveCrownIntelligence: true },
+            journal: 'Gave Capt. Whitcombe a written account of the Brotherhood\'s movements as I have heard them. The Crown notes it.',
+            hook: 'Yr. intelligence to the Crown — the Brotherhood will hear of it in time.',
+          },
+        },
+      },
+      {
+        label: 'Advance the £100 against Bombay',
+        seed: 'cash given; Crown credit; modest standing gain',
+        fixedOutcome: {
+          prose: 'You hand Whitcombe a draft for one hundred pounds, drawn upon yr. London agent and countersigned for collection at Bombay. He gives in turn a Crown receipt that will reach Bombay before the Adventure does. He is grateful in the manner of a captain who has been short of stores for six weeks.',
+          changes: {
+            money: -100,
+            reputation: { crown: 8 },
+            flags: { crownLetterSent: true, advancedCrownCredit: true },
+            journal: 'Advanced £100 to Capt. Whitcombe of HMS Adventure against the Bombay credit. The Crown\'s receipt is in the strongbox.',
+            hook: 'A Crown receipt for £100 stands at Bombay, redeemable when the books admit it.',
+          },
+        },
+      },
+      {
+        label: 'Plead present trade and decline',
+        seed: 'no service; Crown is not pleased',
+        fixedOutcome: {
+          prose: 'You write a courteous declination citing the present pressure of trade and yr. obligations to the Court. Whitcombe receives it without remark; the Adventure sails on schedule. He is not the kind of man who returns to a refusal, but he is also not the kind of man who forgets one.',
+          changes: {
+            reputation: { crown: -5 },
+            flags: { crownLetterSent: true, declinedCrownService: true },
+            journal: 'Declined Capt. Whitcombe\'s requests, civilly. The Crown\'s memory is long.',
+          },
+        },
+      },
+    ],
+    read: false,
+  };
+}
+
+// ─────────── AUTO LETTER SENDERS ───────────
+// Senders gated by reputation / flags so the post reflects the Factor's
+// standing. The Director and the Vizier have dedicated cadences elsewhere
+// (Indiaman + quarterly nags; teak concession) and are excluded here so we
+// don't double up. Weights bias toward senders the Factor would more
+// plausibly hear from often.
+
+const AUTO_SENDERS = [
+  {
+    key: 'wexley',
+    from: 'Mrs. Eliza Wexley, your sister',
+    faction: null,
+    mood: 'familial, news of home, gentle reproach, a child or aunt named, the weather in Bristol',
+    weight: 4,
+  },
+  {
+    key: 'faulke',
+    from: 'Capt. Faulke of the Albatross',
+    faction: null,
+    mood: 'weather-beaten, offering passage or news of the strait, the price of pepper at Madras, perhaps a warning',
+    weight: 3,
+  },
+  {
+    key: 'pyke',
+    from: 'Reverend Pyke of the Mission',
+    faction: 'mission',
+    mood: 'pious, requesting favour, warning of moral peril, perhaps a small subscription wanted',
+    weight: 2,
+    gate: (s) => (s.reputation?.mission || 0) >= -10,
+  },
+  {
+    key: 'pirates',
+    from: 'An Anonymous Hand',
+    faction: 'pirates',
+    mood: 'guarded, suggesting an arrangement profitable to both, written in a hand the Factor does not recognise',
+    weight: 2,
+    gate: (s) => (s.reputation?.pirates || 0) >= 5,
+  },
+  {
+    key: 'terborch',
+    from: 'Mynheer ter Borch',
+    faction: 'dutch',
+    mood: 'formal, suspicious, perhaps offering a deal, perhaps testing — a Calvinist clarity, a trader\'s caution',
+    weight: 2,
+    gate: (s) => (s.reputation?.dutch || 0) >= -25,
+  },
+];
+
+function pickAutoSender(s) {
+  const eligible = AUTO_SENDERS.filter(snd => !snd.gate || snd.gate(s));
+  if (eligible.length === 0) return null;
+  const total = eligible.reduce((a, b) => a + b.weight, 0);
+  let r = Math.random() * total;
+  for (const snd of eligible) {
+    r -= snd.weight;
+    if (r <= 0) return snd;
+  }
+  return eligible[eligible.length - 1];
+}
+
+// ─────────── CHARTER-END LETTER ───────────
+// At day 0 the Court closes the file. The letter the Director writes is
+// templated by completeness — three tonal variants. Returns both the
+// letter object and the outcome key for the closure record.
+
+function evalCharterOutcome(s) {
+  const pep = (s.quotas?.pepper?.have   || 0);
+  const cin = (s.quotas?.cinnamon?.have || 0);
+  const pepNeed = (s.quotas?.pepper?.needed   || 400);
+  const cinNeed = (s.quotas?.cinnamon?.needed || 200);
+  const ratio = (pep / pepNeed + cin / cinNeed) / 2;
+  if (pep >= pepNeed && cin >= cinNeed) return 'success';
+  if (ratio >= 0.65) return 'partial';
+  return 'failure';
+}
+
+function makeCharterEndLetter(s) {
+  const outcome   = evalCharterOutcome(s);
+  const totalPep  = Math.floor(s.quotas?.pepper?.have   || 0);
+  const totalCin  = Math.floor(s.quotas?.cinnamon?.have || 0);
+
+  let subject, body;
+  if (outcome === 'success') {
+    subject = 'Yr. Charter Honourably Concluded';
+    body = `Sir, — The third year is upon us, and the file at this House is closed in yr. favour. ${totalPep} cwt of pepper and ${totalCin} cwt of cinnamon stand to yr. account, the obligation discharged in full.
+
+The Court is well pleased. A second charter will be offered to you in the next packet, with terms more agreeable to a man who has shown what may be done at Bayan-Kor. Yr. tenth of net returns shall be lodged with yr. London agent by Lady Day.
+
+Yr. obedt. servants, the Court of Directors.`;
+  } else if (outcome === 'partial') {
+    subject = 'On the Closing of Yr. Charter';
+    body = `Sir, — The third year is up. The reckoning stands at ${totalPep}/400 pepper and ${totalCin}/200 cinnamon. The obligation is not discharged in full and we cannot pretend it is.
+
+We do not propose to despatch a successor at present. There are, in this latitude, harder posts than yours and easier; you are now of an age to know which is which. We expect a written account of the difficulties, of yr. own pen, by the next homeward Indiaman.
+
+Yr. servants, the Court of Directors.`;
+  } else {
+    subject = 'Yr. Recall, by the Next Packet';
+    body = `Sir, — The third year is closed. We have ${totalPep} cwt of pepper and ${totalCin} cwt of cinnamon out of yr. station against an obligation we set in plain terms three years gone. The Court will not pretend at further patience.
+
+A successor is despatched by the Indiaman next outbound. You will deliver yr. books, yr. keys, and yr. seals to him upon his landing, and take passage home in his place. The matter of yr. tenth is referred to the Standing Committee. Mr. Wilbraham's bones are in the chapel-yard at Bayan-Kor; you have at least the option of the next packet.
+
+Yr. servants, the Court of Directors.`;
+  }
+  return {
+    outcome,
+    letter: {
+      id: 5000000 + s.day,
+      from: 'The Court of Directors, London',
+      subject,
+      body,
+      responses: [
+        { label: 'Acknowledge in plain terms', seed: 'no rep change' },
+        { label: 'Reply with a measured account of difficulties', seed: 'company notes the case' },
+        { label: 'Set the letter aside, write nothing', seed: 'silence' },
+      ],
+      read: false,
+    },
+  };
+}
+
 // ─────────── HOME SIMULATION ───────────
 // Each day the Factor is away (or any day passes), the colony lives.
 // Construction progresses, NPCs act, small incidents accrue.
@@ -691,6 +1126,9 @@ function tickDays(gs, days) {
     indiaman: { ...(gs.indiaman || { lastVisit: 0, nextDay: 180, visits: 0, lastQuarterly: 0 }) },
     shipCommission: gs.shipCommission ? { ...gs.shipCommission } : null,
     ship: gs.ship ? { ...gs.ship } : null,
+    lettersAuto: { ...(gs.lettersAuto || { nextDay: 35 }) },
+    pendingLetterRequests: [...(gs.pendingLetterRequests || [])],
+    charterClosed: gs.charterClosed ? { ...gs.charterClosed } : null,
   };
   const hasStockade = !!s.outpost.buildings.stockade?.built;
   const hasBarracks = !!s.outpost.buildings.barracks?.built;
@@ -699,6 +1137,19 @@ function tickDays(gs, days) {
   for (let i = 0; i < days; i++) {
     s.day += 1;
     s.daysRemaining = Math.max(0, s.daysRemaining - 1);
+
+    // ── charter end: fires once when daysRemaining first hits 0. The Court
+    // closes the file; subsequent days continue to tick (the Factor still
+    // exists in the world) but the charter is over. Subsequent date-driven
+    // events (Indiaman, quarterly nag, auto-letters) are gated on
+    // !s.charterClosed in their own conditions, so they go quiet.
+    if (s.daysRemaining === 0 && !s.charterClosed) {
+      const { letter, outcome } = makeCharterEndLetter(s);
+      s.letters = [...s.letters, letter];
+      s.lettersGenerated = (s.lettersGenerated || 0) + 1;
+      s.charterClosed = { day: s.day, outcome };
+      s.awayLog.push({ day: s.day, type: 'charter-end', text: 'The third year is up. A packet from the Court closes the file.' });
+    }
 
     // ── port stocks replenish toward their cap
     for (const [pk, p] of Object.entries(PORTS)) {
@@ -846,7 +1297,7 @@ function tickDays(gs, days) {
     // ── Indiaman call: every INDIAMAN_INTERVAL days, the Company sends a
     // ship to lift pepper and cinnamon from the godown back to London. The
     // Director writes by the same packet.
-    if (s.day >= (s.indiaman?.nextDay ?? Infinity) && (s.indiaman?.visits ?? 0) < INDIAMAN_TOTAL) {
+    if (!s.charterClosed && s.day >= (s.indiaman?.nextDay ?? Infinity) && (s.indiaman?.visits ?? 0) < INDIAMAN_TOTAL) {
       const peppLifted = Math.floor(s.outpost.warehouse?.pepper || 0);
       const cinnLifted = Math.floor(s.outpost.warehouse?.cinnamon || 0);
       const idx = Math.min(s.indiaman.visits, INDIAMAN_NAMES.length - 1);
@@ -890,6 +1341,7 @@ function tickDays(gs, days) {
     // Doesn't fire on a day that already saw an Indiaman visit (above sets
     // lastQuarterly = lastVisit, blocking same-day double letters).
     if (
+      !s.charterClosed &&
       (s.indiaman?.visits || 0) < INDIAMAN_TOTAL &&
       (s.daysRemaining || 0) > 0 &&
       s.day >= (s.indiaman?.lastVisit || 0) + QUARTERLY_INTERVAL &&
@@ -902,10 +1354,31 @@ function tickDays(gs, days) {
       s.awayLog.push({ day: s.day, type: 'letter', text: 'A packet from London — the Court desires word of yr. progress.' });
     }
 
+    // ── Auto-delivered AI letters from the wider world. The request is
+    // queued here; an effect in GameHub generates the body asynchronously
+    // and pushes the finished letter into the inbox. Schedule advances
+    // whether or not a sender is eligible — quiet stretches reflect a
+    // Factor with few correspondents.
+    if (!s.charterClosed && (s.daysRemaining || 0) > 0 && s.day >= (s.lettersAuto?.nextDay || Infinity)) {
+      const sender = pickAutoSender(s);
+      if (sender) {
+        const seedId = Date.now() + s.day * 13 + (s.pendingLetterRequests?.length || 0);
+        s.pendingLetterRequests = [...(s.pendingLetterRequests || []), {
+          seedId,
+          senderKey: sender.key,
+          from: sender.from,
+          mood: sender.mood,
+          requestedDay: s.day,
+        }];
+      }
+      s.lettersAuto = { nextDay: s.day + 30 + Math.floor(Math.random() * 25) };
+    }
+
     // ── Teak concession: once the Factor has earned a measure of standing
     // with the Rajah, the Vizier writes to lay the long-suspended concession
     // before him. One-off; the flag prevents re-firing.
     if (
+      !s.charterClosed &&
       !s.flags?.teakLetterSent &&
       !s.flags?.teakConcession &&
       s.day >= 60 &&
@@ -916,6 +1389,75 @@ function tickDays(gs, days) {
       s.flags = { ...(s.flags || {}), teakLetterSent: true };
       s.lettersGenerated = (s.lettersGenerated || 0) + 1;
       s.awayLog.push({ day: s.day, type: 'letter', text: 'A formal letter came down from the palace, the Vizier’s seal upon it.' });
+    }
+
+    // ── Dutch trade pass: Mynheer Boom writes once the Factor has put into
+    // Port St. Eustace and the Dutch are not openly hostile. Holding the
+    // pass halves the port duty regardless of standing.
+    if (
+      !s.charterClosed &&
+      !s.flags?.dutchPassLetterSent &&
+      !s.flags?.dutchTradePass &&
+      !s.flags?.dutchPassDeclined &&
+      s.day >= 90 &&
+      (s.reputation?.dutch || 0) >= -10 &&
+      (s.visited || []).includes('Port St. Eustace')
+    ) {
+      const letter = makeDutchPassLetter(s);
+      s.letters = [...s.letters, letter];
+      s.flags = { ...(s.flags || {}), dutchPassLetterSent: true };
+      s.lettersGenerated = (s.lettersGenerated || 0) + 1;
+      s.awayLog.push({ day: s.day, type: 'letter', text: 'A discreet packet from the Dutch House at Eustace — Mynheer Boom’s hand.' });
+    }
+
+    // ── Reverend Pyke: once the chapel is built and the Mission has noted
+    // the Factor with at least mild approval, Pyke writes asking for a
+    // subscription to a small school at the Mission. One-off; pykeLetterSent
+    // prevents re-firing.
+    if (
+      !s.charterClosed &&
+      !s.flags?.pykeLetterSent &&
+      s.outpost?.buildings?.chapel?.built &&
+      s.day >= 100 &&
+      (s.reputation?.mission || 0) >= 5
+    ) {
+      const letter = makePykeSchoolLetter(s);
+      s.letters = [...s.letters, letter];
+      s.lettersGenerated = (s.lettersGenerated || 0) + 1;
+      s.flags = { ...(s.flags || {}), pykeLetterSent: true };
+      s.awayLog.push({ day: s.day, type: 'letter', text: 'A note from the Mission, in the Reverend’s small upright hand.' });
+    }
+
+    // ── The Brotherhood compact: Capt. Maas writes once after the Factor
+    // has put into the Pelican's Nest with at least minimal standing.
+    if (
+      !s.charterClosed &&
+      !s.flags?.brotherhoodLetterSent &&
+      s.day >= 75 &&
+      (s.reputation?.pirates || 0) >= 5 &&
+      (s.visited || []).includes('The Pelican’s Nest')
+    ) {
+      const letter = makeBrotherhoodLetter(s);
+      s.letters = [...s.letters, letter];
+      s.lettersGenerated = (s.lettersGenerated || 0) + 1;
+      s.flags = { ...(s.flags || {}), brotherhoodLetterSent: true };
+      s.awayLog.push({ day: s.day, type: 'letter', text: 'A letter on un-watermarked paper, in a hand the clerk does not know.' });
+    }
+
+    // ── HMS Adventure: Capt. Whitcombe writes once in the early-mid charter,
+    // requesting one of three services. Period-plausible — RN frigates did
+    // call at Company stations on patrol.
+    if (
+      !s.charterClosed &&
+      !s.flags?.crownLetterSent &&
+      s.day >= 120 &&
+      (s.visited || []).length >= 2  // has put into at least one foreign port
+    ) {
+      const letter = makeCrownLetter(s);
+      s.letters = [...s.letters, letter];
+      s.lettersGenerated = (s.lettersGenerated || 0) + 1;
+      s.flags = { ...(s.flags || {}), crownLetterSent: true };
+      s.awayLog.push({ day: s.day, type: 'letter', text: 'A King’s letter under a Royal Navy seal — Capt. Whitcombe of HMS Adventure.' });
     }
 
     // ── Raid: opportunists at the godown. Stockade halves the chance, the
@@ -954,6 +1496,11 @@ const SYSTEM_PROMPT = `You are the narrator of "The Factor's Charter," a text-ba
 
 VOICE: Dry, observational, period-appropriate. Sensory details (heat, salt, mildew, palm oil, gun smoke). No anachronisms — no "okay," no modern idiom. Specific, not generic. Slight melancholy, occasional dark humor. Names of people and ships should sound period-plausible.
 
+PROSE DISCIPLINE:
+- Concrete sensory detail over metaphor. Plain observation does the work; figurative language is a seasoning, not the dish. At most one metaphor or simile per passage. Prefer the named thing to the comparison.
+- Short sentences when the matter is small. Long sentences only when they earn it.
+- Avoid clauses that explain what the prose has already shown.
+
 WORLD GROUNDING (do not violate):
 - The Factor's home station is Bayan-Kor. The named characters who live there are Mr. Hodge (clerk, drunkard), Sgt. Dass (sepoy), the Rajah's Vizier, and Reverend Pyke (at the Mission). These characters can ONLY appear in scenes set at Bayan-Kor or via correspondence.
 - The other ports — Kota Pinang, Port St. Eustace, The Pelican's Nest — are reached only by voyage. They have their own anonymous local populations (harbormasters, merchants, soldiers, etc.).
@@ -963,7 +1510,8 @@ WORLD GROUNDING (do not violate):
 WORLD STATE (you may extend it):
 - Outcomes can plant minor characters into the world via "newAcquaintances": [{ "name", "role", "location", "notes" }]. These characters persist; later scenes will see them in the state context and may bring them back. Use period-plausible names. Don't duplicate existing acquaintances or named home-station characters.
 - Outcomes at sea or under combat can damage the ship via "shipDamage": { "hull": int 0–40, "sails": int 0–40 }. Both fields optional. Only use this when the prose justifies it (storm, gunfire, grounding). Letter outcomes must NEVER set shipDamage.
-- Outcomes can set narrative flags via "flags": { "key": value }. Use sparingly, for things future scenes might want to remember (e.g. "owesViziersFavor": true, "carriesContraband": true).
+- Outcomes can set narrative flags via "flags": { "key": value }. Be very sparing. ONE flag per fact — do not set paired flags that mean the same thing (e.g. "askedX: true" + "awaitingReplyOnX: true" is one fact, set one). Only set a flag if a later scene or letter could plausibly reference it. Flags are durable state, not journal entries.
+- Outcomes may add a "hook" — but before doing so, consider the open threads listed in the state context. If a new hook restates an existing one, REFINE the existing thread instead by leaving "hook" empty (the world keeps the older thread). Add a hook only when it is genuinely a new thread the world would not otherwise hold.
 
 CONSTRAINTS: Output ONLY valid JSON. No code fences, no preamble, no commentary. Stay within the requested length.`;
 
@@ -998,6 +1546,155 @@ async function callClaude(prompt) {
   }
 }
 
+// ─────────── LORE ───────────
+// World-building entries surfaced to the AI in the prompt only when their
+// trigger conditions match the current state. Add new entries here when a
+// real-world history, a place, or a character idea would enrich how the AI
+// writes about a location, faction, or moment. Keep texts tight (2–4 short
+// sentences) — every line eats prompt budget on every relevant call.
+//
+// Trigger keys (any combination, all must match):
+//   location   — exact port name (e.g. 'Bacalar Lagoon')
+//   visited    — only after the Factor has been to this port
+//   flag       — only when gs.flags[flag] is truthy
+//   repAtLeast — { factionKey: minRep }, all keys must satisfy
+//   always     — true (campaign-wide flavor; use sparingly)
+//
+// You can also add a `tag` for grouping (e.g. 'pirate-haven') for future
+// triggers that match by tag rather than by single key.
+
+const LORE = [
+  {
+    key: 'bayan-kor',
+    tag: 'home',
+    trigger: { location: 'Bayan-Kor' },
+    text: 'Bayan-Kor is small: a thatched godown, a leaky dock, the Rajah’s palace on the green hill above. The wet season runs March to October; everything wooden warps in it. The Rajah keeps his court in the Malay style and prefers the Friday audience to any other day. Sgt. Dass commands a sepoy garrison of three at full strength; less, when fever takes one.',
+  },
+  {
+    key: 'kota-pinang',
+    tag: 'sultanate',
+    trigger: { location: 'Kota Pinang' },
+    text: 'Kota Pinang sits up the strait, a Malay sultanate that suffers Europeans for the duty they pay. The Sultan’s harbourmaster is a Bugis named Daeng Mamping who notes every ship and every man aboard her. Pepper comes down from the hills in baskets each new moon. The Sultan takes a tenth of everything bought, and weighs it himself when he doubts.',
+  },
+  {
+    key: 'port-st-eustace',
+    tag: 'dutch',
+    trigger: { location: 'Port St. Eustace' },
+    text: 'Port St. Eustace is whitewashed and orderly, the only paved street east of Malacca. The Dutch House keeps three factors in residence and a Calvinist minister who preaches against Asian pleasures with no measurable effect. Their Bugis interpreters are paid better than most English captains. They watch the Strait and they keep ledgers; what they do with the ledgers is their own concern.',
+  },
+  {
+    key: 'pelicans-nest',
+    tag: 'pirate-haven',
+    trigger: { location: 'The Pelican’s Nest' },
+    text: 'The Pelican’s Nest is a hidden cove east of the chart, with a mangrove channel that admits no ship larger than a sloop without a pilot. The Brotherhood holds court here; their captains are Dutchmen, Bugis, English deserters, and one renegado Portuguese who was a bishop’s son. No flag flies on a fixed mast. The water is fresh from a spring at the head of the bay, and that is why the Brotherhood chose it.',
+  },
+  {
+    // Inspired by the history of Bacalar (Yucatan): a coastal lagoon held by
+    // pirates from the 1648 sack onward, "lagoon of seven colours" for the
+    // bands of blue, repeatedly contested and refortified by the colonial
+    // power. Transposed here to a Southeast-Asian context — abandoned
+    // Portuguese fortresses are period-plausible since Malacca fell to the
+    // Dutch in 1641 and Iberian outposts went dark across the region.
+    key: 'tanjung-cermin',
+    tag: 'pirate-haven',
+    trigger: { location: 'Tanjung Cermin' },
+    text: 'Tanjung Cermin shows seven distinct shades of blue from the dock to the deep — the Bugis call it the cape of mirrors. The Portuguese fort on the inner island is a ruin; its garrison withdrew when Malacca fell to the Dutch in ’41, and no power has held the cove since. The Brotherhood meets in its old chapel each monsoon to settle accounts. The Padre who blessed the keystones lies somewhere among the palms; the marker was long since taken for firewood.',
+  },
+];
+
+function loreForState(gs) {
+  if (!Array.isArray(LORE) || LORE.length === 0) return [];
+  return LORE.filter(e => {
+    const t = e.trigger || {};
+    if (t.always) return true;
+    if (t.location && gs.location !== t.location) return false;
+    if (t.visited && !gs.visited?.includes(t.visited)) return false;
+    if (t.flag && !gs.flags?.[t.flag]) return false;
+    if (t.repAtLeast) {
+      for (const [f, n] of Object.entries(t.repAtLeast)) {
+        if ((gs.reputation?.[f] || 0) < n) return false;
+      }
+    }
+    return true;
+  }).slice(0, 3); // cap to keep prompt budget under control
+}
+
+// ─────────── SCRIPTED ARRIVAL ENCOUNTERS ───────────
+// Curated, choice-driven moments that fire on arrival at a non-home port,
+// when a trigger condition (flag, location, standing) matches. Each choice
+// carries deterministic outcome prose + changes — no AI generation on the
+// mechanical side, since these are load-bearing story payoffs.
+//
+// Trigger keys (any combination, all must match):
+//   flag       — gs.flags[flag] is truthy
+//   location   — exact destination port name
+//   locationIn — destination is one of these port names
+//   repAtLeast — { factionKey: minRep }
+//   visited    — destination has been visited at least once before
+
+const SCRIPTED_ARRIVALS = [
+  {
+    key: 'dutch-packet',
+    trigger: {
+      flag: 'carryingDutchPacket',
+      locationIn: ['The Pelican’s Nest', 'Tanjung Cermin'],
+    },
+    title: 'The Dutchman’s Packet',
+    prose: 'A wharf-rat with a missing thumb finds you before yr. men have set the gangway down. He gives the Bugis word for paper and offers a hand. The sealed packet from Mynheer Boom has been in yr. coat since Eustace; the man waits, no warmer for waiting.',
+    choices: [
+      {
+        label: 'Hand the packet over without ceremony',
+        prose: 'He takes it, signs nothing, and is gone before yr. clerk has noted the matter. The errand is done. What was in the wax is no longer yr. concern.',
+        changes: {
+          reputation: { dutch: 5 },
+          flags: { carryingDutchPacket: false, deliveredDutchPacket: true },
+          journal: 'Delivered Mynheer Boom’s packet at the wharf, into a hand I did not learn the name of. The Dutch may be counted to remember it.',
+        },
+      },
+      {
+        label: 'Open the seal first, then deliver',
+        prose: 'You break the wax in yr. cabin before he is brought aboard. The papers are accounts in a Dutch hand: names of English captains and the prices they paid for Brotherhood passages, with sums and dates back four years. You re-seal as best you can; the wharf-rat takes it without remark, but his look is one degree colder.',
+        changes: {
+          reputation: { dutch: 2 },
+          flags: { carryingDutchPacket: false, openedDutchPacket: true },
+          journal: 'Read Mynheer Boom’s packet before delivery — accounts of English captains who have bought Brotherhood passages. Re-sealed and handed over. The Dutch are watching what is paid in this strait.',
+          hook: 'The Dutch ledger of English-pirate dealings — names and sums, four years back. Use of which is not yet apparent.',
+        },
+      },
+      {
+        label: 'Cast the packet into the harbour',
+        prose: 'You drop it overboard before he reaches the gangway. The seal vanishes in the green water. Yr. man at the rail watches without comment. The Brotherhood’s eyes are everywhere; somewhere yr. choice will be remarked.',
+        changes: {
+          reputation: { dutch: -8, pirates: 3 },
+          flags: { carryingDutchPacket: false, jettisonedDutchPacket: true },
+          journal: 'Threw Mynheer Boom’s packet into the harbour before it could change hands. Boom will hear of it.',
+          hook: 'Boom’s lost packet — the Dutch House at Eustace will not let the matter rest.',
+        },
+      },
+    ],
+  },
+];
+
+function pickArrivalEncounter(gs, dest) {
+  if (!Array.isArray(SCRIPTED_ARRIVALS)) return null;
+  for (const e of SCRIPTED_ARRIVALS) {
+    const t = e.trigger || {};
+    if (t.flag && !gs.flags?.[t.flag]) continue;
+    if (t.location && t.location !== dest) continue;
+    if (t.locationIn && !t.locationIn.includes(dest)) continue;
+    if (t.visited && !gs.visited?.includes(dest)) continue;
+    if (t.repAtLeast) {
+      let ok = true;
+      for (const [f, n] of Object.entries(t.repAtLeast)) {
+        if ((gs.reputation?.[f] || 0) < n) { ok = false; break; }
+      }
+      if (!ok) continue;
+    }
+    return e;
+  }
+  return null;
+}
+
 const stateContext = (gs) => {
   const reps = Object.entries(gs.reputation)
     .filter(([,v]) => v !== 0)
@@ -1025,18 +1722,21 @@ const stateContext = (gs) => {
   const indiamanLine = i.nextDay
     ? `Next Indiaman due in ${Math.max(0, i.nextDay - gs.day)} days (${(i.visits || 0)}/${INDIAMAN_TOTAL} calls made)`
     : 'Indiaman schedule not yet known';
-  return `Day ${gs.day}. Location: ${gs.location}. ${ship}. Crew: ${gs.crew.map(c=>`${c.name} (${c.trait} ${c.role})`).join(', ')}. Reputation: ${reps}. ${reckoning}. ${indiamanLine}. Days remaining on charter: ${gs.daysRemaining}. Recent: ${recentJournal}. Open threads: ${hooks}. Acquaintances: ${acquaintances}. Flags: ${flags}.`;
+  // Lore — only the entries whose triggers match the current state.
+  const lore = loreForState(gs).map(e => `[${e.key}] ${e.text}`).join(' ');
+  const loreLine = lore ? ` Local knowledge: ${lore}` : '';
+  return `Day ${gs.day}. Location: ${gs.location}. ${ship}. Crew: ${gs.crew.map(c=>`${c.name} (${c.trait} ${c.role})`).join(', ')}. Reputation: ${reps}. ${reckoning}. ${indiamanLine}. Days remaining on charter: ${gs.daysRemaining}. Recent: ${recentJournal}. Open threads: ${hooks}. Acquaintances: ${acquaintances}. Flags: ${flags}.${loreLine}`;
 };
 
 async function genVoyageEncounter(gs, fromPort, toPort) {
   const prompt = `Generate a voyage encounter at sea, sailing from ${fromPort} toward ${toPort}.
 ${stateContext(gs)}
 
-SCENE CONSTRAINT: This encounter happens on the open water during the voyage, not at any port. The Factor is aboard the pinnace with anonymous crew (a bosun, sailors). Do NOT introduce Mr. Hodge, Sgt. Dass, the Vizier, or Reverend Pyke unless you state plainly that they have been brought aboard for this voyage. New characters (e.g. another ship's captain, a passenger, a castaway) should have period-plausible names.
+SCENE CONSTRAINT: This encounter happens on the open water during the voyage, not at any port. The Factor is aboard his ship with anonymous crew (a bosun, sailors). Do NOT introduce Mr. Hodge, Sgt. Dass, the Vizier, or Reverend Pyke unless you state plainly that they have been brought aboard for this voyage. New characters (e.g. another ship's captain, a passenger, a castaway) should have period-plausible names.
 
 Return JSON:
 {
-  "prose": "3-4 sentences of period prose. Concrete sensory detail. Set the scene and present a situation requiring a decision.",
+  "prose": "2-3 sentences of period prose. Concrete sensory detail. Plain observation, not metaphor. Set the scene and present a situation requiring a decision.",
   "choices": [
     { "label": "5-9 word verb phrase", "seed": "what tonally happens if chosen" },
     { "label": "5-9 word verb phrase", "seed": "what tonally happens if chosen" },
@@ -1082,7 +1782,7 @@ ${constraintLine}
 
 Generate the outcome. Return JSON:
 {
-  "prose": "2-3 sentences of period prose describing what happens.",
+  "prose": "2-3 sentences of period prose describing what happens. Concrete observation. Avoid metaphor.",
   "changes": {
     "money": integer delta (often 0; range -200 to +200),
     "days": integer days passed (${isLetter ? '0 only' : '0-3'}),
@@ -1118,28 +1818,32 @@ Reputation deltas should be small (-15 to +15). Only include factions that actua
   return { result, log };
 }
 
-async function genLetter(gs) {
-  const senders = [
-    { from: 'The Court of Directors', faction: 'company', mood: 'imperious, demanding quarterly returns' },
-    { from: 'Mrs. Eliza Wexley, your sister', faction: null, mood: 'familial, news of home, gentle reproach' },
-    { from: 'Capt. Faulke of the Albatross', faction: null, mood: 'weather-beaten, offering passage or news' },
-    { from: 'Reverend Pyke of the Mission', faction: 'mission', mood: 'pious, requesting favors or warning of moral peril' },
-    { from: 'An Anonymous Hand', faction: 'pirates', mood: 'guarded, suggesting an arrangement profitable to both parties' },
-    { from: 'Mynheer ter Borch', faction: 'dutch', mood: 'formal, suspicious, perhaps offering a deal' },
-    { from: 'The Rajah\u2019s Vizier', faction: 'rajah', mood: 'elaborate, oblique, with a request behind the courtesy' },
-  ];
-  const sender = senders[gs.lettersGenerated % senders.length];
+async function genLetter(gs, sender) {
+  // Caller (the auto-letter scheduler) selects the sender. The mood line +
+  // stateContext drive the AI to write something the Factor's actual
+  // circumstances make plausible.
   const prompt = `Generate a letter delivered to the Factor at ${gs.location}.
 From: ${sender.from} (${sender.mood})
+
 ${stateContext(gs)}
+
+WRITING THE LETTER:
+- Lean on the Factor's reckoning above. The sender knows what they would plausibly know \u2014 Mrs. Wexley reads of the returns at Blackwall, Capt. Faulke hears the prices at Madras and the Strait, the Mission and the Rajah's people see the godown each day, ter Borch knows what the Dutch factor at Eustace knows, the Brotherhood listen on the wharves.
+- Reference the world by name when natural: the godown stocks, an Indiaman due or recently called, the brigantine on the stocks, the teak concession (and who holds it), Hodge or Dass or the Vizier by name, a port the Factor has lately put into.
+- Period 1720s mercantile English. No anachronism. Open with "Sir, \u2014" or a familial salutation; close with a period sign-off. 3\u20135 sentences.
+- Imply something the Factor might respond to or act upon.
+
+CONSTRAINTS:
+- The Factor cannot meet home-station characters (Hodge, Dass, the Vizier, Reverend Pyke) outside Bayan-Kor. They CAN write him letters from Bayan-Kor.
+- Do not invent named characters who duplicate or replace the home-station NPCs.
 
 Return JSON:
 {
   "from": "${sender.from}",
   "subject": "5-8 word subject",
-  "body": "3-5 sentences of a period letter. Sign off appropriately. Reference the current situation if natural. Should imply something the Factor might respond to or act upon.",
+  "body": "the letter body, with salutation and period sign-off",
   "responses": [
-    { "label": "5-8 word response", "seed": "tonal consequence" },
+    { "label": "5-8 word response in the Factor's voice", "seed": "tonal consequence" },
     { "label": "5-8 word response", "seed": "tonal consequence" },
     { "label": "Set aside, do not reply", "seed": "ignore, possible drift" }
   ]
@@ -1167,7 +1871,7 @@ Return JSON:
     error: call.error,
     startedAt: call.startedAt,
     endedAt: call.endedAt,
-    meta: { senderFrom: sender.from, senderFaction: sender.faction },
+    meta: { senderFrom: sender.from, senderFaction: sender.faction, senderKey: sender.key },
   };
   return { result, log };
 }
@@ -1685,6 +2389,216 @@ const ChartVignette = () => (
   </svg>
 );
 
+// A thatched godown raised on stone piers, bales stacked within. Used for
+// scenes about lodging stock, raids on the warehouse, the harvest coming in.
+const GodownVignette = () => (
+  <svg viewBox="0 0 280 140" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={vignetteWrap}>
+    <g stroke="#5c1a08" strokeWidth="1" fill="none" strokeLinecap="round" strokeLinejoin="round">
+      {/* Distant palms */}
+      <line x1="20" y1="120" x2="20" y2="65" opacity="0.5" strokeWidth="0.7" />
+      <path d="M 20 65 q -6 -3 -10 -10 m 10 10 q 6 -3 10 -10 m -10 10 q -2 -8 -2 -16 m 2 16 q 8 -2 14 -8" opacity="0.5" strokeWidth="0.6" />
+      <line x1="258" y1="118" x2="258" y2="68" opacity="0.5" strokeWidth="0.7" />
+      <path d="M 258 68 q -6 -3 -10 -10 m 10 10 q 6 -3 10 -10 m -10 10 q -2 -8 -2 -16 m 2 16 q 8 -2 14 -8" opacity="0.5" strokeWidth="0.6" />
+      {/* Ground line */}
+      <path d="M 0 120 L 280 120" />
+      {/* Stone piers */}
+      <rect x="62" y="112" width="14" height="8" />
+      <rect x="100" y="112" width="14" height="8" />
+      <rect x="138" y="112" width="14" height="8" />
+      <rect x="176" y="112" width="14" height="8" />
+      <rect x="214" y="112" width="14" height="8" />
+      {/* Floor beam */}
+      <line x1="55" y1="112" x2="235" y2="112" />
+      {/* Walls */}
+      <line x1="60" y1="112" x2="60" y2="70" />
+      <line x1="230" y1="112" x2="230" y2="70" />
+      {/* Roof — thatched, slight slope, with overhang */}
+      <path d="M 50 70 L 145 38 L 240 70" />
+      <path d="M 60 70 L 230 70" />
+      {/* Thatch hatching */}
+      <line x1="80" y1="60" x2="78" y2="65" opacity="0.5" strokeWidth="0.5" />
+      <line x1="100" y1="55" x2="98" y2="60" opacity="0.5" strokeWidth="0.5" />
+      <line x1="120" y1="50" x2="118" y2="55" opacity="0.5" strokeWidth="0.5" />
+      <line x1="140" y1="46" x2="138" y2="51" opacity="0.5" strokeWidth="0.5" />
+      <line x1="160" y1="50" x2="158" y2="55" opacity="0.5" strokeWidth="0.5" />
+      <line x1="180" y1="55" x2="178" y2="60" opacity="0.5" strokeWidth="0.5" />
+      <line x1="200" y1="60" x2="198" y2="65" opacity="0.5" strokeWidth="0.5" />
+      {/* Door */}
+      <path d="M 138 112 L 138 90 L 152 90 L 152 112" />
+      {/* Bales/crates inside, suggested through the doorway */}
+      <rect x="76" y="98" width="14" height="14" opacity="0.6" />
+      <rect x="92" y="100" width="14" height="12" opacity="0.5" />
+      <rect x="195" y="98" width="14" height="14" opacity="0.6" />
+      <rect x="178" y="100" width="14" height="12" opacity="0.5" />
+      {/* A sack with a tied top */}
+      <path d="M 84 98 q 0 -4 6 -4 q 6 0 6 4 z" opacity="0.4" />
+      {/* Lantern hung at the eaves */}
+      <line x1="145" y1="38" x2="145" y2="52" strokeWidth="0.6" opacity="0.7" />
+      <rect x="142" y="52" width="6" height="8" opacity="0.7" />
+    </g>
+  </svg>
+);
+
+// A two-masted brigantine, square-rigged on the foremast and fore-and-aft on
+// the main. Bigger than the pinnace; used for commission events and
+// brigantine voyages.
+const BrigantineVignette = () => (
+  <svg viewBox="0 0 280 140" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={vignetteWrap}>
+    <g stroke="#5c1a08" strokeWidth="1" fill="none" strokeLinecap="round" strokeLinejoin="round">
+      {/* Distant horizon */}
+      <line x1="0" y1="92" x2="60" y2="92" opacity="0.3" strokeWidth="0.5" />
+      <line x1="240" y1="92" x2="280" y2="92" opacity="0.3" strokeWidth="0.5" />
+      {/* Hull — longer than the pinnace */}
+      <path d="M 60 102 L 220 102 L 213 112 L 70 112 Z" />
+      <line x1="90" y1="102" x2="93" y2="112" opacity="0.5" />
+      <line x1="120" y1="102" x2="122" y2="112" opacity="0.5" />
+      <line x1="160" y1="102" x2="161" y2="112" opacity="0.5" />
+      <line x1="195" y1="102" x2="194" y2="112" opacity="0.5" />
+      {/* Gunports */}
+      <rect x="84" y="104" width="3" height="3" opacity="0.7" />
+      <rect x="110" y="104" width="3" height="3" opacity="0.7" />
+      <rect x="138" y="104" width="3" height="3" opacity="0.7" />
+      <rect x="166" y="104" width="3" height="3" opacity="0.7" />
+      <rect x="192" y="104" width="3" height="3" opacity="0.7" />
+      {/* Foremast (square-rigged) */}
+      <line x1="100" y1="102" x2="98" y2="22" />
+      {/* Mainmast (fore-and-aft rigged, slightly aft) */}
+      <line x1="170" y1="102" x2="168" y2="20" />
+      {/* Bowsprit */}
+      <line x1="220" y1="102" x2="248" y2="92" />
+      {/* Foremast yards */}
+      <line x1="78" y1="68" x2="120" y2="68" />
+      <line x1="82" y1="50" x2="116" y2="50" />
+      <line x1="86" y1="34" x2="112" y2="34" />
+      {/* Mainmast gaff */}
+      <line x1="170" y1="50" x2="148" y2="36" />
+      <line x1="170" y1="76" x2="148" y2="80" />
+      {/* Square sails on foremast */}
+      <path d="M 80 69 Q 100 84 120 69 L 120 88 L 80 88 Z" />
+      <path d="M 84 51 Q 100 60 116 51 L 116 67 L 84 67 Z" />
+      <path d="M 88 35 Q 100 41 112 35 L 112 49 L 88 49 Z" />
+      {/* Fore-and-aft (gaff sail) on mainmast */}
+      <path d="M 148 36 L 168 30 L 168 80 L 148 80 Z" />
+      {/* Jib */}
+      <path d="M 220 70 L 168 22 L 246 92 Z" />
+      {/* Pennant */}
+      <path d="M 168 20 L 178 16 L 178 22 L 168 22 Z" />
+      {/* Birds */}
+      <path d="M 30 28 Q 35 25 40 28 Q 45 25 50 28" strokeWidth="0.7" />
+      <path d="M 250 18 Q 255 15 260 18" strokeWidth="0.7" />
+      {/* Waves */}
+      <path d="M 0 102 Q 30 98 60 102 T 220 102 T 280 102" />
+      <path d="M 0 110 Q 40 106 80 110 T 200 110 T 280 110" opacity="0.5" />
+      <path d="M 30 118 Q 70 114 110 118 T 230 118 T 280 118" opacity="0.3" />
+    </g>
+  </svg>
+);
+
+// A three-masted East Indiaman at anchor, much larger than the brigantine,
+// flying the Company colours. Used for Indiaman call events.
+const IndiamanVignette = () => (
+  <svg viewBox="0 0 280 140" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={vignetteWrap}>
+    <g stroke="#5c1a08" strokeWidth="1" fill="none" strokeLinecap="round" strokeLinejoin="round">
+      {/* Distant low coastline */}
+      <path d="M 0 96 q 30 -2 60 0 q 30 2 60 -1 q 30 -2 60 0 q 30 2 60 0 q 20 -1 40 0" opacity="0.3" strokeWidth="0.6" />
+      {/* Hull — broad, with stern castle */}
+      <path d="M 40 100 L 230 100 L 224 115 L 50 115 Z" />
+      <path d="M 220 100 L 232 100 L 232 92 L 224 92 Z" />
+      {/* Two stripes of gunports */}
+      <line x1="60" y1="105" x2="216" y2="105" opacity="0.4" />
+      <line x1="60" y1="110" x2="216" y2="110" opacity="0.3" />
+      {/* Stern windows */}
+      <line x1="225" y1="98" x2="232" y2="98" opacity="0.6" strokeWidth="0.5" />
+      {/* Three masts */}
+      <line x1="80" y1="100" x2="78" y2="14" />
+      <line x1="135" y1="100" x2="133" y2="8" />
+      <line x1="195" y1="100" x2="193" y2="20" />
+      {/* Bowsprit */}
+      <line x1="40" y1="100" x2="14" y2="86" />
+      <line x1="14" y1="86" x2="14" y2="62" />
+      {/* Foremast yards (3 levels) */}
+      <line x1="58" y1="62" x2="100" y2="62" />
+      <line x1="62" y1="44" x2="96" y2="44" />
+      <line x1="66" y1="28" x2="92" y2="28" />
+      {/* Mainmast yards (3 levels) */}
+      <line x1="113" y1="56" x2="155" y2="56" />
+      <line x1="117" y1="38" x2="151" y2="38" />
+      <line x1="121" y1="22" x2="147" y2="22" />
+      {/* Mizzen yards */}
+      <line x1="174" y1="68" x2="212" y2="68" />
+      <line x1="178" y1="50" x2="208" y2="50" />
+      {/* Foremast sails */}
+      <path d="M 60 63 Q 80 78 100 63 L 100 84 L 60 84 Z" />
+      <path d="M 64 45 Q 80 54 96 45 L 96 61 L 64 61 Z" />
+      <path d="M 68 29 Q 80 35 92 29 L 92 43 L 68 43 Z" />
+      {/* Mainmast sails */}
+      <path d="M 115 57 Q 135 72 155 57 L 155 78 L 115 78 Z" />
+      <path d="M 119 39 Q 135 48 151 39 L 151 55 L 119 55 Z" />
+      <path d="M 123 23 Q 135 29 147 23 L 147 37 L 123 37 Z" />
+      {/* Mizzen sails */}
+      <path d="M 176 69 Q 193 80 210 69 L 210 88 L 176 88 Z" />
+      <path d="M 180 51 Q 193 58 206 51 L 206 67 L 180 67 Z" />
+      {/* Lateen on mizzen above */}
+      <path d="M 193 22 L 175 38 L 193 40 Z" />
+      {/* Jibs */}
+      <path d="M 14 62 L 78 14 L 14 86 Z" opacity="0.85" />
+      {/* Company pennant — long, three-tail */}
+      <path d="M 133 8 L 156 6 L 152 11 L 156 14 L 133 12 Z" />
+      {/* Anchor cable */}
+      <line x1="40" y1="115" x2="22" y2="125" opacity="0.6" />
+      {/* Waves */}
+      <path d="M 0 118 Q 40 114 80 118 T 200 118 T 280 118" />
+      <path d="M 0 126 Q 50 122 100 126 T 220 126 T 280 126" opacity="0.45" />
+      <path d="M 30 134 Q 70 130 110 134 T 230 134 T 280 134" opacity="0.3" />
+    </g>
+  </svg>
+);
+
+// The Rajah's palace on its hill above Bayan-Kor — a tiered roof, palms,
+// the suggestion of a courtyard. Used for Vizier letters and palace scenes.
+const PalaceVignette = () => (
+  <svg viewBox="0 0 280 140" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" style={vignetteWrap}>
+    <g stroke="#5c1a08" strokeWidth="1" fill="none" strokeLinecap="round" strokeLinejoin="round">
+      {/* Hill — gentle curve */}
+      <path d="M 0 124 Q 60 96 140 88 Q 220 96 280 124" />
+      {/* Palms flanking */}
+      <line x1="40" y1="120" x2="40" y2="76" opacity="0.7" strokeWidth="0.7" />
+      <path d="M 40 76 q -8 -4 -14 -12 m 14 12 q 8 -4 14 -12 m -14 12 q -3 -10 -3 -20 m 3 20 q 10 -3 16 -10" opacity="0.7" strokeWidth="0.6" />
+      <line x1="240" y1="120" x2="240" y2="74" opacity="0.7" strokeWidth="0.7" />
+      <path d="M 240 74 q -8 -4 -14 -12 m 14 12 q 8 -4 14 -12 m -14 12 q -3 -10 -3 -20 m 3 20 q 10 -3 16 -10" opacity="0.7" strokeWidth="0.6" />
+      {/* Palace base — wide platform */}
+      <rect x="100" y="86" width="80" height="6" />
+      {/* Walls of the palace */}
+      <rect x="108" y="62" width="64" height="24" />
+      {/* Doors and windows */}
+      <path d="M 134 86 L 134 70 Q 140 64 146 70 L 146 86" />
+      <rect x="116" y="68" width="8" height="10" opacity="0.6" />
+      <rect x="156" y="68" width="8" height="10" opacity="0.6" />
+      {/* Tiered roof — first tier */}
+      <path d="M 100 62 Q 140 50 180 62" />
+      {/* Second (smaller) tier */}
+      <path d="M 118 50 Q 140 40 162 50" />
+      <rect x="124" y="40" width="32" height="10" opacity="0.4" />
+      {/* Spire */}
+      <line x1="140" y1="40" x2="140" y2="22" />
+      <circle cx="140" cy="20" r="2" />
+      {/* Pennant on spire */}
+      <path d="M 140 22 L 152 18 L 152 26 L 140 28 Z" opacity="0.7" />
+      {/* Steps to the platform */}
+      <line x1="128" y1="92" x2="152" y2="92" opacity="0.6" strokeWidth="0.6" />
+      <line x1="124" y1="98" x2="156" y2="98" opacity="0.6" strokeWidth="0.6" />
+      <line x1="120" y1="104" x2="160" y2="104" opacity="0.6" strokeWidth="0.6" />
+      {/* Distant low rooftops at the foot of the hill */}
+      <path d="M 60 122 L 65 116 L 70 122" opacity="0.5" strokeWidth="0.6" />
+      <path d="M 75 122 L 80 116 L 85 122" opacity="0.4" strokeWidth="0.6" />
+      <path d="M 200 122 L 205 116 L 210 122" opacity="0.4" strokeWidth="0.6" />
+      <path d="M 215 122 L 220 116 L 225 122" opacity="0.5" strokeWidth="0.6" />
+      {/* Birds */}
+      <path d="M 195 30 Q 200 27 205 30 Q 210 27 215 30" strokeWidth="0.7" opacity="0.7" />
+    </g>
+  </svg>
+);
+
 // Map a loading message to the appropriate vignette by keyword.
 function pickVignette(msg) {
   if (!msg) return null;
@@ -1697,6 +2611,10 @@ function pickVignette(msg) {
   if (m.includes('messenger') || m.includes('compound')) return <MessengerVignette />;
   if (m.includes('hour passes') || m.includes('hour')) return <HourglassVignette />;
   if (m.includes('chart') || m.includes('unrolling')) return <ChartVignette />;
+  if (m.includes('godown') || m.includes('warehouse') || m.includes('lodge') || m.includes('stocks')) return <GodownVignette />;
+  if (m.includes('brigantine') || m.includes('slipway') || m.includes('keel') || m.includes('caulk')) return <BrigantineVignette />;
+  if (m.includes('indiaman') || m.includes('east india')) return <IndiamanVignette />;
+  if (m.includes('palace') || m.includes('vizier') || m.includes('rajah')) return <PalaceVignette />;
   return null;
 }
 
@@ -1804,7 +2722,9 @@ function TitleScreen({ saves, onNewGame, onContinue, onRestore, onDeleteSlot }) 
                       {s.name}, Factor at {s.location || 'Bayan-Kor'}
                     </div>
                     <div style={{ fontSize: '0.82em', color: '#6b4423', letterSpacing: '0.04em' }}>
-                      Day {s.day}{totalDays ? ` of ${totalDays}` : ''} &middot; {fmtAgo(s.lastSavedAt)}
+                      {s.charterClosed
+                        ? <>Charter closed{s.charterClosed.outcome ? ` — ${s.charterClosed.outcome}` : ''} &middot; {fmtAgo(s.lastSavedAt)}</>
+                        : <>Day {s.day}{totalDays ? ` of ${totalDays}` : ''} &middot; {fmtAgo(s.lastSavedAt)}</>}
                     </div>
                   </div>
                   {!isConfirming && (
@@ -2005,6 +2925,7 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
   const [arrivalProse, setArrivalProse] = useState(null);
   const [awayDigest, setAwayDigest] = useState(null);
   const [openLetterId, setOpenLetterId] = useState(null);
+  const [scriptedArrival, setScriptedArrival] = useState(null); // { encounter, port }
 
   // The very first time the game proper begins (after the opening sequence),
   // route the player straight into the unread Director letter so they cannot miss it.
@@ -2059,6 +2980,58 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
     })();
     return () => { cancelled = true; };
   }, [gs.letters]);
+
+  // Auto-letters: tickDays queues a request, this effect drains it. On
+  // success, push the finished letter into the inbox; on failure, drop
+  // the request silently. The schedule (gs.lettersAuto.nextDay) advances
+  // in tickDays whether or not the API call succeeds, so a quiet stretch
+  // simply means a quiet inbox.
+  const generatingLetterRef = useRef(false);
+  useEffect(() => {
+    if (generatingLetterRef.current) return;
+    const next = (gs.pendingLetterRequests || [])[0];
+    if (!next) return;
+    generatingLetterRef.current = true;
+    let cancelled = false;
+    (async () => {
+      try {
+        const sender = AUTO_SENDERS.find(s => s.key === next.senderKey) || {
+          key: next.senderKey, from: next.from, mood: next.mood, faction: null,
+        };
+        const { result, log } = await genLetter(gs, sender);
+        if (cancelled) return;
+        if (!result || !result.body) {
+          setGs(prev => ({
+            ...prev,
+            pendingLetterRequests: (prev.pendingLetterRequests || []).filter(r => r.seedId !== next.seedId),
+          }));
+          return;
+        }
+        const letter = {
+          id: next.seedId,
+          from: result.from || next.from,
+          subject: result.subject || 'A letter received',
+          body: result.body,
+          responses: Array.isArray(result.responses) && result.responses.length ? result.responses : [
+            { label: 'Reply with cautious interest', seed: 'opens dialogue' },
+            { label: 'Reply with formal refusal', seed: 'closes door politely' },
+            { label: 'Set aside, do not reply', seed: 'silence' },
+          ],
+          read: false,
+        };
+        setGs(prev => ({
+          ...prev,
+          letters: [...prev.letters, letter],
+          lettersGenerated: (prev.lettersGenerated || 0) + 1,
+          pendingLetterRequests: (prev.pendingLetterRequests || []).filter(r => r.seedId !== next.seedId),
+          aiLog: log ? pushAiLog(prev.aiLog, log) : prev.aiLog,
+        }));
+      } finally {
+        generatingLetterRef.current = false;
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [gs.pendingLetterRequests]);
 
   // Open a specific letter from anywhere (e.g. the Journal "Read" card).
   const openLetterById = (id) => {
@@ -2144,16 +3117,41 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
       });
     } else {
       setGs(newGs);
-      setPending(true);
-      setPendingMsg('Coming into port');
-      const { result: prose, log } = await genArrivalVignette(newGs, dest);
-      setPending(false);
-      setArrivalProse({ port: dest, prose });
-      if (log) {
-        setGs(prev => ({ ...prev, aiLog: pushAiLog(prev.aiLog, log) }));
+      // First-visit arrivals get a generated vignette to set the place. Revisits
+      // skip the AI call — the port is familiar; no need to pay for flavor.
+      const firstVisit = !gs.visited?.includes(dest);
+      if (firstVisit) {
+        setPending(true);
+        setPendingMsg('Coming into port');
+        const { result: prose, log } = await genArrivalVignette(newGs, dest);
+        setPending(false);
+        setArrivalProse({ port: dest, prose });
+        if (log) {
+          setGs(prev => ({ ...prev, aiLog: pushAiLog(prev.aiLog, log) }));
+        }
+      } else {
+        setArrivalProse(null);
+      }
+      // After the standard arrival surface, check for any scripted encounter
+      // whose triggers match. Curated payoffs for hooks the player has
+      // earned (e.g. the Dutch packet, plot threads from earlier choices).
+      const scripted = pickArrivalEncounter(newGs, dest);
+      if (scripted) {
+        setScriptedArrival({ encounter: scripted, port: dest });
       }
       setTab(returningHome ? 'journal' : 'port');
     }
+  };
+
+  // Resolve a scripted-arrival choice: apply its deterministic changes,
+  // surface the outcome prose, and clear the scriptedArrival state.
+  const handleScriptedChoice = (choice) => {
+    setGs(prev => applyOutcomeChangesPure(prev, choice.changes || {}));
+    setScriptedArrival(s => s ? ({ ...s, resolvedChoice: choice }) : s);
+  };
+
+  const dismissScriptedArrival = () => {
+    setScriptedArrival(null);
   };
 
   const sailTo = async (portKey) => {
@@ -2164,7 +3162,11 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
     }
     setPending(true);
     setPendingMsg('Stowing the cargo, hoisting sail');
-    const haveEncounter = Math.random() < 0.6;
+    // The Brotherhood compact halves the chance of a voyage encounter — a
+    // real mechanical effect of the flag. The Brotherhood's word is
+    // approximate, not absolute, so encounters still happen sometimes.
+    const encChance = gs.flags?.brotherhoodCompact ? 0.4 : 0.6;
+    const haveEncounter = Math.random() < encChance;
 
     if (haveEncounter) {
       const { result: enc, log } = await genVoyageEncounter(gs, gs.location, portKey);
@@ -2274,20 +3276,6 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
     setOutcome({ ...result, changes: safeChanges, encounter: { type: 'letter' } });
   };
 
-  const requestNewLetter = async () => {
-    setPending(true);
-    setPendingMsg('A messenger crosses the compound');
-    const { result: letter, log } = await genLetter(gs);
-    setPending(false);
-    setGs(prev => ({
-      ...prev,
-      letters: [...prev.letters, { ...letter, id: Date.now(), read: false }],
-      lettersGenerated: prev.lettersGenerated + 1,
-      aiLog: log ? pushAiLog(prev.aiLog, log) : prev.aiLog,
-    }));
-    setTab('letters');
-  };
-
   // Commission a brigantine at the Bayan-Kor slipway. Pays up front; pinnace
   // remains in service until the new ship is launched, at which point a
   // pre-quoted credit is paid for the pinnace.
@@ -2353,7 +3341,10 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
   };
 
   const buyGood = (commodity, qty, price) => {
-    const cost = qty * price;
+    const grossCost = qty * price;
+    const taxRate = portTaxRate(gs, gs.location);
+    const tax = Math.round(grossCost * taxRate);
+    const cost = grossCost + tax;
     if (gs.money < cost) return;
     // Hold cap: total stowage of current goods plus this purchase must fit.
     const w = COMMODITIES[commodity].weight;
@@ -2363,6 +3354,7 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
     const stockHere = gs.portStocks?.[gs.location] || {};
     const available = Math.floor(stockHere[commodity] ?? Infinity);
     if (qty > available) return;
+    const taxLine = tax > 0 ? `, with £${tax} duty to the Dutch` : '';
     setGs(prev => ({
       ...prev,
       money: prev.money - cost,
@@ -2374,26 +3366,23 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
           [commodity]: Math.max(0, (prev.portStocks?.[prev.location]?.[commodity] ?? 0) - qty),
         },
       },
-      journal: [...prev.journal, { day: prev.day, entry: `Bought ${qty} ${COMMODITIES[commodity].unit} of ${COMMODITIES[commodity].name} at ${gs.location} for £${cost}.` }],
+      journal: [...prev.journal, { day: prev.day, entry: `Bought ${qty} ${COMMODITIES[commodity].unit} of ${COMMODITIES[commodity].name} at ${gs.location} for £${grossCost}${taxLine}.` }],
     }));
   };
 
   const sellGood = (commodity, qty, price) => {
     if ((gs.goods[commodity] || 0) < qty) return;
-    const proceeds = qty * price;
-    setGs(prev => {
-      const next = {
-        ...prev,
-        money: prev.money + proceeds,
-        goods: { ...prev.goods, [commodity]: prev.goods[commodity] - qty },
-        journal: [...prev.journal, { day: prev.day, entry: `Sold ${qty} ${COMMODITIES[commodity].unit} of ${COMMODITIES[commodity].name} at ${gs.location} for £${proceeds}.` }],
-      };
-      // Quota tracking: shipped to home or to St. Eustace counts toward quota partial
-      if (prev.location === 'Bayan-Kor' && next.quotas?.[commodity]) {
-        // Selling at home doesn't count; you need to ship to London. Skip for prototype.
-      }
-      return next;
-    });
+    const grossProceeds = qty * price;
+    const taxRate = portTaxRate(gs, gs.location);
+    const tax = Math.round(grossProceeds * taxRate);
+    const proceeds = grossProceeds - tax;
+    const taxLine = tax > 0 ? `, less £${tax} Dutch duty` : '';
+    setGs(prev => ({
+      ...prev,
+      money: prev.money + proceeds,
+      goods: { ...prev.goods, [commodity]: prev.goods[commodity] - qty },
+      journal: [...prev.journal, { day: prev.day, entry: `Sold ${qty} ${COMMODITIES[commodity].unit} of ${COMMODITIES[commodity].name} at ${gs.location} for £${grossProceeds}${taxLine}.` }],
+    }));
   };
 
   // Move goods from the ship's hold into the godown at Bayan-Kor.
@@ -2509,6 +3498,18 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
     return <AwayDigestScreen digest={awayDigest} onContinue={handleDigestContinue} onResolveRaid={handleResolveRaid} />;
   }
 
+  if (scriptedArrival) {
+    return (
+      <ScriptedArrivalScreen
+        scene={scriptedArrival.encounter}
+        port={scriptedArrival.port}
+        resolvedChoice={scriptedArrival.resolvedChoice}
+        onChoose={handleScriptedChoice}
+        onContinue={dismissScriptedArrival}
+      />
+    );
+  }
+
   if (encounter && pending) {
     return <Page><Loading msg={pendingMsg} /></Page>;
   }
@@ -2522,6 +3523,7 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
           </div>
           <Fleuron />
           <p style={{ fontSize: '1.1em', whiteSpace: 'pre-line' }}>{outcome.prose}</p>
+          <ImaginePanel prose={outcome.prose} />
           <Fleuron char="❧" />
           <ChangesSummary changes={outcome.changes} />
           <div className="text-center" style={{ marginTop: '2rem' }}>
@@ -2577,9 +3579,9 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
           {tab === 'map' && <MapView gs={gs} sailTo={sailTo} />}
           {tab === 'port' && <PortView gs={gs} buyGood={buyGood} sellGood={sellGood} refitShip={refitShip} arrivalProse={arrivalProse} setTab={setTab} lodgeGoods={lodgeGoods} withdrawGoods={withdrawGoods} commissionBrigantine={commissionBrigantine} />}
           {tab === 'outpost' && atHome && <OutpostView gs={gs} startBuild={startBuild} expediteBuild={expediteBuild} />}
-          {tab === 'letters' && <LettersView gs={gs} setGs={setGs} onRespond={handleLetterResponse} onRequestNew={requestNewLetter} openLetterId={openLetterId} setOpenLetterId={setOpenLetterId} />}
+          {tab === 'letters' && <LettersView gs={gs} setGs={setGs} onRespond={handleLetterResponse} openLetterId={openLetterId} setOpenLetterId={setOpenLetterId} />}
         </div>
-        <ProvisionsDrawer gs={gs} setGs={setGs} requestNewLetter={requestNewLetter} lastSavedAt={lastSavedAt} />
+        <ProvisionsDrawer gs={gs} setGs={setGs} lastSavedAt={lastSavedAt} />
       </div>
     </Page>
   );
@@ -2592,6 +3594,10 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
 // (contents:write); each "Save" button uploads a timestamped JSON file.
 // The PAT is kept in its own localStorage key so it never lands in a
 // manuscript export.
+
+// GitHub backup is hidden in the Claude artifact runtime (CSP blocks
+// api.github.com). Flip to true when running the game outside Claude.
+const ENABLE_GITHUB_BACKUP = false;
 
 const GH_CONFIG_KEY = 'factor_github_config';
 
@@ -2841,6 +3847,120 @@ function GithubBackupModal({ gs, initialConfig, onClose }) {
   );
 }
 
+// ─────────── IMAGINE PANEL ───────────
+// Optional illustration generated from any passage of prose. Tries the
+// Pollinations.ai public endpoint first (free, no auth, served as an
+// <img> so it bypasses the artifact's connect-src CSP — img-src is more
+// permissive). On failure (CSP block, network, the service is down), the
+// prompt is exposed for copy-paste into ChatGPT / DALL·E / Midjourney —
+// the manual bridge. Style template prefixed to keep visual consistency
+// across the charter.
+
+const IMAGINE_STYLE_PREFIX =
+  '1720s logbook engraving, period woodcut style, sepia line illustration, single-color brown ink on cream parchment, period 18th century book illustration. ';
+
+function ImaginePanel({ prose, label = 'Imagine this scene' }) {
+  const [requested, setRequested] = useState(false);
+  const [imgState, setImgState] = useState('loading'); // 'loading' | 'loaded' | 'failed'
+  const [copyFlash, setCopyFlash] = useState('');
+
+  const cleanProse = (prose || '').replace(/\s+/g, ' ').trim().slice(0, 320);
+  const fullPrompt = IMAGINE_STYLE_PREFIX + cleanProse;
+  // Stable seed from the prose so the same passage produces the same image.
+  const seed = Math.abs(
+    cleanProse.split('').reduce((h, c) => ((h << 5) - h) + c.charCodeAt(0), 0) || 1
+  );
+  const imgUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(fullPrompt)}?width=480&height=320&nologo=true&seed=${seed}&model=flux`;
+
+  const copyPrompt = async () => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(fullPrompt);
+        setCopyFlash('Prompt copied.');
+        setTimeout(() => setCopyFlash(''), 2200);
+        return;
+      }
+    } catch (e) { /* fall through */ }
+    setCopyFlash('Long-press the prompt to copy.');
+    setTimeout(() => setCopyFlash(''), 2500);
+  };
+
+  if (!cleanProse) return null;
+
+  if (!requested) {
+    return (
+      <button
+        className="ghost-button-sm"
+        onClick={() => setRequested(true)}
+        style={{ marginTop: '0.5rem' }}
+        title="Generate an illustration from this passage"
+      >
+        ✦ {label}
+      </button>
+    );
+  }
+
+  return (
+    <div style={{
+      marginTop: '0.7rem', padding: '0.7rem 0.8rem',
+      background: 'rgba(255,255,255,0.25)',
+      border: '1px solid rgba(74,44,20,0.2)',
+    }}>
+      <div className="display" style={{ fontSize: '0.78em', color: '#6b4423', letterSpacing: '0.06em', marginBottom: '0.5rem' }}>
+        ⁂ AN ILLUSTRATION
+      </div>
+      {imgState !== 'failed' && (
+        <img
+          src={imgUrl}
+          alt="An illustration of the scene"
+          onLoad={() => setImgState('loaded')}
+          onError={() => setImgState('failed')}
+          style={{
+            width: '100%', maxWidth: '480px', height: 'auto',
+            display: imgState === 'loaded' ? 'block' : 'none',
+            border: '1px solid rgba(74,44,20,0.2)',
+            margin: '0 auto',
+          }}
+        />
+      )}
+      {imgState === 'loading' && (
+        <div className="italic" style={{ color: '#6b4423', fontSize: '0.85em' }}>
+          The hand sketches the scene… this can take half a minute.
+        </div>
+      )}
+      {imgState === 'failed' && (
+        <div style={{ fontSize: '0.85em', color: '#8b1a1a', fontStyle: 'italic' }}>
+          The illustration could not be reached. Copy the prompt below and use it in another tool.
+        </div>
+      )}
+      <details style={{ marginTop: '0.6rem' }}>
+        <summary style={{ cursor: 'pointer', fontSize: '0.82em', color: '#6b4423' }}>
+          Prompt {imgState === 'failed' ? '(copy and paste into ChatGPT / DALL·E / Midjourney)' : ''}
+        </summary>
+        <textarea
+          readOnly
+          value={fullPrompt}
+          onFocus={(e) => e.currentTarget.select()}
+          style={{
+            width: '100%', minHeight: '4rem', padding: '0.4rem', marginTop: '0.3rem',
+            fontFamily: 'monospace', fontSize: '0.78em',
+            background: 'rgba(255,255,255,0.4)',
+            border: '1px solid rgba(74,44,20,0.2)',
+            color: '#2a1a0a',
+            boxSizing: 'border-box',
+          }}
+        />
+        <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
+          <button className="ghost-button-sm" onClick={copyPrompt}>Copy prompt</button>
+          {copyFlash && (
+            <span style={{ fontSize: '0.78em', color: '#3a5c2a', fontStyle: 'italic' }}>{copyFlash}</span>
+          )}
+        </div>
+      </details>
+    </div>
+  );
+}
+
 // ─────────── EXPORT MODAL ───────────
 // Programmatic blob downloads (a.click() on a Blob URL) navigate the artifact
 // iframe away on mobile and tear down the React tree. This modal replaces them
@@ -2957,8 +4077,9 @@ function Header({ gs, onReturnToTitle }) {
   const [githubConfig, setGithubConfig] = useState(null);
 
   // Load GitHub config (if any) once on mount. The modal also re-reads it,
-  // so this is just for menu-label hinting.
+  // so this is just for menu-label hinting. Skipped when the feature is off.
   useEffect(() => {
+    if (!ENABLE_GITHUB_BACKUP) return;
     let cancelled = false;
     (async () => {
       const cfg = await loadGithubConfig();
@@ -3001,7 +4122,7 @@ function Header({ gs, onReturnToTitle }) {
             {gs.player.name}, Factor at {gs.location}
           </h1>
           <div className="display" style={{ fontSize: '0.85em', color: '#6b4423', letterSpacing: '0.1em', marginTop: '0.3rem' }}>
-            DAY {gs.day} · £{gs.money} · HOLD {fmtCwt(cargoWeight(gs.goods))}/{cargoCap(gs)} · {gs.daysRemaining} DAYS REMAIN
+            DAY {gs.day} · £{gs.money} · HOLD {fmtCwt(cargoWeight(gs.goods))}/{cargoCap(gs)} · {gs.charterClosed ? 'CHARTER CLOSED' : `${gs.daysRemaining} DAYS REMAIN`}
           </div>
           <div className="display" style={{ fontSize: '0.78em', color: '#8a6a3f', letterSpacing: '0.08em', marginTop: '0.2rem' }}>
             GODOWN {fmtCwt(warehouseUsed(gs))}/{warehouseCap(gs)} · LONDON: PEPPER {Math.floor(gs.quotas?.pepper?.have || 0)}/{gs.quotas?.pepper?.needed ?? 400} · CINNAMON {Math.floor(gs.quotas?.cinnamon?.have || 0)}/{gs.quotas?.cinnamon?.needed ?? 200}
@@ -3055,13 +4176,25 @@ function Header({ gs, onReturnToTitle }) {
           >
             ⎘ Show AI log ({(gs.aiLog || []).length})
           </button>
-          <button
-            className="ghost-button"
-            style={{ width: '100%', textAlign: 'left', marginBottom: '0.6rem' }}
-            onClick={() => { setGithubOpen(true); setMenuOpen(false); }}
-          >
-            ↑ GitHub backup{githubConfig ? ` — ${githubConfig.owner}/${githubConfig.repo}` : ' (configure)'}
-          </button>
+          {/*
+            GitHub backup is intentionally disabled inside the Claude artifact
+            runtime: the iframe's Content Security Policy blocks fetches to
+            api.github.com (only api.anthropic.com is allowlisted), so the
+            push always fails with TypeError "Failed to fetch". The
+            GithubBackupModal, pushFileToGitHub, and loadGithubConfig
+            helpers are left intact so this menu entry can be restored
+            wholesale when the game runs outside Claude. To re-enable, set
+            ENABLE_GITHUB_BACKUP to true.
+          */}
+          {ENABLE_GITHUB_BACKUP && (
+            <button
+              className="ghost-button"
+              style={{ width: '100%', textAlign: 'left', marginBottom: '0.6rem' }}
+              onClick={() => { setGithubOpen(true); setMenuOpen(false); }}
+            >
+              ↑ GitHub backup{githubConfig ? ` — ${githubConfig.owner}/${githubConfig.repo}` : ' (configure)'}
+            </button>
+          )}
 
           <div className="display" style={{ fontSize: '0.75em', color: '#6b4423', letterSpacing: '0.08em', padding: '0 0.3rem', marginBottom: '0.4rem' }}>
             ⁂ NAVIGATE
@@ -3187,6 +4320,7 @@ function JournalView({ gs, arrivalProse, setTab, openLetterById }) {
         <div style={{ marginBottom: '1.5rem', padding: '1rem', borderLeft: '3px solid #5c1a08', background: 'rgba(255,255,255,0.3)' }}>
           <div className="display" style={{ fontSize: '0.8em', color: '#6b4423' }}>UPON ARRIVAL AT {gs.location.toUpperCase()}</div>
           <p className="italic" style={{ marginTop: '0.5rem', marginBottom: 0 }}>{arrivalProse.prose}</p>
+          <ImaginePanel prose={arrivalProse.prose} label="Imagine the harbour" />
         </div>
       )}
 
@@ -3426,7 +4560,14 @@ function LedgerView({ gs }) {
 // ─────────── MAP VIEW ───────────
 
 function MapView({ gs, sailTo }) {
-  const ports = Object.entries(PORTS).filter(([k]) => k !== gs.location);
+  // Ports with a `requiresVisited` gate stay off the chart until the
+  // prerequisite port has been put into. Preserves the atmosphere of a
+  // place "shown on no chart" until someone tells you about it.
+  const ports = Object.entries(PORTS).filter(([k, p]) => {
+    if (k === gs.location) return false;
+    if (p.requiresVisited && !gs.visited?.includes(p.requiresVisited)) return false;
+    return true;
+  });
   const ship = gs.ship || { hull: 100, sails: 100 };
   const tooDamaged = ship.hull < MIN_HULL_COND || ship.sails < MIN_SAIL_COND;
 
@@ -3562,10 +4703,13 @@ function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab, lodg
   const ship = gs.ship || { name: 'The Pinnace', hull: 100, sails: 100 };
 
   // Compute the largest qty the player can buy of a commodity, given money,
-  // hold capacity, and port stock. Used to decide when to disable Buy buttons.
+  // hold capacity, and port stock. Tax inflates per-unit cost when buying at
+  // a port that levies duty (Dutch).
+  const taxRate = portTaxRate(gs, gs.location);
   const maxBuyable = (c, price) => {
     const w = COMMODITIES[c].weight;
-    const byMoney = Math.floor(gs.money / price);
+    const perUnit = Math.max(1, Math.ceil(price * (1 + taxRate)));
+    const byMoney = Math.floor(gs.money / perUnit);
     const byHold  = w > 0 ? Math.floor(remaining / w) : Infinity;
     const byStock = Math.floor(stocks[c] ?? Infinity);
     return Math.max(0, Math.min(byMoney, byHold, byStock));
@@ -3590,6 +4734,7 @@ function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab, lodg
       {arrivalProse?.port === gs.location && (
         <div style={{ padding: '0.8rem', borderLeft: '3px solid #5c1a08', background: 'rgba(255,255,255,0.3)', marginBottom: '1.5rem' }}>
           <p className="italic" style={{ margin: 0 }}>{arrivalProse.prose}</p>
+          <ImaginePanel prose={arrivalProse.prose} label="Imagine the harbour" />
         </div>
       )}
 
@@ -3609,6 +4754,14 @@ function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab, lodg
             <span style={{ color: '#8b1a1a', fontStyle: 'italic' }}>— too damaged to put to sea</span>
           )}
         </div>
+        {taxRate > 0 && (
+          <div style={{ marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: '1px dashed rgba(74,44,20,0.25)', fontSize: '0.85em', color: '#8b1a1a', fontStyle: 'italic' }}>
+            The Dutch port levies a duty of {Math.round(taxRate * 100)}% on every transaction.
+            {gs.flags?.dutchTradePass && (
+              <span style={{ color: '#3a5c2a' }}> Yr. writ of free trade is honoured here.</span>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="cols-2">
@@ -3618,12 +4771,13 @@ function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab, lodg
             const price = priceFor(gs.location, c, gs.day);
             const onHand = Math.floor(stocks[c] ?? 0);
             const max = maxBuyable(c, price);
+            const effPrice = taxRate > 0 ? Math.ceil(price * (1 + taxRate)) : price;
             return (
               <div key={c} className="trade-row">
                 <div>
                   <div>{COMMODITIES[c].name}</div>
                   <div style={{ fontSize: '0.85em', color: '#6b4423' }}>
-                    £{price} per {COMMODITIES[c].unit} · {COMMODITIES[c].weight} cwt ea ·{' '}
+                    £{price} per {COMMODITIES[c].unit}{taxRate > 0 ? ` (£${effPrice} w/ duty)` : ''} · {COMMODITIES[c].weight} cwt ea ·{' '}
                     <span style={{ color: onHand === 0 ? '#8b1a1a' : '#6b4423' }}>
                       {onHand === 0 ? 'none on hand' : `${onHand} on hand`}
                     </span>
@@ -3643,11 +4797,12 @@ function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab, lodg
           {buys.length === 0 ? <p className="italic">No one is buying.</p> : buys.map(c => {
             const price = priceFor(gs.location, c, gs.day);
             const have = gs.goods[c] || 0;
+            const netPrice = taxRate > 0 ? Math.floor(price * (1 - taxRate)) : price;
             return (
               <div key={c} className="trade-row">
                 <div>
                   <div>{COMMODITIES[c].name} <span style={{ fontSize: '0.85em', color: '#6b4423' }}>(have {have})</span></div>
-                  <div style={{ fontSize: '0.85em', color: '#6b4423' }}>£{price} per {COMMODITIES[c].unit}</div>
+                  <div style={{ fontSize: '0.85em', color: '#6b4423' }}>£{price} per {COMMODITIES[c].unit}{taxRate > 0 ? ` (£${netPrice} after duty)` : ''}</div>
                 </div>
                 <div className="actions">
                   <button className="ghost-button-sm" disabled={have < 1} onClick={() => sellGood(c, 1, price)}>Sell 1</button>
@@ -3995,6 +5150,64 @@ function OutpostView({ gs, startBuild, expediteBuild }) {
 
 // ─────────── AWAY DIGEST SCREEN ───────────
 
+// Renders a curated arrival encounter from SCRIPTED_ARRIVALS. Shows the
+// scene's prose and choice buttons until the player picks; then renders
+// the chosen outcome's prose and a Continue. The mechanical changes are
+// applied by the parent (handleScriptedChoice) before the resolved state
+// reaches this component.
+function ScriptedArrivalScreen({ scene, port, resolvedChoice, onChoose, onContinue }) {
+  return (
+    <Page>
+      <div className="ink-fade-in" style={{ maxWidth: '42rem', margin: '0 auto', padding: '3.0rem 1.5rem', width: '100%' }}>
+        <div className="display text-center" style={{ fontSize: '0.85em', color: '#6b4423', letterSpacing: '0.2em', marginBottom: '0.5rem' }}>
+          AT THE WHARF — {(port || '').toUpperCase()}
+        </div>
+        <h2 className="display text-center" style={{ fontSize: '1.8em', color: '#5c1a08', marginBottom: '1rem' }}>
+          {scene.title}
+        </h2>
+        <Fleuron />
+        <p className="drop-cap" style={{ fontSize: '1.05em' }}>{scene.prose}</p>
+        <Fleuron char="❧" />
+
+        {!resolvedChoice && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '1rem' }}>
+            {scene.choices.map((c, i) => (
+              <button
+                key={i}
+                className="ghost-button"
+                style={{ textAlign: 'left' }}
+                onClick={() => onChoose(c)}
+              >
+                — {c.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {resolvedChoice && (
+          <div className="parchment ink-fade-in" style={{
+            padding: '1rem 1.1rem', marginTop: '1rem', marginBottom: '1.2rem',
+            background: 'rgba(255,253,245,0.55)',
+          }}>
+            <div className="display" style={{ fontSize: '0.85em', color: '#6b4423', letterSpacing: '0.06em', marginBottom: '0.3rem' }}>
+              YOU CHOSE: <span style={{ fontStyle: 'italic', textTransform: 'none', letterSpacing: 0 }}>{resolvedChoice.label}</span>
+            </div>
+            <p style={{ margin: 0, fontSize: '1em' }}>{resolvedChoice.prose}</p>
+          </div>
+        )}
+
+        {resolvedChoice && (
+          <div className="text-center" style={{ marginTop: '1rem' }}>
+            <button className="wax-button" onClick={onContinue}>
+              Take Up the Work
+            </button>
+          </div>
+        )}
+      </div>
+    </Page>
+  );
+}
+
 function AwayDigestScreen({ digest, onContinue, onResolveRaid }) {
   const [raidPending, setRaidPending] = useState(false);
   const [raidResolved, setRaidResolved] = useState(null); // { label, prose }
@@ -4108,7 +5321,7 @@ function AwayDigestScreen({ digest, onContinue, onResolveRaid }) {
 
 // ─────────── LETTERS VIEW ───────────
 
-function LettersView({ gs, setGs, onRespond, onRequestNew, openLetterId, setOpenLetterId }) {
+function LettersView({ gs, setGs, onRespond, openLetterId, setOpenLetterId }) {
   const markRead = (id) => {
     setGs(prev => ({ ...prev, letters: prev.letters.map(l => l.id === id ? { ...l, read: true } : l) }));
   };
@@ -4137,6 +5350,7 @@ function LettersView({ gs, setGs, onRespond, onRequestNew, openLetterId, setOpen
           <div className="italic" style={{ marginBottom: '1rem' }}>{letter.subject}</div>
           <Fleuron char="❧" />
           <p style={{ whiteSpace: 'pre-line', fontSize: '1.05em' }}>{letter.body}</p>
+          <ImaginePanel prose={letter.body} label="Imagine the sender's hand" />
           <Fleuron />
           {letter.replied ? (
             <div className="italic" style={{ color: '#6b4423' }}>You replied: &ldquo;{letter.replyLabel}&rdquo;</div>
@@ -4163,10 +5377,7 @@ function LettersView({ gs, setGs, onRespond, onRequestNew, openLetterId, setOpen
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '1rem' }}>
-        <h2 className="display" style={{ fontSize: '1.4em', color: '#5c1a08', margin: 0 }}>Correspondence</h2>
-        <button className="ghost-button" onClick={onRequestNew}>Await the post</button>
-      </div>
+      <h2 className="display" style={{ fontSize: '1.4em', color: '#5c1a08', margin: '0 0 1rem 0' }}>Correspondence</h2>
       {gs.letters.length === 0 ? (
         <p className="italic" style={{ color: '#6b4423' }}>No letters in your hand.</p>
       ) : (
@@ -4246,7 +5457,7 @@ function ChangesSummary({ changes }) {
 // ─────────── PROVISIONS DRAWER ───────────
 // Save status, export to JSON for off-device backup, import back, reset.
 
-function ProvisionsDrawer({ gs, setGs, requestNewLetter, lastSavedAt }) {
+function ProvisionsDrawer({ gs, setGs, lastSavedAt }) {
   const [open, setOpen] = useState(false);
   const [importText, setImportText] = useState('');
   const [importMode, setImportMode] = useState(false);
@@ -4345,12 +5556,11 @@ function ProvisionsDrawer({ gs, setGs, requestNewLetter, lastSavedAt }) {
             </div>
           )}
 
-          <div className="display" style={{ fontSize: '0.85em', color: '#6b4423', marginTop: '1.2rem', marginBottom: '0.5rem' }}>OTHER</div>
-          <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-            <button className="ghost-button-sm" onClick={requestNewLetter}>Conjure a letter</button>
+          <div style={{ fontStyle: 'italic', color: '#6b4423', fontSize: '0.82em', marginTop: '1.2rem' }}>
+            Letters arrive as the post will bring them. To begin a fresh charter, return to the title from the menu &mdash; this charter will be kept on the rolls.
           </div>
           <div style={{ fontStyle: 'italic', color: '#6b4423', fontSize: '0.82em', marginTop: '0.6rem' }}>
-            To begin a fresh charter, return to the title from the menu &mdash; this charter will be kept on the rolls.
+            For backups, use <strong>Show manuscript</strong> in the menu &mdash; copy the JSON and paste it where you keep your saves. <strong>Show AI log</strong> exports every prompt and response from this charter for review.
           </div>
         </div>
       )}
@@ -4426,6 +5636,7 @@ const summariseSlot = (id, gs, savedAt) => ({
   daysRemaining: gs.daysRemaining,
   location: gs.location,
   lastSavedAt: savedAt,
+  charterClosed: gs.charterClosed ? { outcome: gs.charterClosed.outcome, day: gs.charterClosed.day } : null,
 });
 
 async function loadSavesIndex() {

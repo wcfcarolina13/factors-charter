@@ -4,6 +4,81 @@ The Factor's Charter — a chronological log of what's shipped. Newest first.
 
 ---
 
+## Session 8 — port storage, the Indiaman, faction hooks, the brigantine, world-building scaffold
+
+A long branch (`claude/port-storage-defense-JFty8`) that fixed a structural problem (the quota was unfillable: pinnace held 60 cwt, quota was 600 cwt) and built outward from there.
+
+### Added — storage and defense at Bayan-Kor
+- **Godown** at the home port: `gs.outpost.warehouse`, separate from the ship's hold. Base 120 cwt, +400 with a new **Great Godown** building (£140, 50 days). Pepper/cinnamon lodged here count toward the London quota.
+- **Powder Magazine** building (£100, 35 days) — caps any single raid loss at 10%.
+- **Lodge / Withdraw panel** at the Wharf at home, plus a `GodownPanel` showing current stocks and quota progress.
+- **Raid event** in `tickDays`: opportunists can carry off a slice of stored pepper/cinnamon/silver/opium/sandalwood. Stockade halves the chance, Barracks halves it again, Magazine caps the loss.
+- **Raid → scene** on return home: the most recent raid in the away-log surfaces as an interactive choice in `AwayDigestScreen` — pursue inland with Sgt. Dass, send word to the Vizier, or let it pass. Each calls `genOutcome` for prose and outcome.
+- **Plantation harvest** routed to the godown (with overflow noted in the away-log).
+
+### Added — the Indiaman cycle
+- **East Indiaman call** every 180 days (six in the charter) lifts pepper/cinnamon from the godown back to London. `gs.quotas[k].have` repurposed as cumulative shipped tally.
+- **Director letter** lands by the same packet — three deterministic tone variants (success / partial / empty), then asynchronously upgraded by AI via `genIndiamanLetterPayload` when the API is reachable. Deterministic fallback always shows first.
+- **Quarterly Director nags** at `lastVisit + 90` (so day 90, 270, 450, …): four templated tones based on cumulative pace. Doubles letter density.
+- **Charter end at day 0**: `gs.charterClosed = { day, outcome }` set, final Director letter (success / partial / failure recall), HUD swaps to "CHARTER CLOSED", title roster row labels expired charters. Indiaman, quarterly nags, auto-letters and the one-off triggers gate on `!charterClosed` so the world goes quiet.
+
+### Added — the Brigantine
+- **Country brigantine** as the next ship: 180 cwt hold (3× pinnace), wear 0.6–1.5 per voyage day vs 1.0–3.0 (Pegu teak), −1 day on legs of 4+ days, 6 guns. Period-accurate as the workhorse of the Company's intra-Asian "country trade."
+- **Commission** at Bayan-Kor's Shipwright's Yard: £900 + 60 days. Pinnace stays in service while she's on the stocks; sold to a Bugis trader for £100 on launch. Cargo transfers automatically.
+- **`voyageDays(gs, port)`** helper; `applyVoyageWear` reads ship-type wear ranges.
+
+### Added — world-building feedstock
+- **`LORE` registry** in `factors_charter.jsx` with `loreForState(gs)` — surfaced to the AI in `stateContext` as a "Local knowledge" line only when triggers (location, visited, flag, repAtLeast, always) match. Capped at 3 entries per prompt to protect token budget.
+- **`WORLD_NOTES.md`** at the repo root: Bradley's notebook for tone touchstones, anti-patterns, inspirations landed (with cross-refs to LORE keys and code locations), inspirations pending, names worth keeping, open hooks in plain English. CLAUDE.md now requires reading it before any narrative session.
+- **First port: Tanjung Cermin** — drawn from the Bacalar pirate-bay history (1648 English sack, 1652 Diego el Mulato, lagoon of seven colours, Spanish refortified 1727–33) and transposed into the SE-Asian setting with a Bugis-coded name and an old Portuguese fort. Gated on pirates ≥ +25 AND visited Pelican's Nest. Off the chart until then.
+- **LORE entries** for Bayan-Kor, Kota Pinang, Port St. Eustace, the Pelican's Nest — 4–5 sentences each.
+
+### Added — faction one-offs (the named-figure scripted-letter pattern)
+Five of the six factions now have a one-time scripted letter from a named figure with three deterministic responses (`fixedOutcome` path, no AI on the mechanics):
+- **Rajah / The Vizier** — the inland teak concession (the long-suspended Wilbraham hook). Three responses: take it for the Company (£120 tribute, brigantine drops to £600), sell on to ter Borch (+£200), decline. Trigger: day ≥ 60, Rajah ≥ +5.
+- **Dutch / Mynheer Hendrik Boom** — the writ of free trade, in exchange for £250 tribute, a sealed packet to deliver east (plants the `carryingDutchPacket` hook), or a refusal. Holding the pass halves Dutch port duty regardless of standing — the lever above standing. Trigger: day ≥ 90, visited Eustace, Dutch ≥ −10.
+- **Mission / Reverend Pyke** — a subscription for a small Mission school. Three levels (£100 generous, £30 modest, decline). Generous plants a hook for a recurring child of the school. Trigger: chapel built, day ≥ 100, Mission ≥ +5.
+- **Brotherhood / Capt. Gerrit Maas** — a private compact for safe passage in the strait. £200 tribute halves voyage encounter chance (60% → 40%). Trigger: visited Pelican's Nest, day ≥ 75, pirates ≥ +5.
+- **Crown / Capt. Edward Whitcombe of HMS Adventure** — intelligence on the Brotherhood, a £100 advance against Bombay credit, or a refusal. Trigger: day ≥ 120, has put into a foreign port.
+
+### Added — scripted arrival encounters
+- **`SCRIPTED_ARRIVALS` registry** + `pickArrivalEncounter(gs, dest)` helper + `ScriptedArrivalScreen` component. Curated, choice-driven moments at the wharf when a trigger matches. First entry is the **Dutch packet payoff** at the Pelican's Nest or Tanjung Cermin (a wharf-rat with a missing thumb meets the gangway): hand over clean, read the seal first (plants a Dutch ledger of English-pirate dealings hook), or cast it into the harbour (Boom won't forget).
+
+### Added — auto-delivered correspondence
+- The `Await the post` button and the marginalia `Conjure a letter` button removed. Letters now arrive on a schedule (~30–55 days) from a weighted, gated pool of senders: Mrs. Wexley, Capt. Faulke, Pyke (mission ≥ −10), the Anonymous Hand (pirates ≥ +5), ter Borch (dutch ≥ −25). Director and Vizier excluded from the auto pool — they have their own dedicated tracks.
+- `genLetter` refactored to take an explicit sender; prompt sharpened to lean on `stateContext` (godown stocks, quota, brigantine on the stocks, teak concession holder).
+
+### Added — header HUD strip + AI quota awareness
+- Second info line in the Header: `GODOWN X/Y · LONDON: PEPPER N/400 · CINNAMON N/200`. Always visible.
+- `stateContext` now includes the Factor's reckoning, Indiaman ETA, and charter days remaining. The AI can reference these in encounters and letters.
+
+### Added — multi-save slots
+- `factor_save_<id>` per slot, `factor_saves_index` lists them. Title screen renders a roster of every charter in progress (name, port, "Day X of Y" or "Charter closed", relative timestamp). Resume / strike-out per slot. Legacy `factor_save` migrates to a slot on first load and is removed.
+- Begin Anew flow uses an inline confirmation panel (replaces the silent `window.confirm` swallowing on the artifact runtime).
+
+### Added — four new SVG vignettes
+- **GodownVignette**, **BrigantineVignette**, **IndiamanVignette**, **PalaceVignette** — single-colour line illustrations matching the existing eight. Wired into `pickVignette` by keyword.
+
+### Changed — prompts
+- `SYSTEM_PROMPT` tightened: prose discipline (concrete sensory detail over metaphor, ≤1 figurative comparison per passage); flags discipline (one flag per fact, no paired keys, only set if a later scene could reference); hooks discipline (refine existing threads before adding parallel ones).
+- Voyage encounter prose trimmed 3–4 → 2–3 sentences. Generic "his ship" replaces hardcoded "the pinnace."
+- `genOutcome` adds "concrete observation, avoid metaphor" hint.
+
+### Changed — port arrivals
+- First-visit-only AI vignettes. Revisits skip the call entirely.
+
+### Changed — Dutch port duties
+- **Port St. Eustace** levies a duty on every transaction. Base 10%, modulated by Dutch standing (cordial −25%, hostile +60%). Surfaced in the cargo banner, per-row prices, and journal entries.
+- Holding `gs.flags.dutchTradePass` halves the rate outright — orthogonal to standing.
+
+### Disabled
+- **GitHub backup** hidden behind `ENABLE_GITHUB_BACKUP = false`. The artifact iframe's CSP allowlists `api.anthropic.com` but blocks `api.github.com`; every push fails with "Failed to fetch" before reaching GitHub. All underlying code (`GithubBackupModal`, `pushFileToGitHub`, config helpers) left intact — flip the flag when running outside Claude.
+
+### Removed
+- Manual `requestNewLetter` handler — letters now arrive on the auto schedule.
+
+---
+
 ## Session 7 — GitHub backup
 
 ### Added

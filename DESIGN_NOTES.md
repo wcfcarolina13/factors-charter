@@ -183,16 +183,47 @@ chains. Staff levers come in the Session 10 batch.
 
 1. ~~Private trade allowance~~ (this session)
 2. ~~Brotherhood operative questline~~ (this session)
-3. **Cylinder / sealed-letter questlines** — the AI has plant strong "open this!" hooks that have no follow-up
-4. **Household crises** — Hodge relapse, Dass recall, Vizier marriage
-5. **Generational continuation** — successor charter on charter-end
-6. **Rivalry mechanics** — periodic news of other Factors' returns
-7. **Diamond / fine-goods cargo class** — high-value, low-weight specials
-8. **Internal Company faction split** — a second Director voice contesting
-   the official line; player accumulates standing with each
-9. **Building → person arrives** — Counting House → junior clerk;
-   Barracks → Sepoy corporal; Chapel → catechist
-10. **Bottomry loans** — leverage a voyage with consequences if it sinks
+3. ~~"Pursue a thread" action~~ (player-driven invocation of accumulated state — shipped)
+4. ~~Curated period plates~~ (six 1720s engravings inlined as base64 with ImagePlate matcher)
+5. **Cylinder / sealed-letter questlines** — the AI has planted strong "open this!" hooks that have no follow-up
+6. **Household crises** — Hodge relapse, Dass recall, Vizier marriage
+7. **Generational continuation** — successor charter on charter-end
+8. **Crown-gated port** — mirrors the pirate progression; Royal Navy water station unlocks at Crown ≥ +10
+9. **New commodities** — camphor (native), tobacco, coffee (Mocha-routed), indigo
+10. **Fine-goods cargo class** — pearls, diamonds, bezoars: high-value, near-zero weight, occasional offers
+11. **Rivalry mechanics** — periodic news of other Factors' returns
+12. **Internal Company faction split** — a second Director voice contesting the official line
+13. **Building → person arrives** — Counting House → junior clerk; Barracks → Sepoy corporal; Chapel → catechist
+14. **Bottomry loans** — leverage a voyage with consequences if it sinks
 
 Append additions below with a date stamp; I'll triage them in the next
 session that touches gameplay.
+
+---
+
+## Session 9 (continued): commodity & port expansion
+
+### What I'd add for variety, in priority
+
+**New commodities** — period and place-appropriate for SE Asia 1720s:
+
+| commodity | period rationale | where it would live |
+|---|---|---|
+| **Camphor** | native to Borneo / Sumatra; major regional trade staple; valuable | Bayan-Kor or Kota Pinang sells |
+| **Tobacco** | Spanish/Portuguese-introduced, traded everywhere by 1720s | Eustace sells; Bayan-Kor buys |
+| **Coffee** | Mocha-sourced; hot mid-1720s European market | Eustace sells (Dutch monopoly) |
+| **Pearls** | high-value, near-zero weight; Persian Gulf or Malabar | random opportunity at any port; "fine goods" class |
+| **Indigo** | Indian dyestuff, traded west | Kota Pinang sells |
+| **Bezoar stones** | exotic curio; medical superstition; period | random at Kota Pinang or Tanjung Cermin |
+
+Furs are not period-appropriate for SE Asia (no fur-bearing animals).
+The spirit of "what else did Crusoe sell" lands as the **fine-goods
+class** — pearls, diamonds, bezoars: low weight, high value, rare.
+
+### Port unlock mechanism survey
+
+Currently only pirate progression unlocks new ports. Gaps:
+- **Crown axis:** no port. Should unlock once Crown ≥ +10 OR after Whitcombe's intelligence accepted.
+- **Mission axis:** no port. A Catholic / Jesuit-affiliated trading station inland could unlock with Mission ≥ +15.
+- **Late-game prestige:** a Chinese port (tea, porcelain) gated on brigantine + a quest. Long voyage.
+- **Sub-locations** at existing ports — Kota Pinang's inland teak yard once concession held; Eustace's "back rooms" once trade pass held. Doesn't add new ports but adds depth.

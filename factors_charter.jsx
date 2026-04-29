@@ -11,15 +11,27 @@ import React, { useState, useEffect, useRef } from 'react';
 // `weight` is stowage in cwt-equivalents — what a unit of this commodity
 // occupies in the hold. Pepper sets the scale at 1.0.
 const COMMODITIES = {
-  pepper:     { name: 'Pepper',     unit: 'cwt',    basePrice: 12, weight: 1.0  },
-  cinnamon:   { name: 'Cinnamon',   unit: 'cwt',    basePrice: 18, weight: 1.0  },
-  calico:     { name: 'Calico',     unit: 'bolt',   basePrice: 8,  weight: 0.4  },
-  silver:     { name: 'Silver',     unit: 'oz',     basePrice: 25, weight: 0.02 },
-  sandalwood: { name: 'Sandalwood', unit: 'log',    basePrice: 6,  weight: 1.5  },
-  opium:      { name: 'Opium',      unit: 'chest',  basePrice: 45, weight: 0.6  },
-  rice:       { name: 'Rice',       unit: 'sack',   basePrice: 3,  weight: 1.0  },
-  rum:        { name: 'Rum',        unit: 'barrel', basePrice: 7,  weight: 2.0  },
-  saltpetre:  { name: 'Saltpetre',  unit: 'cask',   basePrice: 22, weight: 1.2  },
+  pepper:     { name: 'Pepper',     unit: 'cwt',    basePrice: 12,  weight: 1.0  },
+  cinnamon:   { name: 'Cinnamon',   unit: 'cwt',    basePrice: 18,  weight: 1.0  },
+  calico:     { name: 'Calico',     unit: 'bolt',   basePrice: 8,   weight: 0.4  },
+  silver:     { name: 'Silver',     unit: 'oz',     basePrice: 25,  weight: 0.02 },
+  sandalwood: { name: 'Sandalwood', unit: 'log',    basePrice: 6,   weight: 1.5  },
+  opium:      { name: 'Opium',      unit: 'chest',  basePrice: 45,  weight: 0.6  },
+  rice:       { name: 'Rice',       unit: 'sack',   basePrice: 3,   weight: 1.0  },
+  rum:        { name: 'Rum',        unit: 'barrel', basePrice: 7,   weight: 2.0  },
+  saltpetre:  { name: 'Saltpetre',  unit: 'cask',   basePrice: 22,  weight: 1.2  },
+  // Native to Borneo and Sumatra; resinous, valued in apothecaries from
+  // Madras to Marseille. Fragrant, light, slow to come down from the inland.
+  camphor:    { name: 'Camphor',    unit: 'cwt',    basePrice: 28,  weight: 0.3  },
+  // Spanish/Portuguese-introduced, traded everywhere by 1720s. Local
+  // demand at Bayan-Kor and Kota Pinang; Eustace gets supply via Manila.
+  tobacco:    { name: 'Tobacco',    unit: 'lb',     basePrice: 6,   weight: 0.5  },
+  // Fine-goods cargo class — high value, near-zero weight. Persian Gulf
+  // and Malabar pearls; rare in any port; coveted everywhere.
+  pearls:     { name: 'Pearls',     unit: 'string', basePrice: 60,  weight: 0.05 },
+  // Indian-cut and uncut. The Factor's strongbox can hide a fortune in
+  // diamonds without anyone noticing.
+  diamonds:   { name: 'Diamonds',   unit: 'parcel', basePrice: 200, weight: 0.01 },
 };
 
 // Each port has finite stocks of what it sells, replenishing over time.
@@ -30,20 +42,20 @@ const PORTS = {
     name: 'Bayan-Kor',
     blurb: 'Your station. A thatched godown, a leaky dock, and the Rajah\u2019s palace on the hill.',
     daysFromHome: 0, isHome: true,
-    sells: { rice: 0.85, sandalwood: 0.75 },
-    stockMax: { rice: 40, sandalwood: 18 },
-    restock:  { rice: 0.5, sandalwood: 0.2 },
-    buys:  { calico: 1.3, rum: 1.4, silver: 1.2 },
+    sells: { rice: 0.85, sandalwood: 0.75, camphor: 0.85 },
+    stockMax: { rice: 40, sandalwood: 18, camphor: 14 },
+    restock:  { rice: 0.5, sandalwood: 0.2, camphor: 0.15 },
+    buys:  { calico: 1.3, rum: 1.4, silver: 1.2, tobacco: 1.2, pearls: 1.3 },
     faction: 'rajah',
   },
   'Kota Pinang': {
     name: 'Kota Pinang',
     blurb: 'A pepper port up the strait. The Sultan tolerates Europeans, and taxes them.',
     daysFromHome: 3,
-    sells: { pepper: 0.7, cinnamon: 0.85, sandalwood: 0.9 },
-    stockMax: { pepper: 80, cinnamon: 30, sandalwood: 22 },
-    restock:  { pepper: 0.7, cinnamon: 0.3, sandalwood: 0.2 },
-    buys:  { calico: 1.4, opium: 1.5, silver: 1.1, rum: 1.2 },
+    sells: { pepper: 0.7, cinnamon: 0.85, sandalwood: 0.9, camphor: 0.9, pearls: 0.75 },
+    stockMax: { pepper: 80, cinnamon: 30, sandalwood: 22, camphor: 18, pearls: 6 },
+    restock:  { pepper: 0.7, cinnamon: 0.3, sandalwood: 0.2, camphor: 0.2, pearls: 0.05 },
+    buys:  { calico: 1.4, opium: 1.5, silver: 1.1, rum: 1.2, tobacco: 1.3 },
     faction: 'rajah',
     yard: 'middling',
     yardBlurb: 'The Sultan\u2019s harbormaster keeps men who know their trade. The work is fair, the wait reasonable.',
@@ -52,10 +64,10 @@ const PORTS = {
     name: 'Port St. Eustace',
     blurb: 'A Dutch harbor, whitewashed and orderly. Their factor watches you closely.',
     daysFromHome: 5,
-    sells: { calico: 0.75, opium: 0.85, saltpetre: 0.8 },
-    stockMax: { calico: 60, opium: 14, saltpetre: 24 },
-    restock:  { calico: 0.5, opium: 0.15, saltpetre: 0.3 },
-    buys:  { pepper: 1.4, cinnamon: 1.5, sandalwood: 1.2, silver: 1.05 },
+    sells: { calico: 0.75, opium: 0.85, saltpetre: 0.8, tobacco: 0.8 },
+    stockMax: { calico: 60, opium: 14, saltpetre: 24, tobacco: 30 },
+    restock:  { calico: 0.5, opium: 0.15, saltpetre: 0.3, tobacco: 0.4 },
+    buys:  { pepper: 1.4, cinnamon: 1.5, sandalwood: 1.2, silver: 1.05, camphor: 1.4, pearls: 1.35 },
     faction: 'dutch', rivalRisk: true,
     // Port duty levied on every transaction. Modulated by Dutch standing
     // through portTaxRate(). The Calvinist clerks miss nothing.
@@ -70,7 +82,7 @@ const PORTS = {
     sells: { silver: 0.65, opium: 0.7, saltpetre: 0.6 },
     stockMax: { silver: 200, opium: 18, saltpetre: 28 },
     restock:  { silver: 1.5, opium: 0.2, saltpetre: 0.3 },
-    buys:  { rum: 1.7, calico: 1.3, rice: 1.5 },
+    buys:  { rum: 1.7, calico: 1.3, rice: 1.5, tobacco: 1.4, camphor: 1.3 },
     faction: 'pirates',
     yard: 'rough',
     yardBlurb: 'The Brotherhood\u2019s wreckers can patch a hull in a hurry \u2014 with what timber they have lifted from elsewhere.',
@@ -81,13 +93,26 @@ const PORTS = {
     daysFromHome: 14,
     requiresRep: { pirates: 25 },
     requiresVisited: 'The Pelican\u2019s Nest',
-    sells: { silver: 0.55, opium: 0.6, saltpetre: 0.55 },
-    stockMax: { silver: 220, opium: 24, saltpetre: 32 },
-    restock:  { silver: 1.7, opium: 0.25, saltpetre: 0.35 },
-    buys:  { rum: 1.9, calico: 1.5, rice: 1.6 },
+    sells: { silver: 0.55, opium: 0.6, saltpetre: 0.55, pearls: 0.65, diamonds: 0.7 },
+    stockMax: { silver: 220, opium: 24, saltpetre: 32, pearls: 8, diamonds: 4 },
+    restock:  { silver: 1.7, opium: 0.25, saltpetre: 0.35, pearls: 0.06, diamonds: 0.04 },
+    buys:  { rum: 1.9, calico: 1.5, rice: 1.6, tobacco: 1.5 },
     faction: 'pirates',
     yard: 'rough',
     yardBlurb: 'A wreckers\u2019 slip among the palms \u2014 driftwood, prize timber, and what the lagoon will give up.',
+  },
+  'Fort Marlborough': {
+    name: 'Fort Marlborough',
+    blurb: 'A British factory on the Sumatran coast \u2014 Crown garrison, RN water station, the Union flag over the bastion.',
+    daysFromHome: 8,
+    requiresRep: { crown: 10 },
+    sells: { saltpetre: 0.65, calico: 0.85 },
+    stockMax: { saltpetre: 24, calico: 40 },
+    restock:  { saltpetre: 0.3, calico: 0.5 },
+    buys:  { pepper: 1.5, cinnamon: 1.6, sandalwood: 1.3, camphor: 1.5, pearls: 1.4, diamonds: 1.5 },
+    faction: 'crown',
+    yard: 'fine',
+    yardBlurb: 'Crown carpenters at the King\u2019s pay \u2014 close work, no Dutchman\u2019s premium, the figures plainly written.',
   },
 };
 
@@ -603,6 +628,9 @@ const PRIVATE_TRADE_LIMIT = 8; // cwt per Indiaman
 const LONDON_MULT = {
   pepper: 3.5, cinnamon: 3.5, sandalwood: 2.8, opium: 4.0,
   silver: 2.0, calico: 2.6, saltpetre: 2.4, rice: 2.0, rum: 2.0,
+  // The new commodities. Camphor and tobacco at solid markups; pearls
+  // and diamonds eyewatering — fine goods are why a Factor goes home rich.
+  camphor: 3.2, tobacco: 2.4, pearls: 4.5, diamonds: 5.0,
 };
 const londonValue = (commodity, qty) => {
   const c = COMMODITIES[commodity];
@@ -1820,6 +1848,17 @@ const LORE = [
     tag: 'pirate-haven',
     trigger: { location: 'Tanjung Cermin' },
     text: 'Tanjung Cermin shows seven distinct shades of blue from the dock to the deep — the Bugis call it the cape of mirrors. The Portuguese fort on the inner island is a ruin; its garrison withdrew when Malacca fell to the Dutch in ’41, and no power has held the cove since. The Brotherhood meets in its old chapel each monsoon to settle accounts. The Padre who blessed the keystones lies somewhere among the palms; the marker was long since taken for firewood.',
+  },
+  {
+    // Fort Marlborough — a real British EIC factory at Bencoolen on the
+    // west coast of Sumatra, established 1685 after the loss of Bantam to
+    // the Dutch. Pepper-trade outpost, Royal Navy water station, garrisoned
+    // by a few dozen Madras-establishment troops. Period-correct in every
+    // particular for the 1720s.
+    key: 'fort-marlborough',
+    tag: 'crown-station',
+    trigger: { location: 'Fort Marlborough' },
+    text: 'Fort Marlborough is the Honourable Company’s factory on the west coast of Sumatra — pepper port, water station, garrison of fifty under a Madras lieutenant. The Royal Navy puts in for stores and intelligence; the Court at Leadenhall reckons the place a difficult one but theirs. The fever takes one in three Englishmen who come ashore through the wet season. The pepper, however, is the cleanest in the East.',
   },
 ];
 

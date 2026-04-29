@@ -394,6 +394,12 @@ const ensureShape = (gs) => {
     // Returning saves: schedule the next letter ~30–55 days out from today.
     next.lettersAuto = { nextDay: (next.day || 1) + 30 + Math.floor(Math.random() * 25) };
   }
+  if (next.privateConsignment === undefined) {
+    next.privateConsignment = null;
+  }
+  if (next.privateConsignmentOffered === undefined) {
+    next.privateConsignmentOffered = false;
+  }
   if (!Array.isArray(next.pendingLetterRequests)) {
     next.pendingLetterRequests = [];
   }
@@ -554,6 +560,11 @@ Mr. W. died this morning at half past four. The Reverend will not come down from
   // own dedicated cadences; this is for everyone else.
   lettersAuto: { nextDay: 35 },
   pendingLetterRequests: [],
+  // Private trade allowance — period-accurate side income. Each Indiaman call
+  // offers up to PRIVATE_TRADE_LIMIT cwt of any commodity to be shipped on
+  // the Factor's own account. Funds return at the next Indiaman call at a
+  // London-market multiplier. While in flight, the consignment lives here.
+  privateConsignment: null, // null | { commodities: { key: cwt }, shippedDay, returnDay, expectedPayout }
   journal: [],
   letters: [directorLetter, wilbrahamPapers],
   hooks: ['The inland teak concession \u2014 ter Borch wants it.'],
@@ -579,6 +590,26 @@ const INDIAMAN_NAMES = [
 ];
 const INDIAMAN_INTERVAL = 180;
 const QUARTERLY_INTERVAL = 90;
+
+// Private trade allowance — per Indiaman call, the Factor may consign up to
+// this many cwt of any commodity from his godown to his own account in
+// London. The Indiaman returns 180 days later with the proceeds. London
+// markups are far above Asian buy prices; the period reality is that this
+// was how Company servants got rich, parallel to the Company quota.
+const PRIVATE_TRADE_LIMIT = 8; // cwt per Indiaman
+// Multiplier on the basePrice of each commodity, representing London market
+// vs Asian source price. Tuned so a full 8-cwt private cargo of pepper
+// returns ~£100, silver returns ~£50, opium ~£200.
+const LONDON_MULT = {
+  pepper: 3.5, cinnamon: 3.5, sandalwood: 2.8, opium: 4.0,
+  silver: 2.0, calico: 2.6, saltpetre: 2.4, rice: 2.0, rum: 2.0,
+};
+const londonValue = (commodity, qty) => {
+  const c = COMMODITIES[commodity];
+  if (!c || !qty) return 0;
+  const mult = LONDON_MULT[commodity] || 2.0;
+  return Math.round(c.basePrice * mult * qty);
+};
 const INDIAMAN_TOTAL = 6;
 
 function makeIndiamanLetter(s, peppLifted, cinnLifted, shipName) {
@@ -986,7 +1017,133 @@ Edward Whitcombe, Captain.`,
   };
 }
 
-// ─────────── AUTO LETTER SENDERS ───────────
+// ─────────── BROTHERHOOD OPERATIVE QUESTLINE (3 STEPS) ───────────
+// First multi-step plot in the game. Pattern: each step is a letter with
+// fixedOutcome responses. Each response sets a flag that gates the next
+// step's trigger in tickDays. Designed to take ~60–80 days end to end and
+// fork at step 2 into Crown or Brotherhood resolution.
+//
+// Trigger chain:
+//   - Step 1 fires once Capt. Faulke is in acquaintances + day >= 90.
+//     Sets faulkeQuestStep = 1 on send.
+//   - Step 1 responses set faulkeQuestStep = 'paid' / 'declined' /
+//     'declined-locked'.
+//   - Step 2 fires 30 days after step 1 if step === 'paid'.
+//   - Step 2 responses set faulkeQuestStep = 'crown' / 'brotherhood' /
+//     'pursued-self'.
+//   - Step 3 fires 14 days later, branched.
+//   - faulkeQuestStep = 'closed-X' on resolution.
+
+function makeFaulkeStep1Letter(s) {
+  return {
+    id: 9000000 + s.day,
+    from: 'Capt. Thomas Faulke, of the Albatross',
+    subject: 'A matter for yr. private ear',
+    body: `Sir, — I have laid by yr. last conversation. The sloop we spoke of has been seen again in these waters, and her lines now match what Ramdeen described to a degree I did not credit at the time.
+
+I am minded to take the Albatross north of Eustace before the next monsoon and look at the cove she runs from. The trip costs me a fortnight and a sum of forty pounds in handlings I have no proper account for. If you wish me to put yr. name on what I find, send the forty pounds with this messenger and I shall write again upon my return.
+
+I am, sir, yr. obedt. servant,
+Thos. Faulke`,
+    responses: [
+      {
+        label: 'Pay £40; bid Faulke go',
+        seed: 'paid; intelligence ~30 days hence',
+        fixedOutcome: {
+          prose: `You count out forty pounds in coin and send the messenger back to the Albatross with yr. note of consent. Faulke does not tarry; he sails the Tuesday following.`,
+          changes: {
+            money: -40,
+            flags: { faulkeQuestStep: 'paid', faulkeQuestStep1Day: s.day },
+            journal: 'Paid £40 to Capt. Faulke for an investigation of the sloop\'s home cove north of Eustace. Word expected upon his return.',
+          },
+        },
+      },
+      {
+        label: 'Decline, but courteously',
+        seed: 'no investigation; thread idles',
+        fixedOutcome: {
+          prose: `You write back declining the venture, citing the press of yr. own affairs. Faulke sends a brief acknowledgement; the matter, for now, is set aside.`,
+          changes: {
+            flags: { faulkeQuestStep: 'declined' },
+            journal: 'Declined Capt. Faulke\'s proposal to investigate the sloop\'s cove. The thread, for now, idles.',
+          },
+        },
+      },
+      {
+        label: 'Pass it to the Crown directly',
+        seed: 'forwarded to RN; questline closes; Crown standing nudged',
+        fixedOutcome: {
+          prose: `You forward Faulke's note, with a covering letter of yr. own, to the Royal Navy via the Bombay packet. The matter passes from yr. hand to better-armed ones.`,
+          changes: {
+            reputation: { crown: 5, pirates: -3 },
+            flags: { faulkeQuestStep: 'closed-handed-to-crown' },
+            journal: 'Handed Faulke\'s sloop intelligence to the Crown directly. The matter passes from yr. hand.',
+          },
+        },
+      },
+    ],
+    read: false,
+  };
+}
+
+function makeFaulkeStep2Letter(s) {
+  return {
+    id: 9100000 + s.day,
+    from: 'Capt. Thomas Faulke, of the Albatross',
+    subject: 'What was found in the northern cove',
+    body: `Sir, — I am back at Eustace, the Albatross sound. The cove is real and the man who runs it bears the name Carel by the local tongue. The Brotherhood\'s shore base is a disused Portuguese watch, three days\' sail north of Eustace at 4°15\' N, marked on no chart. Fourteen men in arms; two sloops; a small store of powder and stolen rigging.
+
+Carel knows me by face but not by purpose. He believes the Albatross was driven in by weather. I do not think he will believe a second visit.
+
+The matter is now in yr. hand. I shall bend my course as you instruct.
+
+Yr. obedt. servant,
+Thos. Faulke`,
+    responses: [
+      {
+        label: 'Pass the location to the Crown',
+        seed: 'Crown takes the cove; large standing shifts; bounty paid',
+        fixedOutcome: {
+          prose: `You compose a sealed packet for Capt. Whitcombe at the Madras station, with chart-bearings and the names Faulke supplied. The Crown\'s answer comes within six weeks: the Adventure has put into the cove, taken Carel and four of his men, fired the watchtower. Yr. share of the prize, accounted for at Bombay, is set at three hundred and twenty pounds.`,
+          changes: {
+            money: 320,
+            reputation: { crown: 18, pirates: -25, company: 4 },
+            flags: { faulkeQuestStep: 'closed-crown', brotherhoodAlerted: true },
+            journal: 'Forwarded Carel\'s cove to Capt. Whitcombe. Crown took the cove and Carel; bounty paid to Bombay (£320). The Brotherhood will know who informed.',
+            hook: 'The Brotherhood will know who informed on Carel. Yr. ships in the strait may pay the price.',
+          },
+        },
+      },
+      {
+        label: 'Warn Capt. Maas; sell the silence',
+        seed: 'Brotherhood standing rises; Crown unaware; modest cash',
+        fixedOutcome: {
+          prose: `A note to Maas, by trusted hand, with the bare names. Within a fortnight a small bag of unmarked silver — sixty pounds — is left at the godown by a Bugis pilot who does not stay to be questioned. Carel, you hear later, has moved his base by a day's sail; the Crown is none the wiser.`,
+          changes: {
+            money: 60,
+            reputation: { pirates: 12, crown: -3 },
+            flags: { faulkeQuestStep: 'closed-brotherhood' },
+            journal: 'Warned the Brotherhood of the imminent threat to Carel; £60 in unmarked silver received. Carel has moved.',
+            hook: 'The Brotherhood holds you in higher esteem; the Crown does not know what you have done. Both states are durable.',
+          },
+        },
+      },
+      {
+        label: 'Sit on it; weigh the matter further',
+        seed: 'questline pauses; can be resumed via Pursue a thread',
+        fixedOutcome: {
+          prose: `You write back asking Faulke to keep his peace and his bearings to himself for the present. He agrees, with a wryness in his hand. The matter sits.`,
+          changes: {
+            flags: { faulkeQuestStep: 'sat-on' },
+            journal: 'Held Faulke\'s intelligence for further consideration. The matter rests.',
+            hook: 'Faulke\'s intelligence on Carel\'s cove sits in a drawer. The Brotherhood will not wait forever; the Crown will not hear without prompting.',
+          },
+        },
+      },
+    ],
+    read: false,
+  };
+}
 // Senders gated by reputation / flags so the post reflects the Factor's
 // standing. The Director and the Vizier have dedicated cadences elsewhere
 // (Indiaman + quarterly nags; teak concession) and are excluded here so we
@@ -1129,6 +1286,8 @@ function tickDays(gs, days) {
     lettersAuto: { ...(gs.lettersAuto || { nextDay: 35 }) },
     pendingLetterRequests: [...(gs.pendingLetterRequests || [])],
     charterClosed: gs.charterClosed ? { ...gs.charterClosed } : null,
+    privateConsignment: gs.privateConsignment ? { ...gs.privateConsignment, commodities: { ...gs.privateConsignment.commodities } } : null,
+    privateConsignmentOffered: !!gs.privateConsignmentOffered,
   };
   const hasStockade = !!s.outpost.buildings.stockade?.built;
   const hasBarracks = !!s.outpost.buildings.barracks?.built;
@@ -1335,6 +1494,37 @@ function tickDays(gs, days) {
         : `${peppLifted} cwt pepper and ${cinnLifted} cwt cinnamon lifted from the godown.`;
       s.awayLog.push({ day: s.day, type: 'indiaman', text: `${ShipName}, of the Company, called for the returns. ${tail} A letter from the Court came by the same packet.` });
       s.indiaman = { lastVisit: s.day, nextDay: s.day + INDIAMAN_INTERVAL, visits: (s.indiaman.visits || 0) + 1, lastQuarterly: s.day };
+
+      // Pay out any private consignment the Factor sent by the previous
+      // Indiaman. Each cwt sold at London-market multipliers; funds return
+      // by the same packet.
+      if (s.privateConsignment && s.privateConsignment.commodities) {
+        let payout = 0;
+        const lines = [];
+        for (const [k, qty] of Object.entries(s.privateConsignment.commodities)) {
+          if (!qty) continue;
+          const v = londonValue(k, qty);
+          payout += v;
+          lines.push(`${qty} cwt ${COMMODITIES[k].name.toLowerCase()} at £${v}`);
+        }
+        if (payout > 0) {
+          s.money = (s.money || 0) + payout;
+          s.awayLog.push({
+            day: s.day,
+            type: 'private_trade',
+            text: `Yr. private consignment by the last Indiaman returned £${payout} from London — ${lines.join('; ')}.`,
+          });
+          s.journal = [...s.journal, { day: s.day, entry: `Yr. private consignment to London paid out £${payout}: ${lines.join('; ')}.` }];
+        }
+        s.privateConsignment = null;
+      }
+
+      // Set a flag so GameHub can prompt the player to send a fresh
+      // consignment by THIS Indiaman before she sails. Cleared when the
+      // player either sends or declines.
+      if ((s.indiaman.visits || 0) < INDIAMAN_TOTAL && !s.charterClosed) {
+        s.privateConsignmentOffered = true;
+      }
     }
 
     // ── Quarterly nag from the Court — fires halfway between Indiaman calls.
@@ -1458,6 +1648,37 @@ function tickDays(gs, days) {
       s.lettersGenerated = (s.lettersGenerated || 0) + 1;
       s.flags = { ...(s.flags || {}), crownLetterSent: true };
       s.awayLog.push({ day: s.day, type: 'letter', text: 'A King’s letter under a Royal Navy seal — Capt. Whitcombe of HMS Adventure.' });
+    }
+
+    // ── Brotherhood operative questline (Faulke).
+    // Step 1: Faulke proposes to investigate. Fires once after the Factor
+    // has met him AND day >= 90.
+    const knowsFaulke = (s.acquaintances || []).some(a => /faulke/i.test(a.name || ''));
+    const fStep = s.flags?.faulkeQuestStep;
+    if (
+      !s.charterClosed &&
+      !fStep &&
+      s.day >= 90 &&
+      knowsFaulke
+    ) {
+      const letter = makeFaulkeStep1Letter(s);
+      s.letters = [...s.letters, letter];
+      s.lettersGenerated = (s.lettersGenerated || 0) + 1;
+      s.flags = { ...(s.flags || {}), faulkeQuestStep: 'proposed' };
+      s.awayLog.push({ day: s.day, type: 'letter', text: 'A note from Capt. Faulke of the Albatross — sealed with his own ring.' });
+    }
+    // Step 2: 30 days after the player paid Faulke, he writes back with
+    // the cove's particulars.
+    if (
+      !s.charterClosed &&
+      fStep === 'paid' &&
+      s.day >= ((s.flags?.faulkeQuestStep1Day || 0) + 30)
+    ) {
+      const letter = makeFaulkeStep2Letter(s);
+      s.letters = [...s.letters, letter];
+      s.lettersGenerated = (s.lettersGenerated || 0) + 1;
+      s.flags = { ...(s.flags || {}), faulkeQuestStep: 'awaiting-decision' };
+      s.awayLog.push({ day: s.day, type: 'letter', text: 'Capt. Faulke is back at Eustace; a sealed packet from him by the same boat.' });
     }
 
     // ── Raid: opportunists at the godown. Stockade halves the chance, the
@@ -1648,6 +1869,16 @@ const MAJOR_COMMITMENTS = [
   { key: 'gaveCrownIntelligence', label: (v) => v ? 'Crown — passed intelligence on the Brotherhood to HMS Adventure.' : null },
   { key: 'advancedCrownCredit',label: (v) => v ? 'Crown — £100 advanced to HMS Adventure against the Bombay credit.' : null },
   { key: 'declinedCrownService', label: (v) => v ? 'Capt. Whitcombe’s requests — declined.' : null },
+  { key: 'faulkeQuestStep', label: (v) =>
+      v === 'paid'                     ? 'Capt. Faulke gone north on yr. account; word expected.' :
+      v === 'awaiting-decision'        ? 'Faulke’s intelligence on Carel sits in yr. drawer.' :
+      v === 'closed-crown'             ? 'Carel’s cove was given to the Crown; the Brotherhood will know.' :
+      v === 'closed-brotherhood'       ? 'Carel was warned; the Brotherhood owes you.' :
+      v === 'closed-handed-to-crown'   ? 'Faulke’s first note was passed to the Crown.' :
+      v === 'sat-on'                   ? 'Faulke’s intelligence is held back; the matter rests.' :
+      v === 'declined'                 ? 'Capt. Faulke’s proposal — declined.' :
+      null },
+  { key: 'brotherhoodAlerted', label: (v) => v ? 'The Brotherhood knows you informed.' : null },
 ];
 
 function commitmentsFor(gs) {
@@ -3630,10 +3861,61 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle }) {
     }));
   };
 
+  // ─────── PRIVATE CONSIGNMENT HANDLERS ───────
+
+  const handleConsignmentConfirm = (commodities) => {
+    setGs(prev => {
+      const ware = { ...(prev.outpost?.warehouse || {}) };
+      let total = 0;
+      for (const [k, qty] of Object.entries(commodities)) {
+        const move = Math.floor(qty || 0);
+        if (move <= 0) continue;
+        ware[k] = Math.max(0, (ware[k] || 0) - move);
+        total += move;
+      }
+      const expected = Object.entries(commodities)
+        .reduce((a, [k, v]) => a + londonValue(k, Math.floor(v) || 0), 0);
+      return {
+        ...prev,
+        outpost: { ...(prev.outpost || {}), warehouse: ware },
+        privateConsignment: {
+          commodities: { ...commodities },
+          shippedDay: prev.day,
+          expectedPayout: expected,
+        },
+        privateConsignmentOffered: false,
+        journal: [
+          ...prev.journal,
+          { day: prev.day, entry: `Consigned ${total} cwt to London on yr. own account by the Indiaman, valued upon return at ~£${expected}.` },
+        ],
+      };
+    });
+  };
+
+  const handleConsignmentDecline = () => {
+    setGs(prev => ({ ...prev, privateConsignmentOffered: false }));
+  };
+
   // ─────── RENDER ───────
 
+  // Away-digest first — narrative news, including the Indiaman's call, is
+  // delivered before the player decides on a private consignment.
   if (awayDigest) {
     return <AwayDigestScreen digest={awayDigest} onContinue={handleDigestContinue} onResolveRaid={handleResolveRaid} />;
+  }
+
+  // Then any pending private-consignment offer. Modal until consigned or
+  // declined.
+  if (gs.privateConsignmentOffered && !gs.charterClosed) {
+    return (
+      <Page>
+        <ConsignmentModal
+          gs={gs}
+          onConfirm={handleConsignmentConfirm}
+          onDecline={handleConsignmentDecline}
+        />
+      </Page>
+    );
   }
 
   if (scriptedArrival) {
@@ -3979,6 +4261,143 @@ function GithubBackupModal({ gs, initialConfig, onClose }) {
 
         <div style={{ marginTop: '0.9rem', textAlign: 'right' }}>
           <button className="ghost-button" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────── CONSIGNMENT MODAL ───────────
+// Opens when the Indiaman calls. Lets the Factor consign up to
+// PRIVATE_TRADE_LIMIT cwt of any commodity from his godown to his own
+// account in London. The next Indiaman returns the proceeds at London
+// markups (LONDON_MULT). If the modal is dismissed without consigning,
+// nothing leaves and no money returns.
+
+function ConsignmentModal({ gs, onConfirm, onDecline }) {
+  // Local working tally — keys are commodity names, values are cwt to ship.
+  const [picks, setPicks] = useState({});
+  const ware = gs.outpost?.warehouse || {};
+  const available = Object.keys(COMMODITIES).filter(k => Math.floor(ware[k] || 0) > 0);
+
+  const totalCwtChosen = Object.values(picks).reduce((a, v) => a + (Number(v) || 0), 0);
+  const expectedPayout = Object.entries(picks)
+    .reduce((a, [k, v]) => a + londonValue(k, Math.floor(v) || 0), 0);
+
+  const setQty = (k, raw) => {
+    const inGodown = Math.floor(ware[k] || 0);
+    const current = Math.floor(picks[k] || 0);
+    const requested = Math.max(0, Math.floor(Number(raw) || 0));
+    const otherTotal = totalCwtChosen - current;
+    const headroom = Math.max(0, PRIVATE_TRADE_LIMIT - otherTotal);
+    const capped = Math.min(requested, inGodown, headroom);
+    setPicks(prev => {
+      const next = { ...prev };
+      if (capped > 0) next[k] = capped;
+      else delete next[k];
+      return next;
+    });
+  };
+
+  const bump = (k, delta) => {
+    const current = Math.floor(picks[k] || 0);
+    setQty(k, current + delta);
+  };
+
+  const confirm = () => {
+    if (totalCwtChosen <= 0) { onDecline(); return; }
+    onConfirm(picks);
+  };
+
+  return (
+    <div
+      onClick={onDecline}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 100,
+        background: 'rgba(20,12,4,0.55)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '1rem',
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="parchment"
+        style={{
+          background: '#f0e3c4',
+          maxWidth: '38rem', width: '100%', maxHeight: '90vh',
+          padding: '1rem', display: 'flex', flexDirection: 'column',
+          boxShadow: '0 4px 16px rgba(20,12,4,0.5)',
+          border: '1px solid rgba(74,44,20,0.4)',
+          overflow: 'auto',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.4rem' }}>
+          <div className="display" style={{ fontSize: '1em', color: '#5c1a08' }}>
+            A private consignment
+          </div>
+          <button
+            onClick={onDecline}
+            aria-label="Close"
+            style={{
+              background: 'transparent', border: '1px solid #6b4423',
+              color: '#5c1a08', padding: '0.2rem 0.5rem', cursor: 'pointer',
+              fontFamily: '"IM Fell English SC", serif', fontSize: '0.9em',
+              minWidth: '2rem',
+            }}
+          >
+            ✕
+          </button>
+        </div>
+        <p style={{ fontSize: '0.92em', color: '#4a3220', fontStyle: 'italic', marginTop: 0, marginBottom: '0.7rem' }}>
+          The Indiaman&rsquo;s mate will take up to {PRIVATE_TRADE_LIMIT} cwt of yr. own goods on yr. private account, by the customary allowance. The proceeds return by the next Indiaman, at the London market.
+        </p>
+        {available.length === 0 ? (
+          <p className="italic" style={{ color: '#6b4423' }}>The godown is empty. No private cargo to send this voyage.</p>
+        ) : (
+          <div style={{ marginBottom: '0.7rem' }}>
+            {available.map(k => {
+              const inGodown = Math.floor(ware[k] || 0);
+              const picked = Math.floor(picks[k] || 0);
+              const expected = londonValue(k, picked);
+              return (
+                <div key={k} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.4rem 0', borderBottom: '1px solid rgba(74,44,20,0.15)', flexWrap: 'wrap' }}>
+                  <div style={{ flex: 1, minWidth: '8rem' }}>
+                    <div>{COMMODITIES[k].name} <span style={{ fontSize: '0.82em', color: '#6b4423' }}>(godown {inGodown})</span></div>
+                    {picked > 0 && (
+                      <div style={{ fontSize: '0.8em', color: '#3a5c2a' }}>
+                        {picked} cwt → £{expected} expected
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.3rem', alignItems: 'center' }}>
+                    <button className="ghost-button-sm" onClick={() => bump(k, -1)} disabled={picked < 1}>−</button>
+                    <input
+                      className="parchment-input"
+                      type="number"
+                      min="0"
+                      max={Math.min(inGodown, PRIVATE_TRADE_LIMIT)}
+                      value={picked}
+                      onChange={(e) => setQty(k, e.target.value)}
+                      style={{ width: '3.5rem', textAlign: 'center', fontSize: '0.9em' }}
+                    />
+                    <button className="ghost-button-sm" onClick={() => bump(k, 1)} disabled={inGodown <= picked || totalCwtChosen >= PRIVATE_TRADE_LIMIT}>+</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        <div style={{ fontSize: '0.85em', color: '#4a3220', marginBottom: '0.5rem' }}>
+          <span>Total chosen: <strong>{totalCwtChosen} / {PRIVATE_TRADE_LIMIT} cwt</strong></span>
+          {expectedPayout > 0 && (
+            <span style={{ marginLeft: '0.7rem', color: '#3a5c2a' }}>· expected return ~£{expectedPayout}</span>
+          )}
+        </div>
+        <div style={{ marginTop: '0.5rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <button className="ghost-button" onClick={onDecline}>Send nothing this voyage</button>
+          <button className="wax-button" onClick={confirm} disabled={totalCwtChosen === 0}>
+            Consign {totalCwtChosen} cwt
+          </button>
         </div>
       </div>
     </div>
@@ -4810,6 +5229,18 @@ function LedgerView({ gs }) {
               </div>
             );
           })()}
+          {gs.privateConsignment && (
+            <div style={{ marginTop: '0.7rem', padding: '0.5rem 0.7rem', background: 'rgba(255,255,255,0.3)', borderLeft: '2px solid #5c1a08', fontSize: '0.85em' }}>
+              <div className="display" style={{ fontSize: '0.78em', color: '#6b4423', letterSpacing: '0.06em', marginBottom: '0.2rem' }}>PRIVATE CONSIGNMENT IN FLIGHT</div>
+              <div style={{ color: '#4a3220', fontStyle: 'italic' }}>
+                {Object.entries(gs.privateConsignment.commodities)
+                  .filter(([,v]) => v > 0)
+                  .map(([k,v]) => `${v} cwt ${COMMODITIES[k].name.toLowerCase()}`)
+                  .join('; ')}
+                {' '}— ~£{gs.privateConsignment.expectedPayout} expected by the next Indiaman.
+              </div>
+            </div>
+          )}
         </div>
         <div>
           <div className="display" style={{ fontSize: '0.9em', color: '#6b4423', marginBottom: '0.5rem' }}>STANDING WITH POWERS</div>

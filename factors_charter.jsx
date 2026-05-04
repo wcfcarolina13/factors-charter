@@ -6354,7 +6354,7 @@ function GithubBackupModal({ gs, initialConfig, onClose }) {
               {[
                 { key: 'token',  label: 'Personal access token (fine-grained)', type: 'password', placeholder: 'github_pat_...' },
                 { key: 'owner',  label: 'Owner (user or org)', placeholder: 'wcfcarolina13' },
-                { key: 'repo',   label: 'Repository', placeholder: 'hello-world' },
+                { key: 'repo',   label: 'Repository', placeholder: 'factors-charter' },
                 { key: 'branch', label: 'Branch', placeholder: 'main' },
                 { key: 'path',   label: 'Path prefix (folder under repo root)', placeholder: 'factors-charter' },
               ].map(f => (

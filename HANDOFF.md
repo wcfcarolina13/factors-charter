@@ -134,13 +134,13 @@ Add to `SHIP_TYPES` (holdCwt, blurb, wearMin/Max, voyageBonus). The Commission f
 
 ```bash
 # Sanity check the file parses
-node -e "const p=require('/tmp/node_modules/@babel/parser'); const fs=require('fs'); const c=fs.readFileSync('/home/user/hello-world/factors_charter.jsx','utf8'); try { p.parse(c,{sourceType:'module',plugins:['jsx']}); console.log('OK',c.split('\n').length,'lines'); } catch(e) { console.log('ERR:',e.message); }"
+node -e "const p=require('/tmp/node_modules/@babel/parser'); const fs=require('fs'); const c=fs.readFileSync('/home/user/factors-charter/factors_charter.jsx','utf8'); try { p.parse(c,{sourceType:'module',plugins:['jsx']}); console.log('OK',c.split('\n').length,'lines'); } catch(e) { console.log('ERR:',e.message); }"
 
 # Find all loading messages and verify pickVignette covers them
-grep -nE "setPendingMsg|pendingMsg=" /home/user/hello-world/factors_charter.jsx
+grep -nE "setPendingMsg|pendingMsg=" /home/user/factors-charter/factors_charter.jsx
 
 # Find all top-level state fields (audit ensureShape coverage)
-grep -nE "^  [a-zA-Z]+:" /home/user/hello-world/factors_charter.jsx | head -30
+grep -nE "^  [a-zA-Z]+:" /home/user/factors-charter/factors_charter.jsx | head -30
 ```
 
 ---

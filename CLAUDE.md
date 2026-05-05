@@ -36,6 +36,17 @@ Single file: **`factors_charter.jsx`** at the repo root. When working inside the
 - **No Tailwind.** Some early code used Tailwind class names (`max-w-4xl`, `mx-auto`, `px-4`, etc.) but they don't reliably apply in the artifact runtime. Use inline styles for sizing and spacing. Some semantic classes (`display`, `parchment`, `wax-button`, `ghost-button`, `cols-2`, `trade-row`, `ink-fade-in`, `quill-cursor`, `fleuron`) ARE defined in the inline `<style>` block inside `<Page>` — those work. Anything else from Tailwind probably won't.
 - **Mobile-first.** The user plays this on a phone in the Claude app. Two-column layouts must collapse cleanly. Use `grid-template-columns: repeat(auto-fit, minmax(...))` not media queries — the iframe's reported viewport is unreliable.
 
+### Runtime targets
+
+The same `factors_charter.jsx` runs in two environments:
+
+- **Claude artifact** (legacy): host injects Anthropic credentials and bridges CORS. `callClaude` detects this path via `window.storage` and falls through to `legacyAnthropicCall`, which makes an unauthenticated direct fetch — preserving the original behaviour.
+- **PWA build** (Vite + Cloudflare Pages): `callClaude` dynamically imports `src/llm/index.js` and dispatches to a configured provider (Anthropic BYO key, or Ollama on localhost). Provider config lives in `localStorage` under `factor_charter_llm_config_v1`. UI for configuration is `src/settings/SettingsPanel.jsx`, surfaced from the title screen and in-game `☰ Menu`.
+
+The `src/` tree exists only for the PWA build. The artifact never imports from it — `lazy()` + `isPwaMode` gating ensures the code path is never reached in artifact mode.
+
+**Adding an LLM provider:** create `src/llm/<name>.js` exporting `{ id, label, fields, call }`, and register it in `PROVIDERS` inside `src/llm/index.js`. No JSX changes required.
+
 ---
 
 ## Code architecture (top to bottom)
@@ -177,6 +188,18 @@ He has a Drive folder for this project (id `1yqTKacEuy4j3_Ph2QR5CKr1T_xIqpjeU`, 
 **Gameplay-shape work** (mechanics, new systems, rebalances) → read `DESIGN_NOTES.md` first. It's the joint design notebook: research surveyed (Morrowind/EEC, Tamriel Rebuilt, Robinson Crusoe, period mercantile reality, Patrician/Anno/CK3/Port Royale), candidate moves, anti-patterns ruled out, and an ordered backlog. Add to the backlog with a date stamp rather than chatting decisions away.
 
 The runtime `LORE` registry in `factors_charter.jsx` is the bridge: lore entries are surfaced to the AI in `stateContext` only when their triggers (location, flag, faction standing, visited) match. Capped at 3 entries per prompt. Keep entries tight (2–4 short sentences) — every line costs prompt budget on every relevant call.
+
+---
+
+## Development & deploy
+
+- `npm install` — bootstrap dependencies.
+- `npm run dev` — Vite dev server at `http://localhost:5173/`.
+- `npm test` — Vitest suite (provider modules, dispatcher, settings store).
+- `npm run build` — production bundle into `dist/`.
+- `npx vite preview` — serve the production build locally for testing.
+- Pushes to `main` auto-deploy via Cloudflare Pages → `factors-charter.pages.dev`.
+- The artifact path is unaffected by any of this. Inside Claude, `factors_charter.jsx` continues to run as a single-file artifact.
 
 ---
 

@@ -1,4 +1,17 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, lazy, Suspense } from 'react';
+
+const isPwaMode = typeof window !== 'undefined' && !window.storage;
+const SettingsPanel = isPwaMode
+  ? lazy(() => import('./src/settings/SettingsPanel.jsx'))
+  : null;
+const settingsConfigured = () => {
+  if (!isPwaMode) return true;
+  try {
+    return !!localStorage.getItem('factor_charter_llm_config_v1');
+  } catch {
+    return false;
+  }
+};
 
 // ═══════════════════════════════════════════════════════════════
 //  THE FACTOR'S CHARTER — playable prototype
@@ -5027,7 +5040,7 @@ const Loading = ({ msg }) => {
 
 // ─────────── TITLE SCREEN ───────────
 
-function TitleScreen({ saves, onNewGame, onContinue, onRestore, onDeleteSlot }) {
+function TitleScreen({ saves, onNewGame, onContinue, onRestore, onDeleteSlot, onOpenSettings }) {
   const [name, setName] = useState('Jonathan Wexley');
   const [showRestore, setShowRestore] = useState(false);
   const [restoreText, setRestoreText] = useState('');
@@ -5170,6 +5183,25 @@ function TitleScreen({ saves, onNewGame, onContinue, onRestore, onDeleteSlot }) 
         </div>
       )}
 
+      {/* FIRST-LAUNCH BANNER */}
+      {isPwaMode && !settingsConfigured() && (
+        <div style={{
+          background: 'rgba(92,26,8,0.08)', border: '1px solid #5c1a08',
+          padding: '0.75rem 1rem', margin: '1rem 0', borderRadius: '3px',
+          color: '#5c1a08', fontFamily: 'EB Garamond, serif',
+        }}>
+          <strong>Set up an AI provider to begin.</strong>{' '}
+          <button
+            onClick={onOpenSettings}
+            style={{
+              background: 'transparent', border: 'none', color: '#5c1a08',
+              textDecoration: 'underline', cursor: 'pointer',
+              fontFamily: 'inherit', fontSize: 'inherit', padding: 0,
+            }}
+          >Open Settings</button>
+        </div>
+      )}
+
       {/* NEW CHARTER */}
       <div style={{ marginTop: '1.5rem' }}>
         <div className="display" style={{ fontSize: '0.85em', color: '#6b4423', marginBottom: '0.5rem' }}>
@@ -5189,6 +5221,20 @@ function TitleScreen({ saves, onNewGame, onContinue, onRestore, onDeleteSlot }) 
             {hasSaves ? 'Begin a New Charter' : 'Open the Charter'}
           </button>
         </div>
+        {isPwaMode && (
+          <div style={{ marginTop: '1.5rem', textAlign: 'center' }}>
+            <button
+              onClick={onOpenSettings}
+              style={{
+                background: 'transparent', border: 'none', color: '#6b4423',
+                fontFamily: 'EB Garamond, serif', fontStyle: 'italic',
+                fontSize: '0.95rem', cursor: 'pointer', textDecoration: 'underline',
+              }}
+            >
+              ⚙ Settings
+            </button>
+          </div>
+        )}
       </div>
 
       {/* RESTORE */}
@@ -5300,7 +5346,7 @@ function OpeningSequence({ name, onComplete }) {
 
 // ─────────── GAME HUB ───────────
 
-function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRenewal }) {
+function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRenewal, onOpenSettings }) {
   const [tab, setTab] = useState('journal');
   const [encounter, setEncounter] = useState(null);
   const [pending, _setPending] = useState(false);
@@ -6197,7 +6243,7 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
   return (
     <Page>
       <div style={{ maxWidth: '64rem', margin: '0 auto', padding: '1.25rem 1.0rem', width: '100%' }}>
-        <Header gs={gs} onReturnToTitle={onReturnToTitle} onSuccession={onSuccession} onRenewal={onRenewal} />
+        <Header gs={gs} onReturnToTitle={onReturnToTitle} onSuccession={onSuccession} onRenewal={onRenewal} onOpenSettings={onOpenSettings} />
         <Tabs tab={tab} setTab={setTab} unread={gs.letters.filter(l => !l.read).length} atHome={atHome} />
         <div className="parchment" style={{ padding: '1.25rem', minHeight: '24rem', background: 'rgba(255,253,245,0.4)' }}>
           {tab === 'journal' && <JournalView gs={gs} arrivalProse={arrivalProse} setTab={setTab} openLetterById={openLetterById} pursueThread={handlePursueThread} />}
@@ -6949,7 +6995,7 @@ function ExportModal({ title, content, filename, onClose, helperText, wrap }) {
 
 // ─────────── HEADER ───────────
 
-function Header({ gs, onReturnToTitle, onSuccession, onRenewal }) {
+function Header({ gs, onReturnToTitle, onSuccession, onRenewal, onOpenSettings }) {
   const [confirmingSuccession, setConfirmingSuccession] = useState(false);
   const [successorName, setSuccessorName] = useState('');
   const [confirmingRenewal, setConfirmingRenewal] = useState(false);
@@ -7177,6 +7223,15 @@ function Header({ gs, onReturnToTitle, onSuccession, onRenewal }) {
             </div>
           )}
 
+          {isPwaMode && (
+            <button
+              className="ghost-button"
+              style={{ width: '100%', textAlign: 'left', marginBottom: '0.3rem' }}
+              onClick={() => { setMenuOpen(false); onOpenSettings && onOpenSettings(); }}
+            >
+              ⚙ Settings
+            </button>
+          )}
           <button
             className="ghost-button"
             style={{ width: '100%', textAlign: 'left', marginBottom: '0.3rem' }}
@@ -8984,6 +9039,7 @@ export default function FactorsCharter() {
   const [savesIndex, setSavesIndex] = useState([]);
   const [activeSaveId, setActiveSaveId] = useState(null);
   const [lastSavedAt, setLastSavedAt] = useState(null);
+  const [showSettings, setShowSettings] = useState(false);
 
   // Mount: load index, run legacy migration, land on title.
   useEffect(() => {
@@ -9089,7 +9145,19 @@ export default function FactorsCharter() {
           onContinue={handleContinue}
           onRestore={handleRestore}
           onDeleteSlot={handleDeleteSlot}
+          onOpenSettings={() => setShowSettings(true)}
         />
+        {showSettings && SettingsPanel && (
+          <div style={{
+            position: 'fixed', inset: 0, background: 'rgba(20,10,5,0.55)',
+            display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
+            overflowY: 'auto', zIndex: 1000, padding: '1rem',
+          }}>
+            <Suspense fallback={null}>
+              <SettingsPanel onClose={() => setShowSettings(false)} />
+            </Suspense>
+          </div>
+        )}
       </Page>
     );
   }
@@ -9112,5 +9180,20 @@ export default function FactorsCharter() {
     );
   }
 
-  return <GameHub gs={gs} setGs={setGs} lastSavedAt={lastSavedAt} onReturnToTitle={handleReturnToTitle} onSuccession={handleSuccession} onRenewal={handleRenewal} />;
+  return (
+    <>
+      <GameHub gs={gs} setGs={setGs} lastSavedAt={lastSavedAt} onReturnToTitle={handleReturnToTitle} onSuccession={handleSuccession} onRenewal={handleRenewal} onOpenSettings={() => setShowSettings(true)} />
+      {showSettings && SettingsPanel && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(20,10,5,0.55)',
+          display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
+          overflowY: 'auto', zIndex: 1000, padding: '1rem',
+        }}>
+          <Suspense fallback={null}>
+            <SettingsPanel onClose={() => setShowSettings(false)} />
+          </Suspense>
+        </div>
+      )}
+    </>
+  );
 }

@@ -260,14 +260,23 @@ Free tier covers this comfortably.
 - **Existing saves:** `safeStorage` keys (`factor_save_*`, `factor_saves_index`, etc.) are untouched. New LLM config uses a distinct namespaced key (`factor_charter_llm_config_v1`).
 - **Sibling docs** (`CLAUDE.md`, `WORLD_NOTES.md`, `DESIGN_NOTES.md`, `CHANGELOG.md`, `HANDOFF.md`): unchanged.
 
-## Open question
+## Artifact-mode behaviour
 
-**Artifact-mode behaviour.** The current `callClaude` makes an unauthenticated request and relies on the artifact host to inject credentials. After the rewire, if the artifact-mode user has not configured a provider (because they don't need to inside Claude), `callLLM` returns the "no provider configured" error and the game falls back to deterministic prose throughout. Two ways to handle:
+The current `callClaude` makes an unauthenticated request and relies on the artifact host to inject credentials. The PWA build cannot do that. To preserve the artifact UX without forcing the user to paste a key inside Claude, the dispatcher detects artifact mode and uses the legacy direct-fetch path automatically.
 
-1. **Detect artifact mode** (presence of `window.storage`) and use the legacy unauthenticated direct-fetch path automatically — no settings needed inside the artifact.
-2. **Require Settings configuration** even in the artifact, with the user pasting their key once.
+```js
+// src/llm/index.js (excerpt)
+const isArtifactMode = typeof window !== 'undefined' && !!window.storage;
 
-Option 1 preserves the current artifact UX exactly; option 2 unifies the code path. Recommend (1) for the implementation plan unless we have reason to prefer the unified path.
+export async function callLLM({ system, prompt, maxTokens = 1000 }) {
+  if (isArtifactMode) {
+    return legacyDirectFetch({ system, prompt, maxTokens }); // unauthenticated, host-bridged
+  }
+  // ...PWA path: read config, dispatch to provider
+}
+```
+
+`legacyDirectFetch` is a near-verbatim copy of the current `callClaude` body — same model id, same headers, same parsing — preserved as the artifact escape hatch. The PWA path is everything else.
 
 ## Test plan
 

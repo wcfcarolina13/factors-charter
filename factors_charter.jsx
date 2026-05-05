@@ -3631,9 +3631,32 @@ WORLD STATE (you may extend it):
 
 CONSTRAINTS: Output ONLY valid JSON. No code fences, no preamble, no commentary. Stay within the requested length.`;
 
-// Returns a full record so the caller can both use the parsed result and log
-// the raw exchange: { parsed, raw, prompt, startedAt, endedAt, error }.
+// Artifact mode: window.storage exists and the host bridges Anthropic auth/CORS.
+// PWA mode: dynamically import the dispatcher (provider config in localStorage).
+// Returns: { parsed, raw, prompt, startedAt, endedAt, error }.
 async function callClaude(prompt) {
+  const isArtifactMode = typeof window !== 'undefined' && !!window.storage;
+  if (isArtifactMode) {
+    return legacyAnthropicCall(prompt);
+  }
+  const startedAt = Date.now();
+  try {
+    const mod = await import('./src/llm/index.js');
+    return mod.callLLM({ system: SYSTEM_PROMPT, prompt, maxTokens: 1000 });
+  } catch (e) {
+    console.error('LLM dispatcher error:', e);
+    return {
+      parsed: null,
+      raw: '',
+      prompt,
+      startedAt,
+      endedAt: Date.now(),
+      error: e.message || String(e),
+    };
+  }
+}
+
+async function legacyAnthropicCall(prompt) {
   const startedAt = Date.now();
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {

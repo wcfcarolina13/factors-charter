@@ -1,12 +1,27 @@
 # The Factor's Charter
 
-A text-based mobile RPG built as a single-file React artifact. The player is a junior Factor (trading-company agent) posted to Bayan-Kor, a vaguely Southeast-Asian colonial frontier station in the early 1720s, with a 3-year charter to ship pepper and cinnamon to London.
+A 1720s text-based mercantile RPG. Originally a Claude artifact; now also runs as an installable PWA.
 
-## Files
+## Play
 
-- `factors_charter.jsx` — the entire game (~2,500 lines, single React component, default export `FactorsCharter`).
-- `CLAUDE.md` — orientation for any Claude session picking up the work.
-- `HANDOFF.md` — current state, pending verification, roadmap.
-- `CHANGELOG.md` — what shipped, newest first.
+- Live build: `https://factors-charter.pages.dev` (configure an AI provider in Settings to enable AI prose).
+- Inside Claude: open `factors_charter.jsx` as an artifact.
 
-Read `CLAUDE.md` before touching the code.
+## Develop
+
+```bash
+npm install
+npm run dev      # http://localhost:5173/
+npm test         # Vitest
+npm run build    # → dist/
+```
+
+## Architecture
+
+- `factors_charter.jsx` — the game (single-file React monolith, runs both as artifact and as PWA entry).
+- `src/main.jsx` — PWA entry point; mounts `FactorsCharter`.
+- `src/llm/` — pluggable LLM providers (Anthropic, Ollama).
+- `src/settings/` — config store + settings UI.
+- `vite.config.js` — Vite + `vite-plugin-pwa`.
+
+See `CLAUDE.md` for design conventions, world-building rules, and contribution patterns.

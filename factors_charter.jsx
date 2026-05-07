@@ -6376,26 +6376,55 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
   if (encounter) {
     return (
       <Page>
-        <div className="ink-fade-in" style={{ maxWidth: '42rem', margin: '0 auto', padding: '3.0rem 1.5rem', width: '100%' }}>
-          <div className="display text-center" style={{ fontSize: '0.85em', color: '#6b4423', letterSpacing: '0.2em', marginBottom: '0.5rem' }}>
-            {encounter.type === 'voyage' ? 'AT SEA' : encounter.type === 'pursue' ? 'A MATTER PURSUED' : 'AN INCIDENT'}
-          </div>
-          <Fleuron />
-          <p className="drop-cap" style={{ fontSize: '1.1em' }}>{encounter.prose}</p>
-          <Fleuron char="❧" />
-          <div style={{ marginTop: '1.5rem' }}>
-            {encounter.choices.map((c, i) => (
-              <div key={i} style={{ marginBottom: '0.7rem' }}>
-                <button
-                  className="ghost-button"
-                  style={{ width: '100%', textAlign: 'left', padding: '0.7rem 1rem' }}
-                  onClick={() => handleEncounterChoice(c)}
-                >
-                  &mdash; {c.label}
-                </button>
+        <div className="ink-fade-in" style={{ maxWidth: viewportMode === 'desktop' ? '80rem' : '42rem', margin: '0 auto', padding: '3.0rem 1.5rem', width: '100%' }}>
+          {viewportMode === 'desktop' ? (
+            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 480px', gap: '1rem', alignItems: 'start' }}>
+              <div>
+                <div className="display text-center" style={{ fontSize: '0.85em', color: '#6b4423', letterSpacing: '0.2em', marginBottom: '0.5rem' }}>
+                  {encounter.type === 'voyage' ? 'AT SEA' : encounter.type === 'pursue' ? 'A MATTER PURSUED' : 'AN INCIDENT'}
+                </div>
+                <Fleuron />
+                <p className="drop-cap" style={{ fontSize: '1.1em' }}>{encounter.prose}</p>
+                <Fleuron char="❧" />
+                <div style={{ marginTop: '1.5rem' }}>
+                  {encounter.choices.map((c, i) => (
+                    <div key={i} style={{ marginBottom: '0.7rem' }}>
+                      <button
+                        className="ghost-button"
+                        style={{ width: '100%', textAlign: 'left', padding: '0.7rem 1rem' }}
+                        onClick={() => handleEncounterChoice(c)}
+                      >
+                        &mdash; {c.label}
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
-            ))}
-          </div>
+              <InlineIllustration prose={encounter.prose} />
+            </div>
+          ) : (
+            <>
+              <div className="display text-center" style={{ fontSize: '0.85em', color: '#6b4423', letterSpacing: '0.2em', marginBottom: '0.5rem' }}>
+                {encounter.type === 'voyage' ? 'AT SEA' : encounter.type === 'pursue' ? 'A MATTER PURSUED' : 'AN INCIDENT'}
+              </div>
+              <Fleuron />
+              <p className="drop-cap" style={{ fontSize: '1.1em' }}>{encounter.prose}</p>
+              <Fleuron char="❧" />
+              <div style={{ marginTop: '1.5rem' }}>
+                {encounter.choices.map((c, i) => (
+                  <div key={i} style={{ marginBottom: '0.7rem' }}>
+                    <button
+                      className="ghost-button"
+                      style={{ width: '100%', textAlign: 'left', padding: '0.7rem 1rem' }}
+                      onClick={() => handleEncounterChoice(c)}
+                    >
+                      &mdash; {c.label}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       </Page>
     );

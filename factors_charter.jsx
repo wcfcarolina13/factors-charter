@@ -6453,7 +6453,7 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
                 {effectiveTab === 'ledger' && viewportMode !== 'desktop' && <LedgerView gs={gs} />}
                 {effectiveTab === 'map' && viewportMode !== 'desktop' && <MapView gs={gs} sailTo={sailTo} />}
                 {effectiveTab === 'port' && <PortView gs={gs} buyGood={buyGood} sellGood={sellGood} refitShip={refitShip} arrivalProse={arrivalProse} setTab={setTab} lodgeGoods={lodgeGoods} withdrawGoods={withdrawGoods} commissionBrigantine={commissionBrigantine} takeBottomry={takeBottomry} liftContractOpium={liftContractOpium} runDutchCustoms={runDutchCustoms} viewportMode={viewportMode} />}
-                {effectiveTab === 'outpost' && atHome && <OutpostView gs={gs} startBuild={startBuild} expediteBuild={expediteBuild} />}
+                {effectiveTab === 'outpost' && atHome && <OutpostView gs={gs} startBuild={startBuild} expediteBuild={expediteBuild} viewportMode={viewportMode} />}
                 {effectiveTab === 'letters' && <LettersView gs={gs} setGs={setGs} onRespond={handleLetterResponse} openLetterId={openLetterId} setOpenLetterId={setOpenLetterId} viewportMode={viewportMode} />}
               </>
             );
@@ -8709,7 +8709,7 @@ function CommissionPanel({ gs, commissionBrigantine }) {
   );
 }
 
-function OutpostView({ gs, startBuild, expediteBuild }) {
+function OutpostView({ gs, startBuild, expediteBuild, viewportMode }) {
   const built = Object.entries(gs.outpost.buildings).filter(([,v]) => v.built);
   const queue = gs.outpost.queue;
 
@@ -8728,6 +8728,10 @@ function OutpostView({ gs, startBuild, expediteBuild }) {
     return Object.entries(b.requires.rep).every(([f, n]) => gs.reputation[f] >= n);
   };
 
+  const containerStyle = viewportMode === 'desktop'
+    ? { display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '1rem', alignItems: 'start' }
+    : { display: 'flex', flexDirection: 'column', gap: '1rem' };
+
   return (
     <div>
       <h2 className="display" style={{ fontSize: '1.4em', color: '#5c1a08', marginTop: 0 }}>The Outpost</h2>
@@ -8735,91 +8739,94 @@ function OutpostView({ gs, startBuild, expediteBuild }) {
         The compound at Bayan-Kor is yours to build. Construction continues whether you are present or at sea.
       </p>
 
-      {built.length > 0 && (
-        <>
+      <div style={containerStyle}>
+        {/* STANDING STRUCTURES */}
+        <div>
           <div className="display" style={{ fontSize: '0.9em', color: '#6b4423', marginBottom: '0.5rem' }}>STANDING STRUCTURES</div>
-          <div style={{ marginBottom: '1.5rem' }}>
-            {built.map(([k, v]) => (
-              <div key={k} className="parchment" style={{ padding: '0.7rem 1rem', marginBottom: '0.5rem', background: 'rgba(255,255,255,0.3)' }}>
-                <div className="display" style={{ color: '#5c1a08' }}>{BUILDINGS[k].name}</div>
-                <div style={{ fontSize: '0.85em', color: '#6b4423', fontStyle: 'italic' }}>Completed day {v.builtOn}. {BUILDINGS[k].effect}</div>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
+          {built.length === 0 ? (
+            <p className="italic" style={{ color: '#6b4423', fontSize: '0.9em' }}>Nothing yet raised.</p>
+          ) : built.map(([k, v]) => (
+            <div key={k} className="parchment" style={{ padding: '0.7rem 1rem', marginBottom: '0.5rem', background: 'rgba(255,255,255,0.3)' }}>
+              <div className="display" style={{ color: '#5c1a08' }}>{BUILDINGS[k].name}</div>
+              <div style={{ fontSize: '0.85em', color: '#6b4423', fontStyle: 'italic' }}>Completed day {v.builtOn}. {BUILDINGS[k].effect}</div>
+            </div>
+          ))}
+        </div>
 
-      {queue.length > 0 && (
-        <>
+        {/* UNDER CONSTRUCTION */}
+        <div>
           <div className="display" style={{ fontSize: '0.9em', color: '#6b4423', marginBottom: '0.5rem' }}>UNDER CONSTRUCTION</div>
-          <div style={{ marginBottom: '1.5rem' }}>
-            {queue.map((q, i) => {
-              const b = BUILDINGS[q.key];
-              const pct = Math.round((1 - q.daysLeft / b.days) * 100);
-              const cost = rushCost(q);
-              const canRush = q.daysLeft > 1 && gs.money >= cost && expediteBuild;
-              return (
-                <div key={i} className="parchment" style={{ padding: '0.7rem 1rem', marginBottom: '0.5rem', background: 'rgba(255,253,245,0.5)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '0.3rem' }}>
-                    <span className="display" style={{ color: '#5c1a08' }}>{b.name}</span>
-                    <span className="display" style={{ fontSize: '0.85em', color: '#6b4423' }}>{q.daysLeft} day{q.daysLeft !== 1 ? 's' : ''} remaining</span>
-                  </div>
-                  <div style={{ fontSize: '0.92em', color: '#4a3220', fontStyle: 'italic', marginTop: '0.25rem' }}>{b.blurb}</div>
-                  <div style={{ fontSize: '0.82em', color: '#6b4423', marginTop: '0.2rem' }}>{b.effect}</div>
-                  <div style={{ height: '5px', background: 'rgba(74,44,20,0.15)', marginTop: '0.5rem', borderRadius: '2px' }}>
-                    <div style={{ width: `${pct}%`, height: '100%', background: '#5c1a08', borderRadius: '2px' }} />
-                  </div>
-                  {q.daysLeft > 1 && expediteBuild && (
-                    <div style={{ marginTop: '0.5rem', display: 'flex', justifyContent: 'flex-end' }}>
-                      <button
-                        className="ghost-button-sm"
-                        disabled={!canRush}
-                        onClick={() => expediteBuild(i)}
-                      >
-                        Rush the work — £{cost}
-                      </button>
-                    </div>
-                  )}
+          {queue.length === 0 ? (
+            <p className="italic" style={{ color: '#6b4423', fontSize: '0.9em' }}>No works in progress.</p>
+          ) : queue.map((q, i) => {
+            const b = BUILDINGS[q.key];
+            const pct = Math.round((1 - q.daysLeft / b.days) * 100);
+            const cost = rushCost(q);
+            const canRush = q.daysLeft > 1 && gs.money >= cost && expediteBuild;
+            return (
+              <div key={i} className="parchment" style={{ padding: '0.7rem 1rem', marginBottom: '0.5rem', background: 'rgba(255,253,245,0.5)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '0.3rem' }}>
+                  <span className="display" style={{ color: '#5c1a08' }}>{b.name}</span>
+                  <span className="display" style={{ fontSize: '0.85em', color: '#6b4423' }}>{q.daysLeft} day{q.daysLeft !== 1 ? 's' : ''} remaining</span>
                 </div>
-              );
-            })}
-          </div>
-        </>
-      )}
-
-      <div className="display" style={{ fontSize: '0.9em', color: '#6b4423', marginBottom: '0.5rem' }}>AVAILABLE FOR CONSTRUCTION</div>
-      {available.length === 0 ? (
-        <p className="italic">All structures begun or built.</p>
-      ) : available.map(([k, b]) => {
-        const canPay = gs.money >= b.cost;
-        const canBuild = meetsRequires(b);
-        const blocked = !canPay || !canBuild;
-        return (
-          <div key={k} className="parchment" style={{ padding: '0.9rem 1rem', marginBottom: '0.7rem', background: 'rgba(255,255,255,0.25)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.5rem' }}>
-              <div style={{ flex: 1, minWidth: '200px' }}>
-                <div className="display" style={{ color: '#5c1a08', fontSize: '1.1em' }}>{b.name}</div>
-                <div style={{ fontSize: '0.95em', color: '#4a3220', fontStyle: 'italic' }}>{b.blurb}</div>
-                <div style={{ fontSize: '0.85em', color: '#6b4423', marginTop: '0.3rem' }}>
-                  £{b.cost} &middot; {b.days} days &middot; {b.effect}
+                <div style={{ fontSize: '0.92em', color: '#4a3220', fontStyle: 'italic', marginTop: '0.25rem' }}>{b.blurb}</div>
+                <div style={{ fontSize: '0.82em', color: '#6b4423', marginTop: '0.2rem' }}>{b.effect}</div>
+                <div style={{ height: '5px', background: 'rgba(74,44,20,0.15)', marginTop: '0.5rem', borderRadius: '2px' }}>
+                  <div style={{ width: `${pct}%`, height: '100%', background: '#5c1a08', borderRadius: '2px' }} />
                 </div>
-                {!canBuild && b.requires?.rep && (
-                  <div style={{ fontSize: '0.85em', color: '#8b1a1a', marginTop: '0.2rem' }}>
-                    Requires standing: {Object.entries(b.requires.rep).map(([f, n]) => `${FACTIONS[f].short} ${n}+`).join(', ')}
+                {q.daysLeft > 1 && expediteBuild && (
+                  <div style={{ marginTop: '0.5rem', display: 'flex', justifyContent: 'flex-end' }}>
+                    <button
+                      className="ghost-button-sm"
+                      disabled={!canRush}
+                      onClick={() => expediteBuild(i)}
+                    >
+                      Rush the work — £{cost}
+                    </button>
                   </div>
                 )}
               </div>
-              <button
-                className="wax-button"
-                disabled={blocked}
-                onClick={() => startBuild(k)}
-              >
-                Begin
-              </button>
-            </div>
-          </div>
-        );
-      })}
+            );
+          })}
+        </div>
+
+        {/* AVAILABLE FOR CONSTRUCTION */}
+        <div>
+          <div className="display" style={{ fontSize: '0.9em', color: '#6b4423', marginBottom: '0.5rem' }}>AVAILABLE FOR CONSTRUCTION</div>
+          {available.length === 0 ? (
+            <p className="italic">All structures begun or built.</p>
+          ) : available.map(([k, b]) => {
+            const canPay = gs.money >= b.cost;
+            const canBuild = meetsRequires(b);
+            const blocked = !canPay || !canBuild;
+            return (
+              <div key={k} className="parchment" style={{ padding: '0.9rem 1rem', marginBottom: '0.7rem', background: 'rgba(255,255,255,0.25)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  <div style={{ flex: 1, minWidth: '200px' }}>
+                    <div className="display" style={{ color: '#5c1a08', fontSize: '1.1em' }}>{b.name}</div>
+                    <div style={{ fontSize: '0.95em', color: '#4a3220', fontStyle: 'italic' }}>{b.blurb}</div>
+                    <div style={{ fontSize: '0.85em', color: '#6b4423', marginTop: '0.3rem' }}>
+                      £{b.cost} &middot; {b.days} days &middot; {b.effect}
+                    </div>
+                    {!canBuild && b.requires?.rep && (
+                      <div style={{ fontSize: '0.85em', color: '#8b1a1a', marginTop: '0.2rem' }}>
+                        Requires standing: {Object.entries(b.requires.rep).map(([f, n]) => `${FACTIONS[f].short} ${n}+`).join(', ')}
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    className="wax-button"
+                    disabled={blocked}
+                    onClick={() => startBuild(k)}
+                  >
+                    Begin
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }

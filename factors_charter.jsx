@@ -6447,7 +6447,7 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
           {tab === 'map' && <MapView gs={gs} sailTo={sailTo} />}
           {tab === 'port' && <PortView gs={gs} buyGood={buyGood} sellGood={sellGood} refitShip={refitShip} arrivalProse={arrivalProse} setTab={setTab} lodgeGoods={lodgeGoods} withdrawGoods={withdrawGoods} commissionBrigantine={commissionBrigantine} takeBottomry={takeBottomry} liftContractOpium={liftContractOpium} runDutchCustoms={runDutchCustoms} viewportMode={viewportMode} />}
           {tab === 'outpost' && atHome && <OutpostView gs={gs} startBuild={startBuild} expediteBuild={expediteBuild} />}
-          {tab === 'letters' && <LettersView gs={gs} setGs={setGs} onRespond={handleLetterResponse} openLetterId={openLetterId} setOpenLetterId={setOpenLetterId} />}
+          {tab === 'letters' && <LettersView gs={gs} setGs={setGs} onRespond={handleLetterResponse} openLetterId={openLetterId} setOpenLetterId={setOpenLetterId} viewportMode={viewportMode} />}
         </div>
         <ProvisionsDrawer gs={gs} setGs={setGs} lastSavedAt={lastSavedAt} />
       </div>
@@ -8965,7 +8965,7 @@ function AwayDigestScreen({ digest, onContinue, onResolveRaid }) {
 
 // ─────────── LETTERS VIEW ───────────
 
-function LettersView({ gs, setGs, onRespond, openLetterId, setOpenLetterId }) {
+function LettersView({ gs, setGs, onRespond, openLetterId, setOpenLetterId, viewportMode }) {
   const markRead = (id) => {
     setGs(prev => ({ ...prev, letters: prev.letters.map(l => l.id === id ? { ...l, read: true } : l) }));
   };
@@ -8987,35 +8987,72 @@ function LettersView({ gs, setGs, onRespond, openLetterId, setOpenLetterId }) {
     return (
       <div>
         <button className="ghost-button" onClick={() => setOpenLetterId(null)} style={{ marginBottom: '1rem' }}>← Back to letters</button>
-        <div className="parchment" style={{ padding: '1.5rem', background: 'rgba(255,253,245,0.6)' }}>
-          <div className="display" style={{ fontSize: '0.85em', color: '#6b4423' }}>FROM</div>
-          <div style={{ marginBottom: '0.5rem' }}>{letter.from}</div>
-          <div className="display" style={{ fontSize: '0.85em', color: '#6b4423' }}>SUBJECT</div>
-          <div className="italic" style={{ marginBottom: '1rem' }}>{letter.subject}</div>
-          <Fleuron char="❧" />
-          <p style={{ whiteSpace: 'pre-line', fontSize: '1.05em' }}>{letter.body}</p>
-          <ImagePlate plate={pickPlate(letter.body)} />
-          <ImaginePanel prose={letter.body} label="Imagine the sender's hand" />
-          <Fleuron />
-          {letter.replied ? (
-            <div className="italic" style={{ color: '#6b4423' }}>You replied: &ldquo;{letter.replyLabel}&rdquo;</div>
-          ) : (
+        {viewportMode === 'desktop' ? (
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 320px', gap: '1rem', alignItems: 'start' }}>
             <div>
-              <div className="display" style={{ fontSize: '0.85em', color: '#6b4423', marginBottom: '0.5rem' }}>YOUR REPLY</div>
-              {letter.responses.map((r, i) => (
-                <div key={i} style={{ marginBottom: '0.5rem' }}>
-                  <button
-                    className="ghost-button"
-                    style={{ width: '100%', textAlign: 'left' }}
-                    onClick={() => { setOpenLetterId(null); onRespond(letter, r); }}
-                  >
-                    &mdash; {r.label}
-                  </button>
-                </div>
-              ))}
+              <div className="parchment" style={{ padding: '1.5rem', background: 'rgba(255,253,245,0.6)' }}>
+                <div className="display" style={{ fontSize: '0.85em', color: '#6b4423' }}>FROM</div>
+                <div style={{ marginBottom: '0.5rem' }}>{letter.from}</div>
+                <div className="display" style={{ fontSize: '0.85em', color: '#6b4423' }}>SUBJECT</div>
+                <div className="italic" style={{ marginBottom: '1rem' }}>{letter.subject}</div>
+                <Fleuron char="❧" />
+                <p style={{ whiteSpace: 'pre-line', fontSize: '1.05em' }}>{letter.body}</p>
+                <ImagePlate plate={pickPlate(letter.body)} />
+                <ImaginePanel prose={letter.body} label="Imagine the sender's hand" />
+                <Fleuron />
+                {letter.replied ? (
+                  <div className="italic" style={{ color: '#6b4423' }}>You replied: &ldquo;{letter.replyLabel}&rdquo;</div>
+                ) : (
+                  <div>
+                    <div className="display" style={{ fontSize: '0.85em', color: '#6b4423', marginBottom: '0.5rem' }}>YOUR REPLY</div>
+                    {letter.responses.map((r, i) => (
+                      <div key={i} style={{ marginBottom: '0.5rem' }}>
+                        <button
+                          className="ghost-button"
+                          style={{ width: '100%', textAlign: 'left' }}
+                          onClick={() => { setOpenLetterId(null); onRespond(letter, r); }}
+                        >
+                          &mdash; {r.label}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
-          )}
-        </div>
+            <InlineIllustration prose={letter.body} />
+          </div>
+        ) : (
+          <div className="parchment" style={{ padding: '1.5rem', background: 'rgba(255,253,245,0.6)' }}>
+            <div className="display" style={{ fontSize: '0.85em', color: '#6b4423' }}>FROM</div>
+            <div style={{ marginBottom: '0.5rem' }}>{letter.from}</div>
+            <div className="display" style={{ fontSize: '0.85em', color: '#6b4423' }}>SUBJECT</div>
+            <div className="italic" style={{ marginBottom: '1rem' }}>{letter.subject}</div>
+            <Fleuron char="❧" />
+            <p style={{ whiteSpace: 'pre-line', fontSize: '1.05em' }}>{letter.body}</p>
+            <ImagePlate plate={pickPlate(letter.body)} />
+            <ImaginePanel prose={letter.body} label="Imagine the sender's hand" />
+            <Fleuron />
+            {letter.replied ? (
+              <div className="italic" style={{ color: '#6b4423' }}>You replied: &ldquo;{letter.replyLabel}&rdquo;</div>
+            ) : (
+              <div>
+                <div className="display" style={{ fontSize: '0.85em', color: '#6b4423', marginBottom: '0.5rem' }}>YOUR REPLY</div>
+                {letter.responses.map((r, i) => (
+                  <div key={i} style={{ marginBottom: '0.5rem' }}>
+                    <button
+                      className="ghost-button"
+                      style={{ width: '100%', textAlign: 'left' }}
+                      onClick={() => { setOpenLetterId(null); onRespond(letter, r); }}
+                    >
+                      &mdash; {r.label}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     );
   }

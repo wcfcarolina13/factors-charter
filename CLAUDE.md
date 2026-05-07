@@ -45,6 +45,21 @@ The same `factors_charter.jsx` runs in two environments, with diverged AI behavi
 
 Parity between runtimes is opportunistic. Game logic, content tables, and generators all live in the shared `factors_charter.jsx` so both runtimes get them automatically. PWA-only affordances (settings UIs, asset richness, etc.) are fine to add and won't appear in artifact — that's expected.
 
+### Two-mode rendering (PWA only)
+
+The PWA renders differently on mobile and desktop, gated by `useViewportMode()` which reads `(min-width: 1024px) and (pointer: fine)` plus a localStorage override (`factor_view_override`) toggleable from the in-game `☰ Menu` ("Compact view" / "Wide view"). The hook returns `'mobile' | 'desktop'`.
+
+- **Mobile** stays byte-identical to its pre-two-mode state. No new affordances.
+- **Desktop** unlocks four wide-screen layouts:
+  - **Letters**: list + reading pane via `<LettersDesktop>`. Inbox left, current letter right with inline illustration.
+  - **Map + Ledger**: collapsed into a single Overview tab via `<DesktopOverview>` showing both side-by-side.
+  - **Outpost**: three-pane grid (Standing structures / Under construction / Available for construction).
+  - **Encounters / arrivals / letters**: render with an `<InlineIllustration prose={...} />` alongside the prose, drawn by Pollinations.ai. Cached in localStorage (LRU at 50 entries, content-hash keyed) so each scene draws the same image every time.
+
+The pure logic is split out: `src/util/text.js` (stableHash, cleanProse), `src/util/viewport.js` (detectMode, setOverride), `src/util/illustration-cache.js` (LRU cache + getOrFetch + markLoaded), `src/util/style-prefix.js` (the single source of truth for the image-gen style prompt). The React hook `useViewportMode` and the components live in the JSX monolith because they use React.
+
+The existing `<ImaginePanel>` button-on-demand path remains in both modes — `<InlineIllustration>` falls back to `null` on fetch failure and the button stays available.
+
 ---
 
 ## Code architecture (top to bottom)

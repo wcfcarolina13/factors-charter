@@ -4,6 +4,18 @@ The Factor's Charter — a chronological log of what's shipped. Newest first.
 
 ---
 
+## 2026-05-07 — Desktop rendering mode
+
+The PWA now adapts to viewport: on screens ≥1024 px with a pointer device, the layout unlocks two-column views — Letters with list + reading pane via `<LettersDesktop>`, Map + Ledger combined into a single Overview tab via `<DesktopOverview>`, Outpost in a three-pane grid (Standing / Under construction / Available). Voyage encounters, arrival vignettes, and letters render with an inline auto-generated period illustration drawn by Pollinations.ai and cached in localStorage (LRU at 50 entries, content-hash keyed).
+
+Pure logic split into `src/util/`: `text.js` (stableHash, cleanProse), `viewport.js` (detectMode, setOverride), `illustration-cache.js` (getOrFetch, markLoaded, LRU eviction), `style-prefix.js` (single-source image-gen prefix). React hook `useViewportMode` and the new components (`<InlineIllustration>`, `<LetterReadingPane>`, `<LettersDesktop>`, `<DesktopOverview>`) live in the JSX monolith. Restored vitest with 17 pure-function tests across `text.test.js` and `illustration-cache.test.js`.
+
+Override toggle in the in-game `☰ Menu` ("Compact view" / "Wide view"); persists per device. Mobile UI is byte-identical. The existing `<ImaginePanel>` button-on-demand path remains in both modes — `<InlineIllustration>` falls back to `null` on fetch failure and the button stays available.
+
+Subsystem A (cross-device save sync via Cloudflare Pages Function + KV) is the next ship; spec at `docs/superpowers/specs/2026-05-07-two-mode-design.md`, no plan yet.
+
+---
+
 ## 2026-05-07 — Pool expansions (cont’d): voyage encounters + away digest
 
 Two more concerns from the audit closed:

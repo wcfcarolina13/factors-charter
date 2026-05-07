@@ -5,6 +5,7 @@ A 1720s text-based mercantile RPG. Originally a Claude artifact; now also runs a
 ## Play
 
 - Live build: `https://factors-charter.pages.dev` — open and play, no setup required.
+- On desktop (≥1024 px wide, pointer device): wide-view layouts (Letters reading pane, Map + Ledger combined, Outpost three-pane) and inline period illustrations alongside scenes. Toggle Compact / Wide view from the in-game `☰ Menu`.
 - Inside Claude: open `factors_charter.jsx` as an artifact (legacy; live-AI prose still works here via the artifact host).
 
 ## Develop

@@ -5511,7 +5511,7 @@ function OpeningSequence({ name, onComplete }) {
 
 // ─────────── GAME HUB ───────────
 
-function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRenewal }) {
+function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRenewal, viewportMode }) {
   const [tab, setTab] = useState('journal');
   const [encounter, setEncounter] = useState(null);
   const [pending, _setPending] = useState(false);
@@ -6408,7 +6408,7 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
   return (
     <Page>
       <div style={{ maxWidth: '64rem', margin: '0 auto', padding: '1.25rem 1.0rem', width: '100%' }}>
-        <Header gs={gs} onReturnToTitle={onReturnToTitle} onSuccession={onSuccession} onRenewal={onRenewal} />
+        <Header gs={gs} onReturnToTitle={onReturnToTitle} onSuccession={onSuccession} onRenewal={onRenewal} viewportMode={viewportMode} />
         <Tabs tab={tab} setTab={setTab} unread={gs.letters.filter(l => !l.read).length} atHome={atHome} />
         <div className="parchment" style={{ padding: '1.25rem', minHeight: '24rem', background: 'rgba(255,253,245,0.4)' }}>
           {tab === 'journal' && <JournalView gs={gs} arrivalProse={arrivalProse} setTab={setTab} openLetterById={openLetterById} pursueThread={handlePursueThread} />}
@@ -7163,7 +7163,7 @@ function ExportModal({ title, content, filename, onClose, helperText, wrap }) {
 
 // ─────────── HEADER ───────────
 
-function Header({ gs, onReturnToTitle, onSuccession, onRenewal }) {
+function Header({ gs, onReturnToTitle, onSuccession, onRenewal, viewportMode }) {
   const [confirmingSuccession, setConfirmingSuccession] = useState(false);
   const [successorName, setSuccessorName] = useState('');
   const [confirmingRenewal, setConfirmingRenewal] = useState(false);
@@ -7392,6 +7392,17 @@ function Header({ gs, onReturnToTitle, onSuccession, onRenewal }) {
             </div>
           )}
 
+          <button
+            className="ghost-button"
+            style={{ width: '100%', textAlign: 'left', marginBottom: '0.3rem' }}
+            onClick={() => {
+              const next = viewportMode === 'desktop' ? 'mobile' : 'desktop';
+              setViewportOverride(next);
+              setMenuOpen(false);
+            }}
+          >
+            {viewportMode === 'desktop' ? '☐ Compact view' : '⊞ Wide view'}
+          </button>
           <button
             className="ghost-button"
             style={{ width: '100%', textAlign: 'left', marginBottom: '0.3rem' }}
@@ -9201,6 +9212,7 @@ export default function FactorsCharter() {
   const [savesIndex, setSavesIndex] = useState([]);
   const [activeSaveId, setActiveSaveId] = useState(null);
   const [lastSavedAt, setLastSavedAt] = useState(null);
+  const viewportMode = useViewportMode();
 
   // Mount: load index, run legacy migration, land on title.
   useEffect(() => {
@@ -9330,6 +9342,6 @@ export default function FactorsCharter() {
   }
 
   return (
-    <GameHub gs={gs} setGs={setGs} lastSavedAt={lastSavedAt} onReturnToTitle={handleReturnToTitle} onSuccession={handleSuccession} onRenewal={handleRenewal} />
+    <GameHub gs={gs} setGs={setGs} lastSavedAt={lastSavedAt} onReturnToTitle={handleReturnToTitle} onSuccession={handleSuccession} onRenewal={handleRenewal} viewportMode={viewportMode} />
   );
 }

@@ -4022,6 +4022,32 @@ Return JSON:
   return { result, log };
 }
 
+// Deterministic pool for genOutcome fallback. Each entry yields a self-consistent
+// {prose, journal} pair — prose for the encounter screen, journal for the
+// permanent record. Picked at random on every fallback. Two pools because the
+// letter-reply branch reads at the desk; the encounter branch reads in the world.
+const FALLBACK_OUTCOME_ENCOUNTER = [
+  { prose: 'It plays out as you might expect, neither as well nor as ill as feared.', journal: 'A day passed without consequence.' },
+  { prose: 'The matter resolves itself in the way of small troubles.', journal: 'A small matter, of no weight to the books.' },
+  { prose: 'Nothing is lost, nothing is gained. The day’s books match the morning’s.', journal: 'The work moved a measure forward.' },
+  { prose: 'The work goes on. The hands take their pay; the matter is closed.', journal: 'Closed the day’s affair without entry to the ledger.' },
+  { prose: 'A small affair, soon over.', journal: 'Quiet day at the godown.' },
+  { prose: 'The sun moves; the wind holds; the matter passes.', journal: 'The matter is in hand. It will keep.' },
+  { prose: 'Set down, taken up, set down again. So the day went.', journal: 'No event of note.' },
+  { prose: 'The thing is settled before the second bell.', journal: 'Day saw little to remember. The work continues.' },
+];
+
+const FALLBACK_OUTCOME_LETTER = [
+  { prose: 'The reply is written and laid by for the next post.', journal: 'Wrote the reply. Sealed and laid by for the post.' },
+  { prose: 'The pen does its work. The paper is folded and sealed.', journal: 'Composed an answer at the desk.' },
+  { prose: 'What was written cannot be unwritten. The Factor lays the pen down.', journal: 'A letter answered, no more.' },
+  { prose: 'A letter answered. The desk is the same desk.', journal: 'Wrote a brief reply for the post-bag.' },
+  { prose: 'He writes plainly. There is little to add when the figures speak.', journal: 'Took up the pen, returned the same.' },
+  { prose: 'The reply is short, as the letter required. The wax cools.', journal: 'A page written to the post.' },
+  { prose: 'Words committed to paper. They will reach London by August at earliest.', journal: 'Reply written. The desk is again clear.' },
+  { prose: 'The reply reads true on the second pass.', journal: 'Sealed the answer and put it with the outgoing.' },
+];
+
 async function genOutcome(gs, encounterProse, choice, opts = {}) {
   const isLetter = !!opts.isLetter;
   const constraintLine = isLetter
@@ -4051,9 +4077,11 @@ Generate the outcome. Return JSON:
   }
 }
 Reputation deltas should be small (-15 to +15). Only include factions that actually shift. Goods can include any of: pepper, cinnamon, calico, silver, sandalwood, opium, rice, rum, saltpetre. Use newAcquaintances when the scene introduces a memorable named figure who could plausibly recur. Flags are sparse and should describe lasting narrative state. Omit any of the optional fields you do not need.`;
+  const pool = isLetter ? FALLBACK_OUTCOME_LETTER : FALLBACK_OUTCOME_ENCOUNTER;
+  const pick = pool[Math.floor(Math.random() * pool.length)];
   const fallback = {
-    prose: 'It plays out as you might expect, neither as well nor as ill as feared.',
-    changes: { money: 0, days: isLetter ? 0 : 1, reputation: {}, goods: {}, journal: 'A day passed without consequence.', hook: '' },
+    prose: pick.prose,
+    changes: { money: 0, days: isLetter ? 0 : 1, reputation: {}, goods: {}, journal: pick.journal, hook: '' },
   };
   const call = await callClaude(prompt);
   const result = call.parsed || fallback;

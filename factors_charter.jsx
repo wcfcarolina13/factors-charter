@@ -3,6 +3,7 @@ import { detectMode as detectViewportMode, setOverride as setViewportOverride, D
 import { getOrFetch as getOrFetchIllustration, markLoaded as markIllustrationLoaded } from './src/util/illustration-cache.js';
 import { STYLE_PREFIX } from './src/util/style-prefix.js';
 import { generatePlaythroughId } from './src/util/playthrough-id.js';
+import { detectConflict } from './src/util/sync-conflict.js';
 
 // React hook wrapping the viewport detection. Subscribes to media-query
 // changes and to localStorage changes (so toggling the override in one tab
@@ -9789,6 +9790,7 @@ export default function FactorsCharter() {
   const [lastSavedAt, setLastSavedAt] = useState(null);
   const viewportMode = useViewportMode();
   const sync = useSyncState(activeSaveId);
+  const [pendingConflict, setPendingConflict] = useState(null);  // { localGs, remoteRecord }
 
   // Mount: load index, run legacy migration, land on title.
   useEffect(() => {
@@ -9820,6 +9822,48 @@ export default function FactorsCharter() {
     })();
     return () => { cancelled = true; };
   }, [gs, phase, activeSaveId]);
+
+  // Pull on launch when sync is enabled. Uses detectConflict to decide:
+  //   'none'     — no remote change since last sync; do nothing.
+  //   'pull'     — silently replace local with cloud (preserving local aiLog).
+  //   'conflict' — both diverged; show ConflictModal.
+  //   'push'     — remote missing or stale; push local to seed/restore.
+  useEffect(() => {
+    if (!gs || !gs.syncEnabled || !gs.playthroughId) return;
+    let cancelled = false;
+    (async () => {
+      const result = await sync.pullNow(gs.playthroughId);
+      if (cancelled) return;
+      if (result.status === 'fetched') {
+        const pointer = sync.pointer();
+        const decision = detectConflict({
+          local: { day: gs.day },
+          remote: { version: result.remote.version, day: result.remote.body?.day || 0 },
+          lastKnown: pointer ? { version: pointer.lastKnownCloudVersion, day: pointer.lastKnownDay || 0 } : null,
+        });
+        if (decision === 'pull') {
+          // Silent pull: cloud body becomes local state, preserving aiLog.
+          setGs(sync.applyPull(gs, result.remote.body));
+          try {
+            window.localStorage.setItem(`factor_save_${activeSaveId}_sync`, JSON.stringify({
+              lastKnownCloudVersion: result.remote.version,
+              lastSyncAt: result.remote.savedAt,
+              lastKnownDay: result.remote.body?.day || 0,
+            }));
+          } catch (e) { /* localStorage may fail; conflict detection will recover next launch */ }
+        } else if (decision === 'conflict') {
+          setPendingConflict({ localGs: gs, remoteRecord: result.remote });
+        } else if (decision === 'push') {
+          sync.pushNow(gs);
+        }
+        // 'none' → no-op
+      } else if (result.status === 'push') {
+        // 404 from server — local has data the cloud never saw, seed it.
+        sync.pushNow(gs);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [gs?.playthroughId, gs?.syncEnabled]);  // re-run if the synced ID changes (e.g. on first opt-in)
 
   const handleNewGame = (name) => {
     const id = newSlotId();
@@ -9932,6 +9976,32 @@ export default function FactorsCharter() {
             playthroughId: syncYes ? generatePlaythroughId() : null,
           }));
         }} />
+      )}
+      {pendingConflict && (
+        <ConflictModal
+          localGs={pendingConflict.localGs}
+          remoteRecord={pendingConflict.remoteRecord}
+          onResolve={(side) => {
+            if (side === 'local') {
+              // Auto-export the cloud loser, then push local to overwrite cloud.
+              sync.exportManuscript(pendingConflict.remoteRecord.body, 'cloud-discarded');
+              sync.pushNow(pendingConflict.localGs);
+            } else {
+              // Auto-export the local loser, then accept cloud as new state
+              // (preserving local aiLog).
+              sync.exportManuscript(pendingConflict.localGs, 'local-discarded');
+              setGs(sync.applyPull(pendingConflict.localGs, pendingConflict.remoteRecord.body));
+              try {
+                window.localStorage.setItem(`factor_save_${activeSaveId}_sync`, JSON.stringify({
+                  lastKnownCloudVersion: pendingConflict.remoteRecord.version,
+                  lastSyncAt: pendingConflict.remoteRecord.savedAt,
+                  lastKnownDay: pendingConflict.remoteRecord.body?.day || 0,
+                }));
+              } catch (e) { /* localStorage may fail; ok */ }
+            }
+            setPendingConflict(null);
+          }}
+        />
       )}
     </>
   );

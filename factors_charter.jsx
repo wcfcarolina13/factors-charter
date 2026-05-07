@@ -61,13 +61,24 @@ function useSyncState(slot) {
   const pushNow = async (gs) => {
     if (!gs?.playthroughId || !gs.syncEnabled) return;
     if (inFlight.current) return;
+    // aiLog is debug-only history of AI request/response pairs — not needed
+    // for cross-device play continuity, and is the main driver of gs size
+    // (a late-game charter routinely pushes past 256 KB with aiLog included).
+    // Strip it from the synced payload; the local copy keeps it for export.
+    const { aiLog: _omit, ...gsForSync } = gs;
+    const body = JSON.stringify(gsForSync);
+    if (body.length > 256 * 1024) {
+      setStatus('error');
+      setError('save too large to sync (>256 KB even without aiLog)');
+      return;
+    }
     inFlight.current = true;
     setStatus('pushing');
     try {
       const res = await fetch(`/api/save?id=${encodeURIComponent(gs.playthroughId)}`, {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(gs),
+        body,
       });
       if (!res.ok) {
         setStatus(res.status >= 500 || res.status === 429 ? 'offline' : 'error');
@@ -91,6 +102,22 @@ function useSyncState(slot) {
     if (debounceTimer.current) clearTimeout(debounceTimer.current);
     debounceTimer.current = setTimeout(() => { pushNow(gs); }, 5000);
   };
+
+  // Cleanup: clear any pending debounce on unmount so a stale timer doesn't
+  // fire into a torn-down component instance.
+  useEffect(() => {
+    return () => {
+      if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    };
+  }, []);
+
+  // Merge a pulled cloud body with the local gs so device-only fields
+  // (aiLog, and any other transient debug state) survive the pull. Used by
+  // the pull-on-launch flow and the conflict-resolution "use cloud" path.
+  const applyPull = (localGs, cloudBody) => ({
+    ...cloudBody,
+    aiLog: localGs?.aiLog || [],
+  });
 
   const pullNow = async (playthroughId) => {
     if (!playthroughId) return { status: 'none' };
@@ -139,6 +166,7 @@ function useSyncState(slot) {
     pointer: readPointer,
     triggerPush, pushNow, pullNow,
     exportManuscript,
+    applyPull,
     setStatus,
   };
 }

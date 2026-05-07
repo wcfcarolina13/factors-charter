@@ -1,7 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 
-const isPwaMode = typeof window !== 'undefined' && !window.storage;
-
 // ═══════════════════════════════════════════════════════════════
 //  THE FACTOR'S CHARTER — playable prototype
 //  A text-based colonial trading game in the spirit of

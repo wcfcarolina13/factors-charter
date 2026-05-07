@@ -4400,6 +4400,58 @@ Return JSON:
   return { result, log };
 }
 
+// Event-aware deterministic fallback for genAwayDigest. Branches on event
+// type in priority order (raid > incident > indiaman > construction >
+// harvest > letter > default), then picks at random from the matched pool.
+// The contextual mismatch the audit flagged \u2014 "ledger half-kept" prose
+// firing after a raid \u2014 is what this addresses.
+const FALLBACK_AWAY_DIGEST = {
+  raid: [
+    'The godown was raided in yr. absence. Hodge has the figures down to the cwt of what was lost. The compound is whole, but the matter is not.',
+    'Dass meets you at the gate, sober. The raid was put down, but not without cost. The ledger reads short by a wide margin.',
+    'You walk the godown by lamp before turning in. The locks are mended, the missing stock counted twice. The work tomorrow will be the worse for it.',
+  ],
+  incident: [
+    'Returned to a household still mending. The compound stands; the ledger has gaps the work of a week will not close.',
+    'There has been trouble while you were gone. Hodge is in some agitation; Dass is calmer but says less. The day will not run to its usual hours.',
+    'You walk the compound and see what was done in yr. absence. Some matters can be set right by the close of the week; others will not be.',
+  ],
+  indiaman: [
+    'An Indiaman had called in yr. absence. Hodge produces the manifests, the receipts, the figures yet to be reconciled. The work of catching up begins.',
+    'You missed the Indiaman by some days. Her sailing-bills are spread on the desk, and there will be a letter from the Court somewhere among them.',
+    'The Company\u2019s ship has come and gone. There are returns to verify, returns to dispute, and a draft on Bombay to be lodged.',
+  ],
+  construction: [
+    'A new beam stands in the compound. Hodge runs through the figures of the build, then the figures of the household. The day proceeds.',
+    'The work was finished while you were away. The men have gone back to their usual labour, and the carpenter is gone with the tide.',
+  ],
+  harvest: [
+    'The pepper has come in. The godown smells of the new lot; the ledger awaits the entry. The work resumes its usual shape.',
+    'A new entry in the godown books \u2014 the harvest, lodged. Hodge has the count down to the cwt, but expects you to verify it yourself.',
+  ],
+  letter: [
+    'A packet of letters waited on the desk. Some will be answered easily; some will not. The bell sounds the noon, and the work resumes.',
+    'Hodge has stacked the post in three piles by his own reckoning. You take up the topmost and read.',
+  ],
+  default: [
+    'Returned to find the godown standing and the ledger half-kept. The work of catching up begins tomorrow.',
+    'The compound is as you left it. Hodge meets you at the door with the keys and a list of small things. The day\u2019s work resumes.',
+    'Came back to the same dock, the same matting, the same heat. There is little to remark upon. The bell sounds the hour.',
+  ],
+};
+
+function pickAwayDigestFallback(awayEvents) {
+  const types = new Set((awayEvents || []).map(e => e.type));
+  for (const key of ['raid', 'incident', 'indiaman', 'construction', 'harvest', 'letter']) {
+    if (types.has(key)) {
+      const pool = FALLBACK_AWAY_DIGEST[key];
+      return pool[Math.floor(Math.random() * pool.length)];
+    }
+  }
+  const pool = FALLBACK_AWAY_DIGEST.default;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
 async function genAwayDigest(gs, awayEvents) {
   if (!awayEvents || awayEvents.length === 0) return { result: null, log: null };
   const events = awayEvents.slice(-12).map(e => `Day ${e.day}: ${e.text}`).join('\n');
@@ -4410,7 +4462,7 @@ ${events}
 Compose a single paragraph (4-6 sentences) in the Factor\u2019s journal voice, written upon his return. He is reading the household ledger, hearing Hodge stammer through reports, and walking the compound. Period prose, dry observation, sensory detail. Do not list the events; weave them.
 
 Return JSON: { "prose": "..." }`;
-  const fallbackProse = 'Returned to find the godown standing and the ledger half-kept. The work of catching up begins tomorrow.';
+  const fallbackProse = pickAwayDigestFallback(awayEvents);
   const call = await callClaude(prompt);
   const result = call.parsed?.prose || fallbackProse;
   const log = {

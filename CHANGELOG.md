@@ -4,6 +4,20 @@ The Factor's Charter — a chronological log of what's shipped. Newest first.
 
 ---
 
+## 2026-05-07 — Cross-device save sync
+
+A charter can now follow the player between devices. First save of a new charter prompts "Sync this charter across devices?"; on yes, an unguessable themed playthrough ID is generated (`pelican-salt-pepper-1923` style) and the save pushes to Cloudflare KV via `functions/api/save.js` (a Pages Function deployed alongside the site). On launch, the cloud version is checked: if newer, it silently replaces local; if both have progressed since the last sync, a conflict modal shows stats from each version and the player picks one — the discarded version auto-exports as a Manuscript JSON. Existing pre-sync charters can opt in via "⁂ Sync this charter" in the in-game `☰ Menu`.
+
+Server-side: 60 req/min per IP rate limit, 256 KB body cap, 365-day TTL on saves (renews per push). No accounts; the playthrough ID is the secret.
+
+The synced payload strips `gs.aiLog` (debug-only AI request/response history; not needed for play continuity) and is well under the body cap; pulled state is merged via `applyPull` to preserve the local `aiLog`.
+
+Pure logic split into `src/util/playthrough-id.js` and `src/util/sync-conflict.js` with vitest coverage. Total tests now 33 across 4 files.
+
+This completes the two-mode design from earlier today: same charter, two interaction modes (mobile / desktop), silent sync between them.
+
+---
+
 ## 2026-05-07 — Desktop rendering mode
 
 The PWA now adapts to viewport: on screens ≥1024 px with a pointer device, the layout unlocks two-column views — Letters with list + reading pane via `<LettersDesktop>`, Map + Ledger combined into a single Overview tab via `<DesktopOverview>`, Outpost in a three-pane grid (Standing / Under construction / Available). Voyage encounters, arrival vignettes, and letters render with an inline auto-generated period illustration drawn by Pollinations.ai and cached in localStorage (LRU at 50 entries, content-hash keyed).

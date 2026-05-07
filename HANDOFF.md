@@ -1,65 +1,58 @@
 # HANDOFF — The Factor's Charter
 
-**Date:** 2026-05-07 (later same day, after the desktop-rendering work)
+**Date:** 2026-05-07 (after cross-device save sync)
 **For:** Bradley (or a fresh Claude session) resuming this project
 **Branch:** `main`
 **Live build:** https://factors-charter.pages.dev (auto-deploys from `main`)
-**Status:** Desktop rendering mode shipped. Cross-device save sync (Subsystem A from the two-mode spec) is the next item — designed but not yet implemented; no plan written yet.
+**Status:** The two-mode design is now fully shipped. Both Subsystem B (desktop rendering mode) and Subsystem A (cross-device save sync) are on `main`.
 
-> Previous handoff archived in `git log` at commit `f996357`.
+> Previous handoff archived in `git log` at commit `956e14b`.
 
 ---
 
-## What shipped this session
+## What shipped this session (the full day)
 
-After the strip and the four pool expansions earlier today:
+In one long session today, the project went from "PWA with live-AI provider config" to:
 
-**Desktop rendering mode.** The PWA now adapts to viewport. Same `factors_charter.jsx`, same gameplay, same content — but on screens ≥1024 px with a pointer device, the layout unlocks two-column views and inline auto-generated period illustrations. Mobile UI is byte-identical to its pre-PR state.
-
-### Added
-- `useViewportMode()` hook + override key `factor_view_override` + Compact/Wide toggle in `☰ Menu`
-- `<InlineIllustration>` component with content-hash-keyed illustration cache (LRU at 50 entries, localStorage backed)
-- `<LetterReadingPane>` shared sub-component (mobile + desktop letter rendering both use it)
-- `<LettersDesktop>` (inbox + reading pane, 24rem inbox, 320px illustration column, default selection = newest unread)
-- `<DesktopOverview>` (Map + Ledger side-by-side, replaces both tabs with a single "Overview" tab on desktop)
-- `OutpostView` three-pane variant (Standing / Under construction / Available)
-- `effectiveTab` symmetric normalization (handles desktop ↔ mobile resize without persisting stale tab state)
-- New `src/util/` tree: `text.js` (stableHash + cleanProse), `viewport.js` (detectMode + setOverride), `illustration-cache.js` (cache module + tests), `style-prefix.js` (single-source image-gen prefix shared between modal + cache)
-- Restored vitest: 17 tests across `text.test.js` (9) and `illustration-cache.test.js` (8). Includes a pinned `stableHash` value test so accidental hash changes don't silently orphan everyone's illustration cache.
+1. **Live-AI stripped from PWA** — deterministic-only player path; mobile-first onboarding fixed.
+2. **Pool expansions** — `genOutcome`, `genArrivalVignette`, `genVoyageEncounter`, `genAwayDigest` all expanded with audit-driven random pools. Only `genLetter` faction × mood remains open.
+3. **Desktop rendering mode** — `useViewportMode()` gates four desktop variants (Letters reading pane, Map+Ledger Overview, Outpost three-pane, encounters/arrivals/letters with inline illustrations from a content-hash-keyed cache).
+4. **Cross-device save sync** — Cloudflare Pages Function + KV; themed playthrough IDs; silent push-on-save / pull-on-launch; conflict modal with auto-export of the loser; live-`gs` ref to avoid the launch-time-stale-closure bug; `aiLog` stripped from synced payload to stay under the 256 KB cap.
 
 ### Reference docs
-- Design spec: `docs/superpowers/specs/2026-05-07-two-mode-design.md` (covers Subsystem B, which shipped, AND Subsystem A, which is the next item)
-- Implementation plan: `docs/superpowers/plans/2026-05-07-ux-divergence.md` (Subsystem B only; A's plan still to be written)
+- Spec (covers both subsystems): `docs/superpowers/specs/2026-05-07-two-mode-design.md`
+- Plan B (UX divergence): `docs/superpowers/plans/2026-05-07-ux-divergence.md` — shipped
+- Plan A (save sync): `docs/superpowers/plans/2026-05-07-save-sync.md` — shipped
 
 ---
 
 ## Deferred items — pick up here
 
-### 1. Subsystem A: cross-device save sync (top priority)
+### 1. genLetter faction × mood pool
 
-Per the spec at `docs/superpowers/specs/2026-05-07-two-mode-design.md`. Cloudflare Pages Function at `functions/api/save.js` + KV namespace, themed-readable playthrough IDs (`coral-monsoon-pelican-1923` style), silent push-on-save / pull-on-launch / conflict modal with auto-export of the loser. Each save in `gs` gets `playthroughId`, `syncEnabled`, plus per-slot `lastKnownCloudVersion` in localStorage. First-launch sync prompt for new charters; retroactive enable for existing.
+The only remaining concern from the original deterministic pool audit. Faction voices need Bradley's tonal authoring. See `DESIGN_NOTES.md` "Concerns flagged" section. Six factions × 3 moods = up to 18 letter templates.
 
-**Pre-deploy setup needed before the implementation plan can run:**
-- Create KV namespace via Cloudflare dashboard or `wrangler kv:namespace create SAVES_KV`
-- Bind the namespace to `SAVES_KV` in the factors-charter Pages project settings → Functions → KV namespace bindings
+### 2. Polished PWA icons
 
-**Then write the implementation plan** via `superpowers:writing-plans` against the spec, and execute it via `superpowers:subagent-driven-development` (same flow as Subsystem B).
+Chrome's manifest validation still flags `icon-192.png`. Replacing the placeholder PNGs with hand-designed icons closes this out.
 
-### 2. genLetter faction × mood pool (still open from earlier today)
+### 3. Lazy-load mid-game views (lower priority)
 
-The only remaining item from the deterministic pool audit. Faction voices need Bradley's tonal authoring. See `DESIGN_NOTES.md` "Concerns flagged" section.
+The 1.13+ MB main chunk is still hefty. Lower priority than #1.
 
-### 3. Polished PWA icons
-
-Chrome's manifest validation still flags `icon-192.png`. Replacing the placeholder PNGs with hand-designed icons closes this out. Manifest already references them.
-
-### 4. Lazy-load mid-game views (lower priority)
-
-The 1.13+ MB main chunk is still hefty. Lower priority than Subsystem A.
-
-### 5. Trusted Types in CSP
+### 4. Trusted Types in CSP
 
 Closes out Lighthouse Best Practices. Not blocking.
+
+### 5. Background audio for desktop mode
+
+Was deliberately deferred from the two-mode spec. Period ambient (wind, wharf, quill) on desktop title and letter screens. Its own future spec.
+
+### 6. Sync UX polish (sub-items, all low priority)
+
+- Concurrent-pull race: `pullNow` lacks an `inFlight` guard; on first opt-in the pull and immediate push race. Status display can flicker; no data corruption. Low-priority.
+- Conflict-detection sensitivity: `localStorage.setItem` failure (quota) is silent in `writePointer`. On the next launch, missing pointer → false-positive conflict modal. Worth a `setError` surfacing if it ever becomes felt.
+- The retroactive "Sync this charter" menu entry currently exposes raw `setGs` to `Header` rather than an `onEnableSync` callback. Consistent with other Header consumers but worth a small refactor when next touching that surface.
 
 ---
 
@@ -69,7 +62,7 @@ Closes out Lighthouse Best Practices. Not blocking.
 cd ~/pontus/factors-charter
 git status
 npm install
-npm test                              # 17 tests across 2 files
+npm test                              # 33 tests across 4 files
 npm run build
 npx vite preview                      # http://localhost:4173/
 ```
@@ -79,9 +72,19 @@ JSX parser:
 node -e "const p=require('@babel/parser'); const fs=require('fs'); const c=fs.readFileSync('factors_charter.jsx','utf8'); p.parse(c,{sourceType:'module',plugins:['jsx']}); console.log('OK',c.split('\n').length,'lines');"
 ```
 
-Live deploy headers (CSP must include `https://image.pollinations.ai` in `img-src`):
+Live deploy headers:
 ```bash
 curl -sI https://factors-charter.pages.dev/ | grep -i content-security
+```
+
+Sync end-to-end (after the deploy lands):
+```bash
+# PUT a test save — use a unique ID so you don't clobber any real charter
+curl -X PUT 'https://factors-charter.pages.dev/api/save?id=pelican-salt-pepper-1234' \
+  -H 'content-type: application/json' \
+  -d '{"day": 1, "test": true}'
+# GET it back
+curl 'https://factors-charter.pages.dev/api/save?id=pelican-salt-pepper-1234'
 ```
 
 ---
@@ -90,19 +93,17 @@ curl -sI https://factors-charter.pages.dev/ | grep -i content-security
 
 - `factors_charter.jsx` stays at repo root. Still monolithic by design.
 - `legacyAnthropicCall` body unchanged.
-- Mobile UI is byte-identical to its pre-desktop-mode state. Desktop affordances are purely additive and gated on `useViewportMode() === 'desktop'`.
-- `src/util/` is React-free pure logic. The React hook `useViewportMode` and the React components (`<InlineIllustration>` etc.) live in the JSX monolith because they use React. Pure functions live in `src/util/`.
-- `src/util/style-prefix.js` is the single source of truth for the image-gen style prefix. Both the cache module and the in-JSX `IllustrationModal` import it. Don't drift them.
-- All gameplay, save format (`ensureShape`), content tables, and generators live in `factors_charter.jsx`.
-- The illustration cache key is content-hashed via `stableHash(cleanProse(prose))`. The pinned test in `text.test.js` enforces hash stability — if you ever need to change the hash function, bump `factor_illustration_cache_v1` to `_v2` in `src/util/illustration-cache.js` so old caches don't get incorrectly served.
+- Mobile UI byte-identical to its pre-PR state.
+- `src/util/` is React-free pure logic. The React hooks (`useViewportMode`, `useSyncState`) and components live in the JSX monolith.
+- `src/util/style-prefix.js` is the single source of truth for the image-gen style prefix.
+- The illustration cache key is `stableHash(cleanProse(prose))`. Pinned test enforces hash stability — bump `factor_illustration_cache_v1` to `_v2` if the hash function changes.
+- The playthrough ID format is `^[a-z]+-[a-z]+-[a-z]+-\d{4}$`. Both client and server validate. Wordlists in `src/util/playthrough-id.js` can be APPENDED (existing IDs unaffected) but not reordered or truncated.
+- `gs` shape additions (`syncEnabled`, `playthroughId`, `syncPromptShown`) flow through `ensureShape`. Per-slot sync pointer is device-local, NOT in `gs`.
+- `aiLog` is intentionally stripped from the synced payload (debug-only, drives gs size past 256 KB late-game). On pull, `sync.applyPull(localGs, cloudBody)` merges so the local `aiLog` survives. Don't `setGs(remote.body)` directly — always go through `applyPull`.
+- `makeSuccessorState` and `makeRenewedState` deliberately do NOT reset sync fields. The same player's sync choice persists across charter generations. If you change this, the prompt re-fires and the cloud copy gets orphaned under a new ID.
 
 ---
 
 ## Bradley's working style (unchanged)
 
-- Mobile, Claude app for casual play. Desktop browser for development.
-- "do that now", "ship it", "proceed", "keep going" — stop discussing, write code.
-- "this doesn't work" — believe him; trace the actual error.
-- Values period accuracy and dry tone over feature volume.
-- Drive folder ("Factor's Charter", id `1yqTKacEuy4j3_Ph2QR5CKr1T_xIqpjeU`) is the canonical save backup channel.
-- Now playing the PWA build at https://factors-charter.pages.dev primarily, on both mobile and desktop.
+(see prior handoffs — same as before)

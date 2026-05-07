@@ -60,6 +60,14 @@ The pure logic is split out: `src/util/text.js` (stableHash, cleanProse), `src/u
 
 The existing `<ImaginePanel>` button-on-demand path remains in both modes — `<InlineIllustration>` falls back to `null` on fetch failure and the button stays available.
 
+### Cross-device save sync (PWA only)
+
+A charter can opt into cross-device sync via a first-launch prompt or a "⁂ Sync this charter" entry in the in-game `☰ Menu`. When enabled, the save is pushed to a Cloudflare KV namespace via `functions/api/save.js` (deployed alongside the static site as a Pages Function), keyed by a themed playthrough ID like `pelican-salt-pepper-1923`. On launch, if the cloud has a newer version, it silently replaces local; if both have progressed since the last sync, a `<ConflictModal>` shows side-by-side stats and the player picks which to keep — the discarded version auto-exports as a Manuscript JSON download.
+
+Pure logic (ID generation, conflict detection) lives in `src/util/playthrough-id.js` and `src/util/sync-conflict.js` with vitest coverage. The React state machine is `useSyncState(slot)` inside the JSX monolith. Per-charter sync metadata in `gs`: `syncEnabled`, `playthroughId`, `syncPromptShown`. Per-slot device-local pointer in localStorage at `factor_save_<slot>_sync`: `{ lastKnownCloudVersion, lastSyncAt, lastKnownDay }`. The synced payload strips `gs.aiLog` (debug-only history; not needed for play continuity) so the body stays well under the 256 KB server cap; pulled state is merged via `sync.applyPull(localGs, cloudBody)` to preserve the local `aiLog`.
+
+Pre-deploy infrastructure (one-time): a Cloudflare KV namespace bound to `SAVES_KV` in the Pages project's Functions bindings. Already configured. CSP `connect-src 'self'` covers same-origin `/api/save` fetches.
+
 ---
 
 ## Code architecture (top to bottom)

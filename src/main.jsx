@@ -4,6 +4,8 @@ import FactorsCharter from '../factors_charter.jsx';
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <FactorsCharter />
+    <main>
+      <FactorsCharter />
+    </main>
   </React.StrictMode>
 );

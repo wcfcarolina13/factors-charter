@@ -5213,6 +5213,7 @@ function TitleScreen({ saves, onNewGame, onContinue, onRestore, onDeleteSlot, on
             value={name}
             onChange={(e) => setName(e.target.value)}
             maxLength={32}
+            aria-label="Factor's name"
             style={{ width: '18rem', maxWidth: '100%' }}
           />
         </div>
@@ -5256,6 +5257,7 @@ function TitleScreen({ saves, onNewGame, onContinue, onRestore, onDeleteSlot, on
               value={restoreText}
               onChange={(e) => setRestoreText(e.target.value)}
               placeholder="Paste the manuscript JSON here..."
+              aria-label="Manuscript JSON"
               style={{
                 width: '100%', minHeight: '6rem', padding: '0.5rem',
                 fontFamily: 'monospace', fontSize: '0.75em',

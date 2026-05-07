@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { detectMode as detectViewportMode, setOverride as setViewportOverride, DESKTOP_QUERY as VIEWPORT_DESKTOP_QUERY } from './src/util/viewport.js';
+import { getOrFetch as getOrFetchIllustration, markLoaded as markIllustrationLoaded } from './src/util/illustration-cache.js';
 
 // React hook wrapping the viewport detection. Subscribes to media-query
 // changes and to localStorage changes (so toggling the override in one tab
@@ -7030,6 +7031,64 @@ function IllustrationModal({ prose, onClose }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// Inline illustration for desktop mode — renders the cached image (or a
+// placeholder while fetching) alongside an encounter / arrival / letter.
+// On fetch failure, renders nothing (the parent's existing button-on-demand
+// path remains available for the player). Mobile callers should not render
+// this component; layouts decide based on viewportMode.
+function InlineIllustration({ prose }) {
+  const storage = (typeof window !== 'undefined') ? window.localStorage : null;
+  const { url, status, hash } = getOrFetchIllustration(storage, prose);
+  const [imgState, setImgState] = useState(status === 'cached' ? 'loaded' : 'loading');
+
+  if (status === 'empty' || !url) return null;
+
+  return (
+    <div style={{
+      width: '100%',
+      maxWidth: '480px',
+      aspectRatio: '3 / 2',
+      background: '#d9c596',
+      border: '1px solid rgba(74,44,20,0.3)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      overflow: 'hidden',
+      position: 'relative',
+    }}>
+      {imgState === 'failed' ? null : (
+        <img
+          src={url}
+          alt="An illustration of the scene"
+          onLoad={() => {
+            setImgState('loaded');
+            if (storage && status === 'fetching') markIllustrationLoaded(storage, hash, url);
+          }}
+          onError={() => setImgState('failed')}
+          style={{
+            width: '100%',
+            height: '100%',
+            objectFit: 'cover',
+            opacity: imgState === 'loaded' ? 1 : 0.5,
+            transition: 'opacity 0.3s ease',
+          }}
+        />
+      )}
+      {imgState === 'loading' && (
+        <div style={{
+          position: 'absolute',
+          fontFamily: '"IM Fell English SC", serif',
+          fontSize: '0.85em',
+          color: '#5c1a08',
+          fontStyle: 'italic',
+        }}>
+          sketching…
+        </div>
+      )}
     </div>
   );
 }

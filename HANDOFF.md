@@ -40,15 +40,15 @@
 
 ### 1. Pool expansion (the new main backlog)
 
-`DESIGN_NOTES.md` has the per-generator audit. Two of the four originally-flagged concerns are already closed (commits `1395a75` and `fbcbb52`, same day as the strip). Remaining priority order:
+`DESIGN_NOTES.md` has the per-generator audit. Four of the original five flagged concerns are already closed in same-day same-PR work. Only `genLetter` remains — it needs Bradley's tonal authoring.
 
-1. ~~**`genOutcome` journal phrase.**~~ **Closed `1395a75`** — replaced single fallback with two 8-entry random pools (encounter / letter-reply).
-2. ~~**`genArrivalVignette` per-port strings.**~~ **Closed `fbcbb52`** — six port-distinctive vignettes, one per port.
-3. **`genLetter` faction × mood pool.** 6 factions × 3 moods = up to 18 templates. Each unlocks a chunk of narrative variety. **Now top priority.** Faction voices are tonally distinct (Brotherhood, Crown, Mission, Dutch, Rajah, Company) — worth Bradley's authoring or close review.
-4. **`genVoyageEncounter` scenario types.** 12–20 distinct snippets covering weather / calm / other-vessels / fog / piracy threat, varied by region.
-5. **`genAwayDigest` event-aware variants.** 3–5 variants keyed on raid presence, goods changes, letter arrivals — or a template approach that echoes the actual event summary.
+1. ~~**`genOutcome` journal phrase.**~~ **Closed `1395a75`** — two 8-entry random pools (encounter / letter-reply) of `{prose, journal}` pairs.
+2. ~~**`genArrivalVignette` per-port strings.**~~ **Closed `fbcbb52`** — six port-distinctive vignettes.
+3. **`genLetter` faction × mood pool.** 6 factions × 3 moods = up to 18 templates. **Open — top priority.** Faction voices (Brotherhood, Crown, Mission, Dutch, Rajah, Company) are tonally distinct enough that Bradley should author or closely review each. Suggested workflow: open the artifact, trigger letters from each faction in different mood states, capture the live-AI outputs from `aiLog`, prune to a small canonical pool per faction, paste into a new `FALLBACK_LETTERS` table keyed by `[from][mood]`, modify `genLetter` to look up + random-pick within the bucket.
+4. ~~**`genVoyageEncounter` scenario types.**~~ **Closed `e74efb7`** — 12-entry random pool covering weather / navigation / other vessels / maintenance / wildlife / atmospheric / crew.
+5. ~~**`genAwayDigest` event-aware variants.**~~ **Closed `4db5b84`** — event-aware branched pools (raid / incident / indiaman / construction / harvest / letter / default), 18 entries across 7 branches via `pickAwayDigestFallback`.
 
-Authoring workflow: run a charter in artifact mode (live-AI generates), capture promising prose into `aiLog`, save the manuscript JSON, paste into Claude Code in this repo to expand the pool literals, commit. Each expansion commit can/should reference the audit entry it clears.
+Authoring workflow for the remaining genLetter work: run a charter in artifact mode (live-AI generates), capture promising prose into `aiLog`, save the manuscript JSON, paste into Claude Code in this repo to expand the pool literals, commit. Each expansion commit can/should reference the audit entry it clears.
 
 ### 2. Polished PWA icons (still pending from previous handoff #3)
 

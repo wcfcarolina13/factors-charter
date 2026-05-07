@@ -4,6 +4,17 @@ The Factor's Charter — a chronological log of what's shipped. Newest first.
 
 ---
 
+## 2026-05-07 — Pool expansions (cont’d): voyage encounters + away digest
+
+Two more concerns from the audit closed:
+
+- **`genVoyageEncounter`** — replaced the single squall-on-horizon fallback with a 12-entry pool covering weather, navigation, other vessels, maintenance, wildlife, and atmospheric scenes. Each has 2-3 sentences of period prose plus three labeled choices with tonal seeds. Random pick on every fallback. Original squall kept as the anchor entry.
+- **`genAwayDigest`** — replaced the single "ledger half-kept" fallback with event-aware branched pools (raid / incident / indiaman / construction / harvest / letter / default), 18 entries total across 7 branches. `pickAwayDigestFallback` inspects `awayEvents` and routes to the most consequential branch — so a raid week gets raid prose, an Indiaman week gets Indiaman prose, etc. Closes the contextual-mismatch concern from the audit.
+
+Four of the original five pool concerns are now addressed in same-day same-PR work. Remaining open: `genLetter` faction × mood templates (top priority — needs Bradley's tonal authoring for the six faction voices).
+
+---
+
 ## 2026-05-07 — First pool expansions (post-strip)
 
 The first two entries from the deterministic pool audit are closed:

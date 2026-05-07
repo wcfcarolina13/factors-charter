@@ -19,13 +19,13 @@ Captured at the moment live-AI was stripped from the PWA player path. Every entr
 
 ### genVoyageEncounter
 
-- **Pool size:** 1
-- **Variety axes:** none (single fixed weather-and-course scene; no port / faction / ship-state variation)
-- **Felt quality:** M — grammatically sound, period-plausible, but the squalls/wind/bosun image is genre-generic; no hooks, no crew names, no cargo reference
-- **Call frequency:** ~25–65 per 3-year charter (60% encounter chance × ~1 voyage per 15 days)
-- **Expansion priority:** H
-- **Target on expansion:** 12–20 — cover weather / calm / other-vessels / fog / piracy threat as distinct scenario types, each varied by region
-- **Release blocker?:** No (object is well-formed; caller at `factors_charter.jsx:5663` spreads it into encounter state without nullguard)
+- **Pool size:** 12 — expanded 2026-05-07 in commit `e74efb7`
+- **Variety axes:** random pick across weather (squall, calm, fog), navigation (reef, shoaling), other vessels (distant sail, junk, pirate sloop), maintenance (pump leak), wildlife (whale), atmospheric (lights ashore, castaway timber), crew (sick boy in dead air). Anonymous crew throughout; no port/faction-keyed variation yet.
+- **Felt quality:** M-H — distinct scenes with concrete sensory detail; original squall kept as the anchor entry. Re-grade after 2-3 charters.
+- **Call frequency:** ~25–65 per 3-year charter
+- **Expansion priority:** L (was H) — addressed in `e74efb7`
+- **Target on next pass:** if still feels repetitive after several charters, key by region (Strait of Malacca / Bay of Bengal / open Indies water) — 12 entries × 3 regions = 36. Or layer faction variations atop existing scenes ("a low sloop" → "a Brotherhood sloop / a VOC patrol / a Crown frigate" depending on rep with each).
+- **Release blocker?:** No
 
 ### genOutcome
 
@@ -79,13 +79,13 @@ Captured at the moment live-AI was stripped from the PWA player path. Every entr
 
 ### genAwayDigest
 
-- **Pool size:** 1
-- **Variety axes:** none — "Returned to find the godown standing and the ledger half-kept. The work of catching up begins tomorrow." fires regardless of what actually happened during the voyage (raid, raid not resolved, goods movements, letter arrivals, etc.)
-- **Felt quality:** L — ignores the actual away-log events entirely; the player just saw a detailed log of what happened, then reads completely generic return prose — the disconnect is noticeable
-- **Call frequency:** ~3–8 per charter (every return from a long voyage with away-events)
-- **Expansion priority:** M (less critical than `genOutcome`/`genLetter` since it fires less often and the event list is still shown on screen)
-- **Target on expansion:** 3–5 variants keyed on raid presence, goods changes, letter arrivals; or a template approach that echoes the event summary
-- **Release blocker?:** No — `AwayDigestScreen` at `factors_charter.jsx:8619` uses `{digest.prose && (...)}` — if prose is null the block is omitted silently; fallback is non-null so it renders; no crash path
+- **Pool size:** 18 across 7 branches (raid: 3, incident: 3, indiaman: 3, construction: 2, harvest: 2, letter: 2, default: 3) — expanded 2026-05-07 in commit `4db5b84`
+- **Variety axes:** event-aware. `pickAwayDigestFallback` inspects `awayEvents` and routes to the matching pool by priority (raid > incident > indiaman > construction > harvest > letter > default). Within branch, random pick.
+- **Felt quality:** H — the contextual mismatch (generic prose firing after a raid) is closed. Each branch reads as a plausible journal entry for the kind of week the events describe.
+- **Call frequency:** ~3–8 per charter (every return from a long voyage)
+- **Expansion priority:** L (was M) — addressed in `4db5b84`
+- **Target on next pass:** if a charter triggers many returns of the same branch (e.g. multiple raids), the within-branch pool may feel small; double the raid pool to 6 entries if so.
+- **Release blocker?:** No
 
 ### Concerns flagged in this audit
 
@@ -93,8 +93,9 @@ These are cosmetic-thinness items deferred per the spec rule (only functional ga
 
 1. ~~**`genOutcome`** — the journal entry `"A day passed without consequence."` is inserted into the permanent in-game journal on every fallback.~~ **Addressed 2026-05-07 in commit `1395a75`** (8-entry random pools per branch).
 2. ~~**`genArrivalVignette`** — single string for all 6 ports, fires once each.~~ **Addressed 2026-05-07 in commit `fbcbb52`** (per-port distinctive vignettes).
-3. **`genLetter`** — subject + body + response labels identical across all senders and moods. Visible the moment a player gets two fallback letters in a row. **Open — top remaining priority.**
-4. **`genAwayDigest`** — ignores the event log just shown to the player. Contextual mismatch is noticeable, especially after a raid. **Open.**
+3. **`genLetter`** — subject + body + response labels identical across all senders and moods. Visible the moment a player gets two fallback letters in a row. **Open — top remaining priority.** Faction voices (Brotherhood, Crown, Mission, Dutch, Rajah, Company) need Bradley's authoring or close review.
+4. ~~**`genAwayDigest`** — ignores the event log just shown to the player.~~ **Addressed 2026-05-07 in commit `4db5b84`** (event-aware branched pools).
+5. ~~**`genVoyageEncounter`** — single squall scene every voyage.~~ **Addressed 2026-05-07 in commit `e74efb7`** (12-entry random pool).
 
 ---
 

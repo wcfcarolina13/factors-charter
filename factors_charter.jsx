@@ -3979,6 +3979,112 @@ const stateContext = (gs) => {
   return `Day ${gs.day}. Location: ${gs.location}. ${ship}. Crew: ${gs.crew.map(c=>`${c.name} (${c.trait} ${c.role})`).join(', ')}. Reputation: ${reps}. ${reckoning}. ${indiamanLine}. Days remaining on charter: ${gs.daysRemaining}. Recent: ${recentJournal}. Open threads: ${hooks}. Acquaintances: ${acquaintances}. Flags: ${flags}.${loreLine}`;
 };
 
+// Deterministic pool for genVoyageEncounter fallback. Each entry is
+// self-contained — anonymous crew (bosun, lookout, carpenter), concrete
+// sensory detail, three labeled choices with seed phrases. Picked at random
+// on every fallback. Pool covers weather (squalls, calms, fog), navigation
+// (reefs), other vessels (sails, junks, sloops), wildlife (whales),
+// maintenance (pump leak), atmospheric (lights ashore, castaway timber).
+// No home-station NPCs (Hodge, Dass, Vizier, Pyke) — those are Bayan-Kor only.
+const FALLBACK_VOYAGE_ENCOUNTERS = [
+  {
+    prose: 'A line of squalls runs along the horizon. The wind drops, then turns. The bosun looks to you for orders.',
+    choices: [
+      { label: 'Run before the weather, lose a day', seed: 'lose time but no harm' },
+      { label: 'Stand on the course, trust the rigging', seed: 'risk damage for time' },
+      { label: 'Reef and ride it out', seed: 'safe but slow' },
+    ],
+  },
+  {
+    prose: 'The wind has fallen. The sails go slack against the yards; the heat lies on the deck like a cloth. The bosun gauges the sun and waits on yr. word.',
+    choices: [
+      { label: 'Send the boats out to tow', seed: 'slow gain, hard on the crew' },
+      { label: 'Hold and wait the wind', seed: 'lose two days, no harm' },
+      { label: 'Try a sounding for current', seed: 'small risk, possible faster progress' },
+    ],
+  },
+  {
+    prose: 'A grey wall of fog comes off the lee shore at the change of watch. The lookout calls "Cant see the bowsprit," and the bosun asks if we should anchor.',
+    choices: [
+      { label: 'Drop anchor, ride till it lifts', seed: 'safe, lose half a day' },
+      { label: 'Press on with leadsman in the chains', seed: 'risk grounding, no time lost' },
+      { label: 'Stand off, work to windward', seed: 'no harm, but slow' },
+    ],
+  },
+  {
+    prose: 'A sail shows two leagues to leeward, hull-down on the haze. No flag flies, and she keeps her distance. The bosun reaches for the glass.',
+    choices: [
+      { label: 'Crowd on canvas and run', seed: 'save time, no harm if friendly' },
+      { label: 'Stand on under reduced sail', seed: 'neutral' },
+      { label: 'Make the recognition signal and wait', seed: 'chance of help, chance of trouble' },
+    ],
+  },
+  {
+    prose: 'The leadsman calls a sudden shoaling — six fathoms, then four, then less. The chart says deep water; the chart is older than yr. grandfather. The bosun waits.',
+    choices: [
+      { label: 'Heave to and sound carefully', seed: 'lose half a day, safe' },
+      { label: 'Put her on the other tack and stand off', seed: 'no harm' },
+      { label: 'Trust the chart, press on', seed: 'risk grounding' },
+    ],
+  },
+  {
+    prose: 'No air stirs. The sails hang slack; the deck timbers crack in the heat. A boy aft is taken with the gripes, and the bosun calls for the grog.',
+    choices: [
+      { label: 'Issue the grog, see the boy fed', seed: 'no harm' },
+      { label: 'Put the men to scrubbing the deck', seed: 'discipline holds' },
+      { label: 'Wait it out without ceremony', seed: 'a flat day passes' },
+    ],
+  },
+  {
+    prose: 'A high-pooped junk passes close to leeward, her crew dressed in indigo, her bowsprit cocked at an angle. She hails in no language you know but dips her foresail by way of greeting.',
+    choices: [
+      { label: 'Salute in return and stand on', seed: 'neutral' },
+      { label: 'Heave to and trade signs', seed: 'chance of useful word' },
+      { label: 'Keep clear and hold the course', seed: 'neutral' },
+    ],
+  },
+  {
+    prose: 'The carpenter reports the pump on the larboard side is making more water than it shifts. He will have her tight again in half a day if you heave to. Otherwise she will bear up, but the bilges will not be sweet.',
+    choices: [
+      { label: 'Heave to and let him work', seed: 'lose half a day, ship clean' },
+      { label: 'Bear up; repair at the next port', seed: 'minor wear, no time lost' },
+      { label: 'Set the watch to bailing in turn', seed: 'slow but steady, tired crew' },
+    ],
+  },
+  {
+    prose: 'Two lights show on the dark coast as the sun sets, and a third farther out — blinking, deliberate. The bosun thinks it is signalling. You are too far off to make sense of it.',
+    choices: [
+      { label: 'Stand off, keep wide of the shore', seed: 'neutral' },
+      { label: 'Beat in for a closer look', seed: 'risk of trouble, hook plants' },
+      { label: 'Mark the coordinates and stand on', seed: 'hook plants' },
+    ],
+  },
+  {
+    prose: 'A low sloop appears two points off the bow — dark hull, dark sail, no colours flying. She does not approach but does not fall away either. The bosun has the helm and asks the question.',
+    choices: [
+      { label: 'Crowd on canvas and run', seed: 'risk wear if she gives chase' },
+      { label: 'Stand on and trust to luck', seed: 'neutral, hook plants' },
+      { label: 'Beat to leeward to put her in our wake', seed: 'lose time, safe' },
+    ],
+  },
+  {
+    prose: 'A whale comes up not a cable from the larboard quarter and rolls a long flank above the swell, blowing once before going under. The bosun crosses himself; the sailors are silent for a quarter-hour.',
+    choices: [
+      { label: 'Make the customary signs and stand on', seed: 'neutral' },
+      { label: 'Mark the bearing — they say the deeps follow', seed: 'neutral, lore hook' },
+      { label: 'Pay it no mind, drive the work on', seed: 'minor crew morale' },
+    ],
+  },
+  {
+    prose: 'The lookout calls out a piece of broken timber riding the swell, painted white above the line. Likely a fishing-boat that did not come home. There may be a man on it; there may not.',
+    choices: [
+      { label: 'Heave to and search the water', seed: 'lose half a day, possible meeting' },
+      { label: 'Mark the position and report at the next port', seed: 'neutral' },
+      { label: 'Pass it by — we have timber enough', seed: 'minor crew unease' },
+    ],
+  },
+];
+
 async function genVoyageEncounter(gs, fromPort, toPort) {
   const prompt = `Generate a voyage encounter at sea, sailing from ${fromPort} toward ${toPort}.
 ${stateContext(gs)}
@@ -3996,14 +4102,7 @@ Return JSON:
     { "label": "5-9 word verb phrase", "seed": "what tonally happens if chosen" }
   ]
 }`;
-  const fallback = {
-    prose: 'A line of squalls runs along the horizon. The wind drops, then turns. The bosun looks to you for orders.',
-    choices: [
-      { label: 'Run before the weather, lose a day', seed: 'lose time but no harm' },
-      { label: 'Stand on the course, trust the rigging', seed: 'risk damage for time' },
-      { label: 'Reef and ride it out', seed: 'safe but slow' },
-    ],
-  };
+  const fallback = FALLBACK_VOYAGE_ENCOUNTERS[Math.floor(Math.random() * FALLBACK_VOYAGE_ENCOUNTERS.length)];
   const call = await callClaude(prompt);
   const result = call.parsed || fallback;
   const log = {

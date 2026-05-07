@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { detectMode as detectViewportMode, setOverride as setViewportOverride, DESKTOP_QUERY as VIEWPORT_DESKTOP_QUERY } from './src/util/viewport.js';
 import { getOrFetch as getOrFetchIllustration, markLoaded as markIllustrationLoaded } from './src/util/illustration-cache.js';
 import { STYLE_PREFIX } from './src/util/style-prefix.js';
+import { generatePlaythroughId } from './src/util/playthrough-id.js';
 
 // React hook wrapping the viewport detection. Subscribes to media-query
 // changes and to localStorage changes (so toggling the override in one tab
@@ -7072,6 +7073,51 @@ async function robustCopy(text) {
   return false;
 }
 
+// One-time modal shown on the first save of a new charter. Player chooses
+// whether to enable cross-device sync. Choice is sticky for the charter's
+// life — the menu still has a "Sync this charter" entry to enable later if
+// they declined here.
+function FirstLaunchSyncPrompt({ onChoice }) {
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 200,
+      background: 'rgba(20,12,4,0.55)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: '1rem',
+    }}>
+      <div className="parchment" style={{
+        maxWidth: '36rem', width: '100%',
+        padding: '1.5rem 1.7rem',
+        background: '#f0e3c4',
+        boxShadow: '0 4px 16px rgba(20,12,4,0.5)',
+        border: '1px solid rgba(74,44,20,0.4)',
+      }}>
+        <div className="display" style={{ fontSize: '1.1em', color: '#5c1a08', marginBottom: '0.6rem' }}>
+          ⁂ SYNC THIS CHARTER ACROSS DEVICES?
+        </div>
+        <p style={{ fontSize: '0.95em', color: '#2a1a0a', lineHeight: 1.6, marginBottom: '0.5rem' }}>
+          Yr. saves can travel with you between yr. phone and yr. desk. Whichever device
+          you next open the charter on will pick up where the other left off.
+        </p>
+        <p style={{ fontSize: '0.85em', color: '#4a3220', fontStyle: 'italic', marginBottom: '1rem' }}>
+          Saves live on Cloudflare's servers under a charter ID like
+          "pelican-salt-pepper-1923". Anyone with the ID can read or write the save —
+          the ID is the secret. Nothing is encrypted, but the Manuscript JSON export
+          remains the canonical permanent backup either way.
+        </p>
+        <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <button className="ghost-button" onClick={() => onChoice(false)}>
+            No, keep local-only
+          </button>
+          <button className="wax-button" onClick={() => onChoice(true)}>
+            Yes, sync this charter
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function IllustrationModal({ prose, onClose }) {
   const [tryImage, setTryImage] = useState(false);
   const [imgState, setImgState] = useState('idle'); // 'idle' | 'loading' | 'loaded' | 'failed'
@@ -9746,6 +9792,8 @@ export default function FactorsCharter() {
     setPhase('game');
   };
 
+  const showSyncPrompt = !!gs && !gs.syncPromptShown && (gs.day > 0 || gs.seenOpening);
+
   if (phase === 'loading') {
     return <Page><Loading msg="Unrolling the chart" /></Page>;
   }
@@ -9783,6 +9831,18 @@ export default function FactorsCharter() {
   }
 
   return (
-    <GameHub gs={gs} setGs={setGs} lastSavedAt={lastSavedAt} onReturnToTitle={handleReturnToTitle} onSuccession={handleSuccession} onRenewal={handleRenewal} viewportMode={viewportMode} sync={sync} />
+    <>
+      <GameHub gs={gs} setGs={setGs} lastSavedAt={lastSavedAt} onReturnToTitle={handleReturnToTitle} onSuccession={handleSuccession} onRenewal={handleRenewal} viewportMode={viewportMode} sync={sync} />
+      {showSyncPrompt && (
+        <FirstLaunchSyncPrompt onChoice={(syncYes) => {
+          setGs(prev => ({
+            ...prev,
+            syncPromptShown: true,
+            syncEnabled: syncYes,
+            playthroughId: syncYes ? generatePlaythroughId() : null,
+          }));
+        }} />
+      )}
+    </>
   );
 }

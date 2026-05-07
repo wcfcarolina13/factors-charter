@@ -2907,6 +2907,11 @@ Yr. obedt. servants, the Court of Directors, in London, &c.`,
 }
 
 function makeSuccessorState(prev, newName) {
+  // Note on sync fields: syncPromptShown / syncEnabled / playthroughId are
+  // intentionally NOT reset here. The player's sync choice persists across
+  // charter generations — succession is the same player on a new save.
+  // Resetting syncPromptShown would re-fire the modal and orphan the prior
+  // charter's cloud copy under a new ID.
   const moneyKept = Math.round((prev.money || 0) * 0.6);
 
   // Predecessor becomes a permanent acquaintance — a memory the AI sees in
@@ -3023,6 +3028,9 @@ Yr. obedt. servants, the Court of Directors, in London, &c.`,
 
 function makeRenewedState(prev) {
   // Same Factor; per-charter triggers reset; the rest persists.
+  // Sync fields (syncPromptShown / syncEnabled / playthroughId) intentionally
+  // persist — same player, same sync choice. Resetting would orphan the
+  // prior charter's cloud copy and re-fire the prompt unnecessarily.
   const carryFlags = {};
   for (const [k, v] of Object.entries(prev.flags || {})) {
     if (/LetterSent$/.test(k)) continue;
@@ -7548,7 +7556,9 @@ function ExportModal({ title, content, filename, onClose, helperText, wrap }) {
 // Small status indicator next to the menu button. Renders nothing if the
 // charter is not synced. Tooltip on the badge shows the last sync time + ID.
 function SyncBadge({ gs, sync }) {
-  if (!gs?.syncEnabled) return null;
+  // Defensive: also guard on `sync` so a future caller that forgets to pass
+  // it doesn't crash on `sync.status` access.
+  if (!gs?.syncEnabled || !sync) return null;
 
   const label =
     sync.status === 'pushing' ? 'syncing…' :

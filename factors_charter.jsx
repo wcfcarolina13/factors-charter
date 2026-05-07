@@ -7118,6 +7118,86 @@ function FirstLaunchSyncPrompt({ onChoice }) {
   );
 }
 
+// Conflict modal — shown when both this device and the cloud have progressed
+// since the last sync. Player picks a side; the discarded version is
+// auto-downloaded as a Manuscript JSON before the choice commits, so a wrong
+// pick is recoverable via the existing Restore from manuscript flow.
+function ConflictModal({ localGs, remoteRecord, onResolve }) {
+  const remoteGs = remoteRecord?.body || {};
+
+  const stats = (gs, savedAt) => ({
+    day: gs.day || 0,
+    money: gs.money || 0,
+    location: gs.location || '—',
+    latestEntry: (gs.journal && gs.journal.length > 0) ? gs.journal[gs.journal.length - 1].entry : '—',
+    savedAt: savedAt ? new Date(savedAt).toLocaleString() : '—',
+  });
+
+  const localStats = stats(localGs, null);
+  const remoteStats = stats(remoteGs, remoteRecord?.savedAt);
+
+  const renderColumn = (label, s) => (
+    <div className="parchment" style={{
+      padding: '0.9rem 1rem',
+      background: 'rgba(255,253,245,0.5)',
+      border: '1px solid rgba(74,44,20,0.25)',
+      flex: 1,
+      minWidth: '14rem',
+    }}>
+      <div className="display" style={{ fontSize: '0.85em', color: '#5c1a08', marginBottom: '0.4rem' }}>{label}</div>
+      <div style={{ fontSize: '0.85em', lineHeight: 1.7, color: '#2a1a0a' }}>
+        <div>Day: {s.day}</div>
+        <div>Money: £{s.money}</div>
+        <div>Location: {s.location}</div>
+        <div style={{ fontStyle: 'italic', marginTop: '0.3rem', color: '#4a3220' }}>
+          {s.latestEntry}
+        </div>
+        <div style={{ fontSize: '0.78em', color: '#6b4423', marginTop: '0.5rem', fontStyle: 'italic' }}>
+          last saved: {s.savedAt}
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 200,
+      background: 'rgba(20,12,4,0.55)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: '1rem',
+    }}>
+      <div className="parchment" style={{
+        maxWidth: '44rem', width: '100%',
+        padding: '1.5rem 1.7rem',
+        background: '#f0e3c4',
+        boxShadow: '0 4px 16px rgba(20,12,4,0.5)',
+        border: '1px solid rgba(74,44,20,0.4)',
+      }}>
+        <div className="display" style={{ fontSize: '1.1em', color: '#5c1a08', marginBottom: '0.6rem' }}>
+          ⁂ THE CHARTER HAS DIVERGED
+        </div>
+        <p style={{ fontSize: '0.92em', color: '#2a1a0a', lineHeight: 1.6, marginBottom: '0.8rem' }}>
+          Yr. cloud copy and this device have both moved on since the last sync. Pick which to keep.
+          The discarded version will be saved to yr. downloads as a Manuscript so nothing is truly lost —
+          you can restore it later via the Manuscript import.
+        </p>
+        <div style={{ display: 'flex', gap: '0.7rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
+          {renderColumn('THIS DEVICE', localStats)}
+          {renderColumn('CLOUD', remoteStats)}
+        </div>
+        <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <button className="ghost-button" onClick={() => onResolve('local')}>
+            Keep this device's version
+          </button>
+          <button className="wax-button" onClick={() => onResolve('cloud')}>
+            Use cloud's version
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function IllustrationModal({ prose, onClose }) {
   const [tryImage, setTryImage] = useState(false);
   const [imgState, setImgState] = useState('idle'); // 'idle' | 'loading' | 'loaded' | 'failed'

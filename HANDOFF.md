@@ -40,12 +40,13 @@
 
 ### 1. Pool expansion (the new main backlog)
 
-`DESIGN_NOTES.md` has the per-generator audit. The "Concerns flagged" subsection ranks the highest-impact items. Suggested order:
+`DESIGN_NOTES.md` has the per-generator audit. Two of the four originally-flagged concerns are already closed (commits `1395a75` and `fbcbb52`, same day as the strip). Remaining priority order:
 
-1. **`genOutcome` journal phrase.** "A day passed without consequence." goes into the *permanent* in-game journal on every fallback. Highest-frequency generator (~50–130 calls/charter); the most visible repetition. Top priority.
-2. **`genArrivalVignette` per-port strings.** Cheapest single fix — six unique strings, one per port, with port-distinctive sensory details.
-3. **`genLetter` faction × mood pool.** 6 factions × 3 moods = up to 18 templates. Each unlocks a chunk of narrative variety.
+1. ~~**`genOutcome` journal phrase.**~~ **Closed `1395a75`** — replaced single fallback with two 8-entry random pools (encounter / letter-reply).
+2. ~~**`genArrivalVignette` per-port strings.**~~ **Closed `fbcbb52`** — six port-distinctive vignettes, one per port.
+3. **`genLetter` faction × mood pool.** 6 factions × 3 moods = up to 18 templates. Each unlocks a chunk of narrative variety. **Now top priority.** Faction voices are tonally distinct (Brotherhood, Crown, Mission, Dutch, Rajah, Company) — worth Bradley's authoring or close review.
 4. **`genVoyageEncounter` scenario types.** 12–20 distinct snippets covering weather / calm / other-vessels / fog / piracy threat, varied by region.
+5. **`genAwayDigest` event-aware variants.** 3–5 variants keyed on raid presence, goods changes, letter arrivals — or a template approach that echoes the actual event summary.
 
 Authoring workflow: run a charter in artifact mode (live-AI generates), capture promising prose into `aiLog`, save the manuscript JSON, paste into Claude Code in this repo to expand the pool literals, commit. Each expansion commit can/should reference the audit entry it clears.
 

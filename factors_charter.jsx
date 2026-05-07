@@ -8740,7 +8740,11 @@ function OutpostView({ gs, startBuild, expediteBuild, viewportMode }) {
       </p>
 
       <div style={containerStyle}>
-        {/* STANDING STRUCTURES */}
+        {/* STANDING STRUCTURES — always shown on desktop so the grid has three
+            populated cells; on mobile, hidden entirely when empty (preserves
+            the original mobile UX where the section disappears with no built
+            structures). */}
+        {(viewportMode === 'desktop' || built.length > 0) && (
         <div>
           <div className="display" style={{ fontSize: '0.9em', color: '#6b4423', marginBottom: '0.5rem' }}>STANDING STRUCTURES</div>
           {built.length === 0 ? (
@@ -8752,8 +8756,10 @@ function OutpostView({ gs, startBuild, expediteBuild, viewportMode }) {
             </div>
           ))}
         </div>
+        )}
 
-        {/* UNDER CONSTRUCTION */}
+        {/* UNDER CONSTRUCTION — same desktop-vs-mobile pattern as STANDING. */}
+        {(viewportMode === 'desktop' || queue.length > 0) && (
         <div>
           <div className="display" style={{ fontSize: '0.9em', color: '#6b4423', marginBottom: '0.5rem' }}>UNDER CONSTRUCTION</div>
           {queue.length === 0 ? (
@@ -8789,8 +8795,10 @@ function OutpostView({ gs, startBuild, expediteBuild, viewportMode }) {
             );
           })}
         </div>
+        )}
 
-        {/* AVAILABLE FOR CONSTRUCTION */}
+        {/* AVAILABLE FOR CONSTRUCTION — always rendered on every viewport;
+            unchanged from before this PR. */}
         <div>
           <div className="display" style={{ fontSize: '0.9em', color: '#6b4423', marginBottom: '0.5rem' }}>AVAILABLE FOR CONSTRUCTION</div>
           {available.length === 0 ? (

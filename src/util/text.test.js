@@ -8,6 +8,12 @@ describe('stableHash', () => {
   it('returns the same hash for the same input', () => {
     expect(stableHash('a voyage encounter at sea')).toBe(stableHash('a voyage encounter at sea'));
   });
+  it('hash value is pinned for cache key stability across versions', () => {
+    // If this test fails, the hash function changed and ALL existing
+    // illustration-cache entries on every player's device will be orphaned.
+    // Don't update this without also bumping the cache key version.
+    expect(stableHash('a voyage encounter at sea')).toBe('2c7umwf');
+  });
   it('returns different hashes for different inputs', () => {
     expect(stableHash('alpha')).not.toBe(stableHash('beta'));
   });

@@ -22,6 +22,127 @@ function useViewportMode() {
   return mode;
 }
 
+// Per-charter sync state machine. Owns the cloud-side pointer
+// (lastKnownCloudVersion, lastSyncAt) in device-local storage at
+// factor_save_<slot>_sync, and the debounced push-on-save trigger.
+//
+// State:
+//   { status, lastKnownCloudVersion, lastSyncAt, error }
+//   status ∈ 'idle' | 'pushing' | 'pulling' | 'offline' | 'error' | 'conflict'
+//
+// API:
+//   triggerPush(gs)     — schedule a push 5s after the last save (debounced).
+//   pushNow(gs)         — push immediately.
+//   pullNow(playthroughId) → Promise<{ status, remote }>
+//   resolveConflict via setStatus
+//
+// Storage: factor_save_<slot>_sync = { lastKnownCloudVersion, lastSyncAt, lastKnownDay }
+function useSyncState(slot) {
+  const [status, setStatus] = useState('idle');
+  const [error, setError] = useState(null);
+  const debounceTimer = useRef(null);
+  const inFlight = useRef(false);
+
+  const pointerKey = `factor_save_${slot}_sync`;
+
+  const readPointer = () => {
+    if (typeof window === 'undefined') return null;
+    try {
+      const raw = window.localStorage.getItem(pointerKey);
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) { return null; }
+  };
+
+  const writePointer = (p) => {
+    if (typeof window === 'undefined') return;
+    try { window.localStorage.setItem(pointerKey, JSON.stringify(p)); } catch (e) {}
+  };
+
+  const pushNow = async (gs) => {
+    if (!gs?.playthroughId || !gs.syncEnabled) return;
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setStatus('pushing');
+    try {
+      const res = await fetch(`/api/save?id=${encodeURIComponent(gs.playthroughId)}`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(gs),
+      });
+      if (!res.ok) {
+        setStatus(res.status >= 500 || res.status === 429 ? 'offline' : 'error');
+        setError(`PUT ${res.status}`);
+        return;
+      }
+      const data = await res.json();
+      writePointer({ lastKnownCloudVersion: data.version, lastSyncAt: data.savedAt, lastKnownDay: gs.day });
+      setStatus('idle');
+      setError(null);
+    } catch (e) {
+      setStatus('offline');
+      setError(e.message || String(e));
+    } finally {
+      inFlight.current = false;
+    }
+  };
+
+  const triggerPush = (gs) => {
+    if (!gs?.playthroughId || !gs.syncEnabled) return;
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    debounceTimer.current = setTimeout(() => { pushNow(gs); }, 5000);
+  };
+
+  const pullNow = async (playthroughId) => {
+    if (!playthroughId) return { status: 'none' };
+    setStatus('pulling');
+    try {
+      const res = await fetch(`/api/save?id=${encodeURIComponent(playthroughId)}`);
+      if (res.status === 404) {
+        setStatus('idle');
+        return { status: 'push', remote: null };
+      }
+      if (!res.ok) {
+        setStatus('error');
+        setError(`GET ${res.status}`);
+        return { status: 'error' };
+      }
+      const remote = await res.json();
+      setStatus('idle');
+      return { status: 'fetched', remote };
+    } catch (e) {
+      setStatus('offline');
+      setError(e.message || String(e));
+      return { status: 'error' };
+    }
+  };
+
+  // Auto-export a save object as a downloaded Manuscript JSON.
+  const exportManuscript = (gs, label) => {
+    if (typeof window === 'undefined') return;
+    try {
+      const manuscript = { gs, exportedAt: new Date().toISOString(), label };
+      const blob = new Blob([JSON.stringify(manuscript, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      const playerName = gs?.player?.name || 'unnamed';
+      const day = gs?.day || 0;
+      a.download = `factors-charter-${playerName}-day${day}-${label}-${Date.now()}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(a.href);
+    } catch (e) { /* download blocked; player still has the local copy */ }
+  };
+
+  return {
+    status, error,
+    pointer: readPointer,
+    triggerPush, pushNow, pullNow,
+    exportManuscript,
+    setStatus,
+  };
+}
+
 // ═══════════════════════════════════════════════════════════════
 //  THE FACTOR'S CHARTER — playable prototype
 //  A text-based colonial trading game in the spirit of
@@ -9466,6 +9587,7 @@ export default function FactorsCharter() {
   const [activeSaveId, setActiveSaveId] = useState(null);
   const [lastSavedAt, setLastSavedAt] = useState(null);
   const viewportMode = useViewportMode();
+  const sync = useSyncState(activeSaveId);
 
   // Mount: load index, run legacy migration, land on title.
   useEffect(() => {
@@ -9486,6 +9608,7 @@ export default function FactorsCharter() {
       const ok = await safeStorage.set(slotKey(activeSaveId), JSON.stringify({ gs, phase, savedAt }));
       if (!ok || cancelled) return;
       setLastSavedAt(savedAt);
+      sync.triggerPush(gs);
       const entry = summariseSlot(activeSaveId, gs, savedAt);
       setSavesIndex(prev => {
         const filtered = prev.filter(s => s.id !== activeSaveId);

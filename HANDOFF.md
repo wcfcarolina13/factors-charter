@@ -1,158 +1,155 @@
 # HANDOFF — The Factor's Charter
 
-**Date:** 2026-04-28
-**For:** Bradley (or a fresh Claude session) resuming this branch
-**Branch:** `claude/port-storage-defense-JFty8`
-**Status:** Working prototype, late-stage iteration. Many features shipped this branch; playtest still pending.
+**Date:** 2026-05-06
+**For:** Bradley (or a fresh Claude session) resuming this project
+**Branch:** `main`
+**Live build:** https://factors-charter.pages.dev (auto-deploys from `main`)
+**Status:** PWA port shipped. Game playable as installable web app + still runnable as Claude artifact. Deferred polish items below.
+
+> Previous handoff (Session 8, content/world work) archived in `git log` at commit `f6b47b6`. The world-content reference is now in `CLAUDE.md` and `CHANGELOG.md`.
 
 ---
 
-## How to resume
+## What shipped this session
 
-1. Read `CLAUDE.md` (project charter, conventions, pitfalls) and `WORLD_NOTES.md` (lore feedstock — required before any narrative work).
-2. The full source is in `factors_charter.jsx` at the repo root. Run the parser sanity check below before editing.
-3. Check `WORLD_NOTES.md` "INSPIRATIONS PENDING" for anything Bradley has appended that hasn't been folded into code yet — that's the first translation pass.
-4. `CHANGELOG.md` "Session 8" lists everything shipped on this branch in detail.
+**The Factor's Charter now runs as an installable PWA.** Same `factors_charter.jsx` monolith, plus a thin Vite scaffold around it. Inside Claude, it still runs as an artifact unchanged.
 
----
+### New surface area
+- `index.html`, `vite.config.js`, `src/main.jsx` — Vite + PWA scaffold
+- `src/llm/{index,anthropic,ollama}.js` — pluggable LLM provider layer + dispatcher
+- `src/llm/*.test.js` — Vitest, 19 tests covering store + dispatcher + providers
+- `src/settings/{store,SettingsPanel}.{js,jsx}` — config storage + provider config UI
+- `public/{icon-192,icon-512,icon-512-maskable}.png` — PWA icons (placeholder, see deferred)
+- `public/robots.txt`, `meta description` in `index.html` — SEO basics
+- `CLAUDE.md` "Runtime targets" + "Development & deploy" sections
+- `README.md` rewritten for play / develop / architecture quick-ref
 
-## What's in the world right now
+### One-line edit to the JSX
+- `callClaude` now gates on `window.storage` to detect Claude-artifact mode. In artifact mode → `legacyAnthropicCall` (byte-identical to original). In PWA mode → dynamic import of `src/llm/index.js` → configured provider.
+- Settings overlay surfaced from title-screen footer + in-game `☰ Menu`. First-launch banner ("Set up an AI provider to begin") shows only when no provider configured.
 
-### Geography (5 ports)
-- **Bayan-Kor** (home, Rajah ground): trading + outpost + slipway
-- **Kota Pinang** (Sultanate, 3 days): pepper / cinnamon source
-- **Port St. Eustace** (Dutch, 5 days): buys pepper/cinnamon at premium, levies duty
-- **The Pelican's Nest** (pirates, 7 days): silver/opium/saltpetre, gated on pirates ≥ +10
-- **Tanjung Cermin** (pirates, 14 days): deep haven, gated on pirates ≥ +25 AND visited Pelican's Nest. Off the chart until then.
+### Reference docs
+- Spec: `docs/superpowers/specs/2026-05-05-pwa-port-design.md`
+- Plan (15 tasks across 7 phases): `docs/superpowers/plans/2026-05-05-pwa-port.md`
+- Lighthouse audit (post-fix): `docs/download.pdf`
 
-### Named NPCs
-**Home-station** (only appear at Bayan-Kor or via correspondence):
-- Mr. Hodge — clerk, drunkard, sobriety/loyalty tracked
-- Sgt. Dass — sepoy, loyalty/morale/health tracked
-- The Rajah's Vizier — friendliness/scheming tracked
-- Reverend Pyke — at the Mission
+### Lighthouse scores after quick-wins commit (`37fbcbc`)
+| Category | Score |
+|---|---|
+| Performance | 68 |
+| Accessibility | **100** |
+| Best Practices | 96 |
+| SEO | **100** |
 
-**External / faction figures** (introduced through one-off scripted letters):
-- Mynheer Hendrik Boom — Junior Dutch Factor at Eustace (trade pass)
-- Capt. Gerrit Maas — Bugis-Dutch Brotherhood captain (compact)
-- Capt. Edward Whitcombe — RN, HMS Adventure (Crown service)
-- Daeng Mamping — Sultan's Bugis harbourmaster at Kota Pinang (LORE only)
-
-### Mechanics shipped this branch
-- **Godown** (port-side storage at home, 120 cwt base, +400 with Great Godown)
-- **Powder Magazine** (caps raid losses)
-- **Indiaman cycle** (every 180 days, 6 visits) with AI-aware Director letters
-- **Quarterly Director nags** between visits
-- **Charter end** at day 0 with three outcome variants
-- **The Brigantine** (180 cwt teak ship, commissioned at Bayan-Kor, £900 / £600 with teak concession)
-- **Five faction one-off letters** (Vizier teak, Boom Dutch pass, Pyke school, Maas compact, Whitcombe Crown)
-- **Brotherhood compact** halves voyage encounter chance
-- **Dutch port duty** with pass-held bypass
-- **Scripted arrival encounters** (first: Dutch packet payoff)
-- **Auto-delivered correspondence** from a gated, weighted sender pool (~one letter per 30–55 days)
-- **LORE registry** + **WORLD_NOTES.md** scaffold for lore-by-trigger
-- **Multi-save slots** with title roster
-- **Header HUD** showing godown capacity and quota progress always
-- **Raid event** + **raid-as-scene** on return home
-- **AI quota awareness** in `stateContext`
+Performance is gated by the 1.27 MB bundle on cold Slow 4G; TBT 0 ms, CLS 0.001, Speed Index 5.0 s. Real-device + warm SW cache is much faster.
 
 ---
 
-## How to add new content
+## Deferred items — pick up here
 
-### A new piece of lore
-1. Add to `WORLD_NOTES.md` "INSPIRATIONS PENDING" first (Bradley's notebook).
-2. Translate to code: a `LORE` entry in `factors_charter.jsx` (text 2–4 short sentences, with a `trigger` matching when it should surface).
-3. If it warrants a port: add to `PORTS`. If a sender: add to `AUTO_SENDERS`. If an event: add a `make…Letter()` helper + a trigger in `tickDays`.
-4. Promote from PENDING to LANDED in `WORLD_NOTES.md` with cross-refs.
+### 1. Bundle splitting (biggest perf win)
+**The 1.27 MB `dist/assets/index-*.js` is the JSX monolith plus React.** Lighthouse: "Reduce unused JavaScript — 445 KiB."
 
-### A new faction one-off (the established pattern)
-Mirror `makeTeakConcessionLetter` / `makeDutchPassLetter` / `makePykeSchoolLetter` / `makeBrotherhoodLetter` / `makeCrownLetter`:
-- A top-level helper that returns a letter object with three response choices, each carrying a `fixedOutcome: { prose, changes }`.
-- A trigger in `tickDays` gated on `!s.charterClosed && !s.flags?.{nameOfLetterSent}` plus the faction's standing/visit conditions.
-- The letter response goes through `handleLetterResponse`, which detects `fixedOutcome` and skips the AI call.
+Constraint: CLAUDE.md says "the file is monolithic by design — easier to ship as a single artifact, easier to keep in one place. Don't fragment it." So we can't split the JSX itself.
 
-### A new scripted arrival encounter
-Add to `SCRIPTED_ARRIVALS` registry. Trigger keys: `flag`, `location`, `locationIn`, `repAtLeast`, `visited`. Each choice has `prose` + `changes` shape. The `ScriptedArrivalScreen` renders automatically.
+What we CAN do without violating that:
+- Lazy-load views that only render mid-game (`MapView`, `OutpostView`, `LedgerView`, `JournalView`, etc.) via `React.lazy()` + `Suspense`. Title screen → first view path stays in the main bundle; everything else becomes a chunk.
+- Lazy-load AI helpers if they're heavy (the system prompt is large but inline so won't move the needle).
+- Vite `manualChunks` config to push React/ReactDOM into a separate vendor chunk for better caching.
 
-### A new ship type
-Add to `SHIP_TYPES` (holdCwt, blurb, wearMin/Max, voyageBonus). The Commission flow currently only supports brigantine; would need extension for a third ship.
+Estimated lift: Performance score from 68 → low/mid 80s. Worth it before any wider distribution.
 
----
+### 2. Source maps in production
+Lighthouse: "Missing source maps for large first-party JavaScript." One Vite config flag in `vite.config.js`:
+```js
+build: { sourcemap: true },
+```
+Trade-off: ~2× build output, exposes the unminified source. For a single-player game with no IP secrets, that's fine. Helps in-browser debugging of any future bug reports.
 
-## Open threads (pending, in WORLD_NOTES.md detail)
+### 3. Polished PWA icons
+Current icons are 192/512/maskable PNGs generated from a pure-Python solid-color circle (no glyph). They're valid but ugly. Options:
+- Hand-design a wax-seal "⁂" or "❦" on parchment cream in Affinity / Figma, export at the three sizes.
+- Or commission via image gen — feed it the palette (`#f0e3c4` parchment, `#5c1a08` sealing-wax red) and the typography brief (1720s logbook).
+- Drop them into `public/icon-{192,512,512-maskable}.png`, push to main, Cloudflare rebuilds. Manifest already references them.
 
-- **The opened-packet ledger** — if the Factor read Boom's seal, a Dutch ledger of English-pirate dealings is in their head. Hook plants but no payoff yet. Could become a Director letter ("we hear you saw something at Eustace").
-- **The jettisoned-packet retaliation** — Boom won't forget. Could become a follow-up Dutch letter, a denied service at Eustace, or a hostile encounter.
-- **Mail-by-port** — currently letters arrive on time-only schedule. Could deliver some letters via specific ports (Faulke at Kota Pinang, etc.) for atmosphere.
-- **Pyke's school children** — the generous subscription plants a hook for one of the children to grow into a recurring household figure.
-- **Bigger ship beyond brigantine** — late-charter ship-rigged trader (~300 cwt). Deferred.
-- **Second commodity quota / Director embargo** — late-game tension when the original quota is met early. Deferred.
+### 4. aria-labels on inner-game inputs
+Title-screen inputs got aria-labels in this session. Lighthouse only audits the home page so it scored 100, but inner views still have unlabeled inputs at:
+- `factors_charter.jsx:6432` — provider config field (already labeled correctly via `<label>` wrap; double-check)
+- `factors_charter.jsx:6626` — number input for goods qty in trade rows
+- `factors_charter.jsx:6804` — Imagine prompt textarea (readonly)
+- `factors_charter.jsx:6965` — Manuscript export textarea (readonly)
+- `factors_charter.jsx:7195` — Successor name input on charter-end screen
+- `factors_charter.jsx:8370` — Ship naming input
+- `factors_charter.jsx:8900` — Import textarea on in-game menu
 
----
+Each needs a one-line `aria-label="..."` addition.
 
-## What was tabled or removed
+### 5. Custom domain (optional)
+`factors-charter.pages.dev` works fine. If you want a custom domain, Cloudflare Pages → factors-charter → Custom domains → Set up a custom domain. CNAME or apex via Cloudflare DNS is one click.
 
-### Disabled but present in code
-- **GitHub backup** (`ENABLE_GITHUB_BACKUP = false`). The Claude artifact iframe's CSP blocks `api.github.com`; every push fails with "Failed to fetch". All code (`GithubBackupModal`, `pushFileToGitHub`, config helpers) left intact for when the game runs outside Claude. Flip the flag to true when that happens.
+### 6. Future LLM providers (the abstraction is ready)
+The dispatcher is set up so adding a provider is just a new file + one registry entry:
+```js
+// src/llm/<name>.js
+export const provider = { id, label, fields, call: async (...) => text };
+// src/llm/index.js
+const PROVIDERS = { anthropic, ollama, <name> };
+```
+Candidates that match Bradley's "cheaper or free" exploration:
+- **OpenRouter** — aggregator with free Llama 3, Mistral 7B, etc. Headers similar to OpenAI.
+- **Groq** — very fast Llama 3, generous free tier. OpenAI-compatible.
+- **Google AI Studio (Gemini Flash)** — free tier. Different request shape.
+- **Together AI** — many free models, OpenAI-compatible.
+None are blocked; each is its own ~30-line file.
 
-### Removed
-- The manual `Await the post` button in the Letters tab.
-- The marginalia `Conjure a letter` button.
-- The in-game `Begin anew` button (replaced by Return to Title → Begin a New Charter on the title screen, which never overwrites).
-
----
-
-## Conventions
-
-### Save shape evolution
-`ensureShape(gs)` is the migration funnel. Add new fields here as `if (!next.X) next.X = default`. Old saves load and gain the new shape transparently. Don't ever rely on a field being present without going through `ensureShape` on load.
-
-### Flags discipline (per the system prompt's PROSE DISCIPLINE block)
-- One flag per fact. No paired keys for the same truth.
-- Only set a flag a later scene could plausibly read.
-- Don't proliferate orphans.
-
-### Hooks discipline
-- Before adding a new hook, look at open threads. Refine an existing thread (leave hook empty) before parallel-tracking.
-
-### Letter ID ranges (to avoid collisions)
-- 1–999: hand-seeded letters
-- 1,000,000+: Indiaman letters
-- 2,000,000+: teak concession
-- 3,000,000+: quarterly nags
-- 4,000,000+: Dutch trade pass
-- 5,000,000+: charter end
-- 6,000,000+: Pyke school
-- 7,000,000+: Brotherhood compact
-- 8,000,000+: Crown service
-- Auto-letter (genLetter) and arbitrary new IDs use seed-based unique values
+### 7. CSP / HSTS / COOP / Trusted Types (Best Practices score)
+Lighthouse flags these for any site without explicit security headers. Cloudflare Pages can serve a `_headers` file in `public/` to set them. For a single-player static game with no auth or third-party iframes, the practical risk is minimal — but a strict CSP would close out the Best Practices category to 100. Not blocking.
 
 ---
 
-## Useful diagnostic commands
+## How to verify the project is healthy on resume
 
 ```bash
-# Sanity check the file parses
-node -e "const p=require('/tmp/node_modules/@babel/parser'); const fs=require('fs'); const c=fs.readFileSync('/home/user/factors-charter/factors_charter.jsx','utf8'); try { p.parse(c,{sourceType:'module',plugins:['jsx']}); console.log('OK',c.split('\n').length,'lines'); } catch(e) { console.log('ERR:',e.message); }"
+cd ~/pontus/factors-charter
+git status                           # should be clean on main
+npm install                          # if node_modules absent
+npm test                             # 19/19 across 4 suites
+npm run build                        # dist/ produced, PWA precache 12 entries
+npx vite preview                     # localhost:4173, click around
+```
 
-# Find all loading messages and verify pickVignette covers them
-grep -nE "setPendingMsg|pendingMsg=" /home/user/factors-charter/factors_charter.jsx
+JSX parser sanity check (run after any edit to `factors_charter.jsx`):
+```bash
+node -e "const p=require('@babel/parser'); const fs=require('fs'); const c=fs.readFileSync('factors_charter.jsx','utf8'); try { p.parse(c,{sourceType:'module',plugins:['jsx']}); console.log('OK',c.split('\n').length,'lines'); } catch(e) { console.log('ERR:',e.message); }"
+```
 
-# Find all top-level state fields (audit ensureShape coverage)
-grep -nE "^  [a-zA-Z]+:" /home/user/factors-charter/factors_charter.jsx | head -30
+Live deploy verification:
+```bash
+curl -s -o /dev/null -w "HTTP %{http_code}\n" https://factors-charter.pages.dev/
+curl -s -o /dev/null -w "HTTP %{http_code}\n" https://factors-charter.pages.dev/manifest.webmanifest
+curl -s -o /dev/null -w "HTTP %{http_code}\n" https://factors-charter.pages.dev/sw.js
 ```
 
 ---
 
-## Bradley's working style
+## Architecture invariants (don't break)
+
+- `factors_charter.jsx` stays at repo root (artifact compatibility).
+- The `src/` tree is PWA-only. Artifact runtime never reaches it (`isPwaMode` + `lazy()` gating).
+- `legacyAnthropicCall` body is byte-identical to the original `callClaude`. Don't drift it.
+- `safeStorage` keys (`factor_save_*`, `factor_saves_index`) and the LLM config key (`factor_charter_llm_config_v1`) must not collide.
+- All existing 7 callsites of `callClaude` use the unchanged `(prompt) => result` signature. Don't change the signature without updating callers.
+
+---
+
+## Bradley's working style (unchanged)
 
 - Mobile, Claude app. Short responses preferred.
-- Will say "do that now", "ship it", "proceed", "keep going" — these mean stop discussing and write code.
-- Will say "this doesn't work" directly. Believe him.
+- "do that now", "ship it", "proceed", "keep going" — stop discussing, write code.
+- "this doesn't work" — believe him; trace the actual error.
 - Values period accuracy and dry tone over feature volume.
-- Has a 140-book reading list, an Obsidian vault, a trading interest. Trips and reading become world-building feedstock — append to `WORLD_NOTES.md`, not chat history.
-- The Drive folder workflow ("Factor's Charter", id `1yqTKacEuy4j3_Ph2QR5CKr1T_xIqpjeU`) is the canonical save backup channel — paste manuscript JSON in chat → Claude saves to Drive with timestamp.
+- Drive folder ("Factor's Charter", id `1yqTKacEuy4j3_Ph2QR5CKr1T_xIqpjeU`) is the canonical save backup channel.
+- Has begun working locally on his Mac (`~/pontus/factors-charter`) in addition to artifact use. The PWA build serves both Mac and mobile from one URL now.
 
 ---
 
@@ -162,4 +159,4 @@ grep -nE "^  [a-zA-Z]+:" /home/user/factors-charter/factors_charter.jsx | head -
 **ID:** `1yqTKacEuy4j3_Ph2QR5CKr1T_xIqpjeU`
 **URL:** https://drive.google.com/drive/folders/1yqTKacEuy4j3_Ph2QR5CKr1T_xIqpjeU
 
-**Should contain:** `CLAUDE.md`, `CHANGELOG.md`, `HANDOFF.md`, `WORLD_NOTES.md`, manuscript and AI-log JSON exports.
+**Should contain:** `CLAUDE.md`, `CHANGELOG.md`, `HANDOFF.md`, `WORLD_NOTES.md`, `DESIGN_NOTES.md`, manuscript and AI-log JSON exports.

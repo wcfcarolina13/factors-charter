@@ -1,4 +1,24 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { detectMode as detectViewportMode, setOverride as setViewportOverride, OVERRIDE_KEY as VIEWPORT_OVERRIDE_KEY, DESKTOP_QUERY as VIEWPORT_DESKTOP_QUERY } from './src/util/viewport.js';
+
+// React hook wrapping the viewport detection. Subscribes to media-query
+// changes and to localStorage changes (so toggling the override in one tab
+// updates other tabs of the same site). Returns 'mobile' | 'desktop'.
+function useViewportMode() {
+  const [mode, setMode] = useState(detectViewportMode);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mq = window.matchMedia(VIEWPORT_DESKTOP_QUERY);
+    const onChange = () => setMode(detectViewportMode());
+    mq.addEventListener('change', onChange);
+    window.addEventListener('storage', onChange);
+    return () => {
+      mq.removeEventListener('change', onChange);
+      window.removeEventListener('storage', onChange);
+    };
+  }, []);
+  return mode;
+}
 
 // ═══════════════════════════════════════════════════════════════
 //  THE FACTOR'S CHARTER — playable prototype

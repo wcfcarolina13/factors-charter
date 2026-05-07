@@ -3645,28 +3645,22 @@ WORLD STATE (you may extend it):
 CONSTRAINTS: Output ONLY valid JSON. No code fences, no preamble, no commentary. Stay within the requested length.`;
 
 // Artifact mode: window.storage exists and the host bridges Anthropic auth/CORS.
-// PWA mode: dynamically import the dispatcher (provider config in localStorage).
+// PWA mode: no live AI; return an empty result so callers fall through to deterministic content.
 // Returns: { parsed, raw, prompt, startedAt, endedAt, error }.
 async function callClaude(prompt) {
   const isArtifactMode = typeof window !== 'undefined' && !!window.storage;
   if (isArtifactMode) {
     return legacyAnthropicCall(prompt);
   }
-  const startedAt = Date.now();
-  try {
-    const mod = await import('./src/llm/index.js');
-    return mod.callLLM({ system: SYSTEM_PROMPT, prompt, maxTokens: 1000 });
-  } catch (e) {
-    console.error('LLM dispatcher error:', e);
-    return {
-      parsed: null,
-      raw: '',
-      prompt,
-      startedAt,
-      endedAt: Date.now(),
-      error: e.message || String(e),
-    };
-  }
+  const now = Date.now();
+  return {
+    parsed: null,
+    raw: '',
+    prompt,
+    startedAt: now,
+    endedAt: now,
+    error: 'PWA deterministic mode — no live AI',
+  };
 }
 
 async function legacyAnthropicCall(prompt) {

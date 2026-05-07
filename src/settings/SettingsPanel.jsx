@@ -60,28 +60,35 @@ export default function SettingsPanel({ onClose }) {
   const providers = useMemo(() => listProviders(), []);
   const stored = readConfig();
   const [providerId, setProviderId] = useState(stored?.providerId || providers[0]?.id || '');
-  const [settings, setSettings] = useState(stored?.settings || {});
+  const [allSettings, setAllSettings] = useState(() => {
+    const init = {};
+    if (stored?.providerId) init[stored.providerId] = { ...(stored.settings || {}) };
+    return init;
+  });
   const [showSecrets, setShowSecrets] = useState(false);
   const [testState, setTestState] = useState({ status: 'idle', msg: '' });
 
   const provider = providers.find(p => p.id === providerId);
+  const settings = allSettings[providerId] || {};
 
   useEffect(() => {
     if (!provider) return;
-    const next = { ...settings };
-    let changed = false;
-    for (const f of provider.fields) {
-      if (next[f.key] === undefined) {
-        if (f.default !== undefined) {
+    setAllSettings(s => {
+      const cur = s[providerId] || {};
+      const next = { ...cur };
+      let changed = !s[providerId];
+      for (const f of provider.fields) {
+        if (next[f.key] === undefined && f.default !== undefined) {
           next[f.key] = f.default;
           changed = true;
         }
       }
-    }
-    if (changed) setSettings(next);
+      return changed ? { ...s, [providerId]: next } : s;
+    });
   }, [providerId]);
 
-  const updateField = (key, value) => setSettings(s => ({ ...s, [key]: value }));
+  const updateField = (key, value) =>
+    setAllSettings(s => ({ ...s, [providerId]: { ...(s[providerId] || {}), [key]: value } }));
 
   const onSave = () => {
     writeConfig({ providerId, settings });

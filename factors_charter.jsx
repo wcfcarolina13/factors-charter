@@ -6444,8 +6444,16 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
         <div className="parchment" style={{ padding: '1.25rem', minHeight: '24rem', background: 'rgba(255,253,245,0.4)' }}>
           {(() => {
             // On desktop, 'map' and 'ledger' are merged into 'overview'.
-            // effectiveTab normalises old tab state if a player resizes mid-session.
-            const effectiveTab = (viewportMode === 'desktop' && (tab === 'map' || tab === 'ledger')) ? 'overview' : tab;
+            // effectiveTab normalises stale tab state across viewport changes
+            // without persisting it. desktop ↔ mobile is symmetric:
+            //   desktop sees old 'map'/'ledger' as 'overview'
+            //   mobile sees old 'overview' as 'map' (closest equivalent)
+            // The persistent tab value (`tab`) is whatever the player last clicked;
+            // effectiveTab is the renderable normalisation of that for the current mode.
+            const effectiveTab =
+              (viewportMode === 'desktop' && (tab === 'map' || tab === 'ledger')) ? 'overview' :
+              (viewportMode !== 'desktop' && tab === 'overview') ? 'map' :
+              tab;
             return (
               <>
                 {effectiveTab === 'journal' && <JournalView gs={gs} arrivalProse={arrivalProse} setTab={setTab} openLetterById={openLetterById} pursueThread={handlePursueThread} viewportMode={viewportMode} />}
@@ -8730,7 +8738,9 @@ function OutpostView({ gs, startBuild, expediteBuild, viewportMode }) {
 
   const containerStyle = viewportMode === 'desktop'
     ? { display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '1rem', alignItems: 'start' }
-    : { display: 'flex', flexDirection: 'column', gap: '1rem' };
+    // Mobile: gap 1.5rem matches the per-section marginBottom of the original
+    // pre-Phase-4 layout. Keeps mobile spacing byte-equivalent.
+    : { display: 'flex', flexDirection: 'column', gap: '1.5rem' };
 
   return (
     <div>

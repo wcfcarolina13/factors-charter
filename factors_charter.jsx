@@ -4260,6 +4260,20 @@ Return JSON:
   return { result, log };
 }
 
+// Per-port arrival fallback. Each entry is sensory and port-distinctive
+// (faction, lore, characteristic detail). genArrivalVignette is a once-per-port
+// moment — only fires on first visit — so a single generic line was the
+// least defensible part of the deterministic pool. Lookup falls back to the
+// generic line for any port not in the table (defensive, shouldn't happen).
+const ARRIVAL_VIGNETTE_FALLBACKS = {
+  'Bayan-Kor': 'The Factor’s flag goes up the pole at first light. The Rajah’s drum sounds three short, one long — the welcome for a returning trader. The godown smells of palm oil and damp matting; Hodge waits at the door with the keys.',
+  'Kota Pinang': 'The pilot brings her up through the morning haze. Ox-carts move pepper down the shore road; the dust hangs in still air. The Sultan’s harbormaster waits at the steps with a tally book and his own price.',
+  'Port St. Eustace': 'A Dutch corporal hails from the bastion. The harbor is whitewashed to severity, the carts running to a schedule that brooks no slackening. Their factor watches from his window above the gate.',
+  'The Pelican’s Nest': 'No flag, no bell, no harbormaster. A red lantern burns on the headland through the morning. A longboat puts out from the cove without challenge; the air carries woodsmoke and salt-pork.',
+  'Tanjung Cermin': 'The lagoon opens in seven shades of blue. The old Portuguese fort stands above the palms, its walls gone soft under fig roots. Nothing on the shore answers to a flag.',
+  'Fort Marlborough': 'The Union flag stands above the bastion. A boatswain’s whistle from the wharf, the Crown pilot cleaner-shaven than the Brotherhood’s. Pepper sacks are stacked in the King’s warehouse, their rope-marks black with damp.',
+};
+
 async function genArrivalVignette(gs, port) {
   const prompt = `The Factor arrives at ${port}. ${PORTS[port].blurb}
 ${stateContext(gs)}
@@ -4267,7 +4281,8 @@ Return JSON:
 {
   "prose": "2-3 sentences of arrival prose. Sensory, specific to this port. Period."
 }`;
-  const fallbackProse = `The ${port} pilot comes aboard at first light. The harbor smells of fish and woodsmoke.`;
+  const fallbackProse = ARRIVAL_VIGNETTE_FALLBACKS[port]
+    || `The ${port} pilot comes aboard at first light. The harbor smells of fish and woodsmoke.`;
   const call = await callClaude(prompt);
   const result = call.parsed?.prose || fallbackProse;
   const log = {

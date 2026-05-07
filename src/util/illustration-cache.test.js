@@ -44,6 +44,23 @@ describe('getOrFetch', () => {
     const b = getOrFetch(makeStorage(), 'the same scene');
     expect(a.url).toBe(b.url);
   });
+
+  it('handles null storage gracefully', () => {
+    const result = getOrFetch(null, 'a junk passes close');
+    expect(result.status).toBe('fetching');
+    expect(result.url).toMatch(/^https:\/\//);
+  });
+});
+
+describe('markLoaded', () => {
+  it('is idempotent — second call does not overwrite the first', () => {
+    const storage = makeStorage();
+    const { hash, url } = getOrFetch(storage, 'a sail to leeward');
+    markLoaded(storage, hash, url);
+    markLoaded(storage, hash, 'https://different-url.com/image.jpg');
+    const reread = getOrFetch(storage, 'a sail to leeward');
+    expect(reread.url).toBe(url);
+  });
 });
 
 describe('LRU eviction', () => {

@@ -1,11 +1,9 @@
 import { stableHash, cleanProse } from './text.js';
+import { STYLE_PREFIX } from './style-prefix.js';
 
 const CACHE_KEY = 'factor_illustration_cache_v1';
 const MAX_ENTRIES = 50;
 const POLLINATIONS_PREFIX = 'https://image.pollinations.ai/prompt/';
-// Must match the existing IMAGINE_STYLE_PREFIX in factors_charter.jsx.
-// Kept duplicated here so the cache module is self-contained for tests.
-const STYLE_PREFIX = '1720s logbook engraving, period woodcut style, sepia line illustration, single-color brown ink on cream parchment, period 18th century book illustration. ';
 
 // Read the cache from localStorage. Returns {} on parse failure or absence.
 function readCache(storage) {
@@ -56,6 +54,10 @@ export function getOrFetch(storage, prose) {
   const hash = stableHash(clean);
   const cache = readCache(storage);
   if (cache[hash]) {
+    // Bump viewedAt on every cache hit so LRU evicts least-recently-queried
+    // entries first. "Viewed" here means "the cache was queried" rather than
+    // "the player saw the image render"; in practice these are close enough
+    // since the component queries on mount and immediately renders the <img>.
     cache[hash].viewedAt = Date.now();
     writeCache(storage, cache);
     return { url: cache[hash].url, status: 'cached', hash };
@@ -64,7 +66,10 @@ export function getOrFetch(storage, prose) {
 }
 
 // Called by the consumer after an <img> successfully loads. Commits the
-// URL into the cache; safe to call repeatedly.
+// URL into the cache; safe to call repeatedly. First-writer-wins:
+// concurrent <InlineIllustration> mounts for the same prose will both call
+// markLoaded, but the second is a no-op. This avoids overwrite races and
+// keeps cache writes idempotent.
 export function markLoaded(storage, hash, url) {
   if (!hash || !url) return;
   const cache = readCache(storage);

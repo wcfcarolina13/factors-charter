@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { detectMode as detectViewportMode, setOverride as setViewportOverride, DESKTOP_QUERY as VIEWPORT_DESKTOP_QUERY } from './src/util/viewport.js';
 import { getOrFetch as getOrFetchIllustration, markLoaded as markIllustrationLoaded } from './src/util/illustration-cache.js';
+import { STYLE_PREFIX } from './src/util/style-prefix.js';
 
 // React hook wrapping the viewport detection. Subscribes to media-query
 // changes and to localStorage changes (so toggling the override in one tab
@@ -6836,11 +6837,9 @@ function ConsignmentModal({ gs, onConfirm, onDecline }) {
 //   - Has multiple exit paths: ✕ icon top right, Close button, click
 //     outside the modal.
 //
-// The IMAGINE_STYLE_PREFIX keeps illustrations consistent across the
-// charter — the same hand made them all.
-
-const IMAGINE_STYLE_PREFIX =
-  '1720s logbook engraving, period woodcut style, sepia line illustration, single-color brown ink on cream parchment, period 18th century book illustration. ';
+// STYLE_PREFIX (shared with the illustration cache via src/util/style-prefix.js)
+// keeps illustrations consistent across the charter — the same hand made them
+// all. Modal + cache import the same constant so they cannot drift.
 
 // Robust copy: try modern clipboard API first; if it throws or is missing,
 // inject a hidden textarea and execCommand('copy'), which is permitted in
@@ -6881,7 +6880,7 @@ function IllustrationModal({ prose, onClose }) {
   const taRef = useRef(null);
 
   const cleanProse = (prose || '').replace(/\s+/g, ' ').trim().slice(0, 320);
-  const fullPrompt = IMAGINE_STYLE_PREFIX + cleanProse;
+  const fullPrompt = STYLE_PREFIX + cleanProse;
   const seed = Math.abs(
     cleanProse.split('').reduce((h, c) => ((h << 5) - h) + c.charCodeAt(0), 0) || 1
   );

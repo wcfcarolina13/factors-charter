@@ -6442,10 +6442,10 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
         <Header gs={gs} onReturnToTitle={onReturnToTitle} onSuccession={onSuccession} onRenewal={onRenewal} viewportMode={viewportMode} />
         <Tabs tab={tab} setTab={setTab} unread={gs.letters.filter(l => !l.read).length} atHome={atHome} />
         <div className="parchment" style={{ padding: '1.25rem', minHeight: '24rem', background: 'rgba(255,253,245,0.4)' }}>
-          {tab === 'journal' && <JournalView gs={gs} arrivalProse={arrivalProse} setTab={setTab} openLetterById={openLetterById} pursueThread={handlePursueThread} />}
+          {tab === 'journal' && <JournalView gs={gs} arrivalProse={arrivalProse} setTab={setTab} openLetterById={openLetterById} pursueThread={handlePursueThread} viewportMode={viewportMode} />}
           {tab === 'ledger' && <LedgerView gs={gs} />}
           {tab === 'map' && <MapView gs={gs} sailTo={sailTo} />}
-          {tab === 'port' && <PortView gs={gs} buyGood={buyGood} sellGood={sellGood} refitShip={refitShip} arrivalProse={arrivalProse} setTab={setTab} lodgeGoods={lodgeGoods} withdrawGoods={withdrawGoods} commissionBrigantine={commissionBrigantine} takeBottomry={takeBottomry} liftContractOpium={liftContractOpium} runDutchCustoms={runDutchCustoms} />}
+          {tab === 'port' && <PortView gs={gs} buyGood={buyGood} sellGood={sellGood} refitShip={refitShip} arrivalProse={arrivalProse} setTab={setTab} lodgeGoods={lodgeGoods} withdrawGoods={withdrawGoods} commissionBrigantine={commissionBrigantine} takeBottomry={takeBottomry} liftContractOpium={liftContractOpium} runDutchCustoms={runDutchCustoms} viewportMode={viewportMode} />}
           {tab === 'outpost' && atHome && <OutpostView gs={gs} startBuild={startBuild} expediteBuild={expediteBuild} />}
           {tab === 'letters' && <LettersView gs={gs} setGs={setGs} onRespond={handleLetterResponse} openLetterId={openLetterId} setOpenLetterId={setOpenLetterId} />}
         </div>
@@ -7556,7 +7556,7 @@ function Tabs({ tab, setTab, unread, atHome }) {
 
 // ─────────── JOURNAL VIEW ───────────
 
-function JournalView({ gs, arrivalProse, setTab, openLetterById, pursueThread }) {
+function JournalView({ gs, arrivalProse, setTab, openLetterById, pursueThread, viewportMode }) {
   const entries = [...gs.journal].reverse().slice(0, 20);
   const unread = gs.letters.filter(l => !l.read);
   const latestLetter = gs.letters.length > 0 ? gs.letters[gs.letters.length - 1] : null;
@@ -7608,12 +7608,26 @@ function JournalView({ gs, arrivalProse, setTab, openLetterById, pursueThread })
       )}
 
       {arrivalProse && arrivalProse.port === gs.location && (
-        <div style={{ marginBottom: '1.5rem', padding: '1rem', borderLeft: '3px solid #5c1a08', background: 'rgba(255,255,255,0.3)' }}>
-          <div className="display" style={{ fontSize: '0.8em', color: '#6b4423' }}>UPON ARRIVAL AT {gs.location.toUpperCase()}</div>
-          <p className="italic" style={{ marginTop: '0.5rem', marginBottom: 0 }}>{arrivalProse.prose}</p>
-          <ImagePlate plate={pickPlate(arrivalProse.prose)} />
-          <ImaginePanel prose={arrivalProse.prose} label="Imagine the harbour" />
-        </div>
+        viewportMode === 'desktop' ? (
+          <div style={{ marginBottom: '1.5rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 480px', gap: '1rem', alignItems: 'start' }}>
+              <div style={{ padding: '1rem', borderLeft: '3px solid #5c1a08', background: 'rgba(255,255,255,0.3)' }}>
+                <div className="display" style={{ fontSize: '0.8em', color: '#6b4423' }}>UPON ARRIVAL AT {gs.location.toUpperCase()}</div>
+                <p className="italic" style={{ marginTop: '0.5rem', marginBottom: 0 }}>{arrivalProse.prose}</p>
+                <ImagePlate plate={pickPlate(arrivalProse.prose)} />
+                <ImaginePanel prose={arrivalProse.prose} label="Imagine the harbour" />
+              </div>
+              <InlineIllustration prose={arrivalProse.prose} />
+            </div>
+          </div>
+        ) : (
+          <div style={{ marginBottom: '1.5rem', padding: '1rem', borderLeft: '3px solid #5c1a08', background: 'rgba(255,255,255,0.3)' }}>
+            <div className="display" style={{ fontSize: '0.8em', color: '#6b4423' }}>UPON ARRIVAL AT {gs.location.toUpperCase()}</div>
+            <p className="italic" style={{ marginTop: '0.5rem', marginBottom: 0 }}>{arrivalProse.prose}</p>
+            <ImagePlate plate={pickPlate(arrivalProse.prose)} />
+            <ImaginePanel prose={arrivalProse.prose} label="Imagine the harbour" />
+          </div>
+        )
       )}
 
       {entries.length === 0 ? (
@@ -8114,7 +8128,7 @@ function MapView({ gs, sailTo }) {
 
 // ─────────── PORT VIEW ───────────
 
-function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab, lodgeGoods, withdrawGoods, commissionBrigantine, takeBottomry, liftContractOpium, runDutchCustoms }) {
+function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab, lodgeGoods, withdrawGoods, commissionBrigantine, takeBottomry, liftContractOpium, runDutchCustoms, viewportMode }) {
   const port = PORTS[gs.location];
   const sells = Object.keys(port.sells || {});
   const buys = Object.keys(port.buys || {});
@@ -8154,11 +8168,24 @@ function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab, lodg
       <h2 className="display" style={{ fontSize: '1.4em', color: '#5c1a08', marginTop: 0 }}>{port.name} &mdash; The Wharf</h2>
       <p className="italic" style={{ color: '#4a3220', marginBottom: '1rem' }}>{port.blurb}</p>
       {arrivalProse?.port === gs.location && (
-        <div style={{ padding: '0.8rem', borderLeft: '3px solid #5c1a08', background: 'rgba(255,255,255,0.3)', marginBottom: '1.5rem' }}>
-          <p className="italic" style={{ margin: 0 }}>{arrivalProse.prose}</p>
-          <ImagePlate plate={pickPlate(arrivalProse.prose)} />
-          <ImaginePanel prose={arrivalProse.prose} label="Imagine the harbour" />
-        </div>
+        viewportMode === 'desktop' ? (
+          <div style={{ marginBottom: '1.5rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 480px', gap: '1rem', alignItems: 'start' }}>
+              <div style={{ padding: '0.8rem', borderLeft: '3px solid #5c1a08', background: 'rgba(255,255,255,0.3)' }}>
+                <p className="italic" style={{ margin: 0 }}>{arrivalProse.prose}</p>
+                <ImagePlate plate={pickPlate(arrivalProse.prose)} />
+                <ImaginePanel prose={arrivalProse.prose} label="Imagine the harbour" />
+              </div>
+              <InlineIllustration prose={arrivalProse.prose} />
+            </div>
+          </div>
+        ) : (
+          <div style={{ padding: '0.8rem', borderLeft: '3px solid #5c1a08', background: 'rgba(255,255,255,0.3)', marginBottom: '1.5rem' }}>
+            <p className="italic" style={{ margin: 0 }}>{arrivalProse.prose}</p>
+            <ImagePlate plate={pickPlate(arrivalProse.prose)} />
+            <ImaginePanel prose={arrivalProse.prose} label="Imagine the harbour" />
+          </div>
+        )
       )}
 
       {/* Cargo gauge — always visible at any port. */}

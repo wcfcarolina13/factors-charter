@@ -105,6 +105,16 @@ function useSyncState(slot) {
     debounceTimer.current = setTimeout(() => { pushNow(gs); }, 5000);
   };
 
+  // Cancel any pending debounced push without firing it. Used by the conflict
+  // detection path so a 5-second debounced push doesn't race with the player's
+  // resolution choice and silently overwrite the cloud version they're picking.
+  const cancelPendingPush = () => {
+    if (debounceTimer.current) {
+      clearTimeout(debounceTimer.current);
+      debounceTimer.current = null;
+    }
+  };
+
   // Cleanup: clear any pending debounce on unmount so a stale timer doesn't
   // fire into a torn-down component instance.
   useEffect(() => {
@@ -166,7 +176,8 @@ function useSyncState(slot) {
   return {
     status, error,
     pointer: readPointer,
-    triggerPush, pushNow, pullNow,
+    writePointer,
+    triggerPush, pushNow, pullNow, cancelPendingPush,
     exportManuscript,
     applyPull,
     setStatus,
@@ -9809,6 +9820,12 @@ export default function FactorsCharter() {
   const sync = useSyncState(activeSaveId);
   const [pendingConflict, setPendingConflict] = useState(null);  // { localGs, remoteRecord }
 
+  // Live-gs ref so async callbacks (notably pull-on-launch) don't operate
+  // against a stale closure if the player advanced the day before the
+  // network request returned.
+  const gsRef = useRef(gs);
+  useEffect(() => { gsRef.current = gs; });
+
   // Mount: load index, run legacy migration, land on title.
   useEffect(() => {
     (async () => {
@@ -9851,32 +9868,38 @@ export default function FactorsCharter() {
     (async () => {
       const result = await sync.pullNow(gs.playthroughId);
       if (cancelled) return;
+      // Re-read live gs after the network round-trip — the player may have
+      // advanced day(s) while the request was in flight. Decisions and writes
+      // must use this snapshot, not the closed-over `gs` from effect-run time.
+      const liveGs = gsRef.current;
       if (result.status === 'fetched') {
         const pointer = sync.pointer();
         const decision = detectConflict({
-          local: { day: gs.day },
+          local: { day: liveGs?.day || 0 },
           remote: { version: result.remote.version, day: result.remote.body?.day || 0 },
           lastKnown: pointer ? { version: pointer.lastKnownCloudVersion, day: pointer.lastKnownDay || 0 } : null,
         });
         if (decision === 'pull') {
           // Silent pull: cloud body becomes local state, preserving aiLog.
-          setGs(sync.applyPull(gs, result.remote.body));
-          try {
-            window.localStorage.setItem(`factor_save_${activeSaveId}_sync`, JSON.stringify({
-              lastKnownCloudVersion: result.remote.version,
-              lastSyncAt: result.remote.savedAt,
-              lastKnownDay: result.remote.body?.day || 0,
-            }));
-          } catch (e) { /* localStorage may fail; conflict detection will recover next launch */ }
+          setGs(sync.applyPull(liveGs, result.remote.body));
+          sync.writePointer({
+            lastKnownCloudVersion: result.remote.version,
+            lastSyncAt: result.remote.savedAt,
+            lastKnownDay: result.remote.body?.day || 0,
+          });
         } else if (decision === 'conflict') {
-          setPendingConflict({ localGs: gs, remoteRecord: result.remote });
+          // Cancel any pending debounced push so it doesn't fire while the
+          // player is choosing — would race with the resolution and
+          // overwrite the cloud version they're picking between.
+          sync.cancelPendingPush();
+          setPendingConflict({ localGs: liveGs, remoteRecord: result.remote });
         } else if (decision === 'push') {
-          sync.pushNow(gs);
+          sync.pushNow(liveGs);
         }
         // 'none' → no-op
       } else if (result.status === 'push') {
         // 404 from server — local has data the cloud never saw, seed it.
-        sync.pushNow(gs);
+        sync.pushNow(liveGs);
       }
     })();
     return () => { cancelled = true; };
@@ -10008,13 +10031,11 @@ export default function FactorsCharter() {
               // (preserving local aiLog).
               sync.exportManuscript(pendingConflict.localGs, 'local-discarded');
               setGs(sync.applyPull(pendingConflict.localGs, pendingConflict.remoteRecord.body));
-              try {
-                window.localStorage.setItem(`factor_save_${activeSaveId}_sync`, JSON.stringify({
-                  lastKnownCloudVersion: pendingConflict.remoteRecord.version,
-                  lastSyncAt: pendingConflict.remoteRecord.savedAt,
-                  lastKnownDay: pendingConflict.remoteRecord.body?.day || 0,
-                }));
-              } catch (e) { /* localStorage may fail; ok */ }
+              sync.writePointer({
+                lastKnownCloudVersion: pendingConflict.remoteRecord.version,
+                lastSyncAt: pendingConflict.remoteRecord.savedAt,
+                lastKnownDay: pendingConflict.remoteRecord.body?.day || 0,
+              });
             }
             setPendingConflict(null);
           }}

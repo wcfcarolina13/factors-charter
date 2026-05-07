@@ -5665,7 +5665,7 @@ function OpeningSequence({ name, onComplete }) {
 
 // ─────────── GAME HUB ───────────
 
-function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRenewal, viewportMode }) {
+function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRenewal, viewportMode, sync }) {
   const [tab, setTab] = useState('journal');
   const [encounter, setEncounter] = useState(null);
   const [pending, _setPending] = useState(false);
@@ -6591,7 +6591,7 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
   return (
     <Page>
       <div style={{ maxWidth: '64rem', margin: '0 auto', padding: '1.25rem 1.0rem', width: '100%' }}>
-        <Header gs={gs} onReturnToTitle={onReturnToTitle} onSuccession={onSuccession} onRenewal={onRenewal} viewportMode={viewportMode} />
+        <Header gs={gs} onReturnToTitle={onReturnToTitle} onSuccession={onSuccession} onRenewal={onRenewal} viewportMode={viewportMode} sync={sync} />
         <Tabs tab={tab} setTab={setTab} unread={gs.letters.filter(l => !l.read).length} atHome={atHome} viewportMode={viewportMode} />
         <div className="parchment" style={{ padding: '1.25rem', minHeight: '24rem', background: 'rgba(255,253,245,0.4)' }}>
           {(() => {
@@ -7419,7 +7419,43 @@ function ExportModal({ title, content, filename, onClose, helperText, wrap }) {
 
 // ─────────── HEADER ───────────
 
-function Header({ gs, onReturnToTitle, onSuccession, onRenewal, viewportMode }) {
+// Small status indicator next to the menu button. Renders nothing if the
+// charter is not synced. Tooltip on the badge shows the last sync time + ID.
+function SyncBadge({ gs, sync }) {
+  if (!gs?.syncEnabled) return null;
+
+  const label =
+    sync.status === 'pushing' ? 'syncing…' :
+    sync.status === 'pulling' ? 'pulling…' :
+    sync.status === 'offline' ? 'offline' :
+    sync.status === 'error' ? 'sync error' :
+    sync.status === 'conflict' ? 'conflict' :
+    'synced';
+
+  const color =
+    sync.status === 'offline' || sync.status === 'error' ? '#8b1a1a' :
+    sync.status === 'conflict' ? '#5c1a08' :
+    '#6b4423';
+
+  const pointer = sync.pointer();
+  const tooltip = pointer?.lastSyncAt
+    ? `last sync: ${new Date(pointer.lastSyncAt).toLocaleString()}\nID: ${gs.playthroughId}`
+    : `ID: ${gs.playthroughId || '—'}`;
+
+  return (
+    <span title={tooltip} style={{
+      fontFamily: 'EB Garamond, serif',
+      fontStyle: 'italic',
+      fontSize: '0.78em',
+      color,
+      marginRight: '0.5rem',
+    }}>
+      {label}
+    </span>
+  );
+}
+
+function Header({ gs, onReturnToTitle, onSuccession, onRenewal, viewportMode, sync }) {
   const [confirmingSuccession, setConfirmingSuccession] = useState(false);
   const [successorName, setSuccessorName] = useState('');
   const [confirmingRenewal, setConfirmingRenewal] = useState(false);
@@ -7481,6 +7517,7 @@ function Header({ gs, onReturnToTitle, onSuccession, onRenewal, viewportMode }) 
             GODOWN {fmtCwt(warehouseUsed(gs))}/{warehouseCap(gs)} · LONDON: PEPPER {Math.floor(gs.quotas?.pepper?.have || 0)}/{gs.quotas?.pepper?.needed ?? 400} · CINNAMON {Math.floor(gs.quotas?.cinnamon?.have || 0)}/{gs.quotas?.cinnamon?.needed ?? 200}
           </div>
         </div>
+        <SyncBadge gs={gs} sync={sync} />
         <button
           onClick={() => setMenuOpen(!menuOpen)}
           aria-label="Menu"
@@ -9746,6 +9783,6 @@ export default function FactorsCharter() {
   }
 
   return (
-    <GameHub gs={gs} setGs={setGs} lastSavedAt={lastSavedAt} onReturnToTitle={handleReturnToTitle} onSuccession={handleSuccession} onRenewal={handleRenewal} viewportMode={viewportMode} />
+    <GameHub gs={gs} setGs={setGs} lastSavedAt={lastSavedAt} onReturnToTitle={handleReturnToTitle} onSuccession={handleSuccession} onRenewal={handleRenewal} viewportMode={viewportMode} sync={sync} />
   );
 }

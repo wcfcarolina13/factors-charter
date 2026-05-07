@@ -609,6 +609,9 @@ const ensureShape = (gs) => {
   if (!next.player || typeof next.player !== 'object' || !next.player.name) {
     next.player = next.player || { name: 'The Factor', title: 'Factor' };
   }
+  if (next.syncEnabled === undefined) next.syncEnabled = false;
+  if (next.playthroughId === undefined) next.playthroughId = null;
+  if (next.syncPromptShown === undefined) next.syncPromptShown = false;
   return next;
 };
 

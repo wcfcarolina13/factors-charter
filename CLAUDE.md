@@ -38,14 +38,12 @@ Single file: **`factors_charter.jsx`** at the repo root. When working inside the
 
 ### Runtime targets
 
-The same `factors_charter.jsx` runs in two environments:
+The same `factors_charter.jsx` runs in two environments, with diverged AI behavior:
 
-- **Claude artifact** (legacy): host injects Anthropic credentials and bridges CORS. `callClaude` detects this path via `window.storage` and falls through to `legacyAnthropicCall`, which makes an unauthenticated direct fetch — preserving the original behaviour.
-- **PWA build** (Vite + Cloudflare Pages): `callClaude` dynamically imports `src/llm/index.js` and dispatches to a configured provider (Anthropic BYO key, or Ollama on localhost). Provider config lives in `localStorage` under `factor_charter_llm_config_v1`. UI for configuration is `src/settings/SettingsPanel.jsx`, surfaced from the title screen and in-game `☰ Menu`.
+- **PWA build** (Vite + Cloudflare Pages, https://factors-charter.pages.dev): **deterministic only.** No live AI. Every generator (`genVoyageEncounter`, `genOutcome`, etc.) falls through to its inline fallback. No setup, no API keys, no provider configuration. Mobile-first.
+- **Claude artifact** (legacy): host injects Anthropic credentials and bridges CORS. `callClaude` detects this path via `window.storage` and falls through to `legacyAnthropicCall`. Useful as a dev / playtest sandbox; not the player target going forward.
 
-The `src/` tree exists only for the PWA build. The artifact never imports from it — `lazy()` + `isPwaMode` gating ensures the code path is never reached in artifact mode.
-
-**Adding an LLM provider:** create `src/llm/<name>.js` exporting `{ id, label, fields, call }`, and register it in `PROVIDERS` inside `src/llm/index.js`. No JSX changes required.
+Parity between runtimes is opportunistic. Game logic, content tables, and generators all live in the shared `factors_charter.jsx` so both runtimes get them automatically. PWA-only affordances (settings UIs, asset richness, etc.) are fine to add and won't appear in artifact — that's expected.
 
 ---
 
@@ -195,7 +193,7 @@ The runtime `LORE` registry in `factors_charter.jsx` is the bridge: lore entries
 
 - `npm install` — bootstrap dependencies.
 - `npm run dev` — Vite dev server at `http://localhost:5173/`.
-- `npm test` — Vitest suite (provider modules, dispatcher, settings store).
+- `npm test` — Vitest suite (no tests currently; `src/llm/` and `src/settings/` tests removed with those modules).
 - `npm run build` — production bundle into `dist/`.
 - `npx vite preview` — serve the production build locally for testing.
 - Pushes to `main` auto-deploy via Cloudflare Pages → `factors-charter.pages.dev`.

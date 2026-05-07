@@ -4,6 +4,12 @@ The Factor's Charter — a chronological log of what's shipped. Newest first.
 
 ---
 
+## 2026-05-07 — Strip live-AI from PWA
+
+PWA goes deterministic-only. Removed `src/llm/` (Anthropic + Ollama providers, dispatcher, all LLM tests) and `src/settings/` (SettingsPanel + store + tests). `callClaude` now short-circuits in PWA mode so every generator falls through to its inline fallback. Title-screen Settings button, in-game ☰ Menu Settings entry, and "Set up an AI provider to begin" first-launch banner all removed. CSP `connect-src` tightened — dropped `api.anthropic.com`, localhost / 127.0.0.1. Artifact runtime unchanged. Pool audit captured in `DESIGN_NOTES.md` as the post-ship expansion backlog.
+
+---
+
 ## Session 8 — port storage, the Indiaman, faction hooks, the brigantine, world-building scaffold
 
 A long branch (`claude/port-storage-defense-JFty8`) that fixed a structural problem (the quota was unfillable: pinnace held 60 cwt, quota was 600 cwt) and built outward from there.

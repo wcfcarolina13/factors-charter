@@ -4,6 +4,17 @@ The Factor's Charter — a chronological log of what's shipped. Newest first.
 
 ---
 
+## 2026-05-07 — First pool expansions (post-strip)
+
+The first two entries from the deterministic pool audit are closed:
+
+- **`genOutcome`** — replaced the single fixed fallback with two 8-entry pools (encounter / letter-reply) of `{prose, journal}` pairs, picked at random. The "A day passed without consequence." permanent-journal repetition is gone. Highest-frequency generator (~50–130 calls per charter), so this is the most visible win.
+- **`genArrivalVignette`** — replaced the single port-name-interpolated line with one distinctive vignette per port (Bayan-Kor / Kota Pinang / Port St. Eustace / The Pelican's Nest / Tanjung Cermin / Fort Marlborough), each leaning on its faction and lore. Once-per-port salience plus port-distinctive sensory detail.
+
+Tone matches the existing fallback anchor — dry, observational, period. `DESIGN_NOTES.md` audit entries updated to reflect new pool sizes; remaining open items: `genLetter` (faction × mood pool) and `genAwayDigest` (event-log echo).
+
+---
+
 ## 2026-05-07 — Strip live-AI from PWA
 
 PWA goes deterministic-only. Removed `src/llm/` (Anthropic + Ollama providers, dispatcher, all LLM tests) and `src/settings/` (SettingsPanel + store + tests). `callClaude` now short-circuits in PWA mode so every generator falls through to its inline fallback. Title-screen Settings button, in-game ☰ Menu Settings entry, and "Set up an AI provider to begin" first-launch banner all removed. CSP `connect-src` tightened — dropped `api.anthropic.com`, localhost / 127.0.0.1. Artifact runtime unchanged. Pool audit captured in `DESIGN_NOTES.md` as the post-ship expansion backlog.

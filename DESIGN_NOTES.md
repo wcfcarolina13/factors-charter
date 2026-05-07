@@ -29,13 +29,13 @@ Captured at the moment live-AI was stripped from the PWA player path. Every entr
 
 ### genOutcome
 
-- **Pool size:** 1
-- **Variety axes:** `isLetter` flag toggles `days=0` (correctly reflected in fallback) — prose and `changes` are identical regardless of encounter type, location, or choice
-- **Felt quality:** L — "It plays out as you might expect, neither as well nor as ill as feared." is intentionally vague but gives the player zero texture; the journal entry "A day passed without consequence." is the weakest line in any fallback — it renders in the permanent journal and will stand out as placeholder
+- **Pool size:** 16 (8 encounter pairs + 8 letter-reply pairs of `{prose, journal}`) — expanded 2026-05-07
+- **Variety axes:** `isLetter` selects which pool; random pick within the pool. `changes` shape unchanged.
+- **Felt quality:** M — random pick across two branches removes the "same phrase every fallback" tell; tone matches the original anchor line. Cosmetic-thin still vs. live AI, but no longer the visible repetition it was. Re-grade after several charters.
 - **Call frequency:** ~50–130 per charter (every encounter × some letter responses) — highest frequency of all generators
-- **Expansion priority:** H
-- **Target on expansion:** not a pool problem — the fix is to make the single fallback prose less visibly thin, not to expand a pool; the object shape is correct
-- **Release blocker?:** No (all required fields present — `prose`, `changes.money`, `changes.days`, `changes.reputation`, `changes.goods`, `changes.journal`, `changes.hook`)
+- **Expansion priority:** L (was H) — addressed in commit `1395a75`
+- **Target on next pass:** if pools start to feel small under 100+ calls per charter, double each pool to 16 entries. Above that, consider keying by `choice.seed` so different choices yield different prose textures.
+- **Release blocker?:** No
 
 ### genLetter
 
@@ -69,13 +69,13 @@ Captured at the moment live-AI was stripped from the PWA player path. Every entr
 
 ### genArrivalVignette
 
-- **Pool size:** 1
-- **Variety axes:** none — "The [port] pilot comes aboard at first light. The harbor smells of fish and woodsmoke." is identical for all 6 ports (only the port name interpolation varies)
-- **Felt quality:** L — "fish and woodsmoke" is applicable to any harbor in any era; no port differentiation at all
-- **Call frequency:** 6 per charter maximum (one per port, first-visit only) — guaranteed to fire for all 6 ports in a complete playthrough
-- **Expansion priority:** H
-- **Target on expansion:** 1 fallback string per port (6 total) using port-distinctive sensory details; highest-value single fix given that every first-time arrival shows the same line
-- **Release blocker?:** No (caller at `factors_charter.jsx:5612` receives a string directly — `call.parsed?.prose || fallbackProse`; result is set as `arrivalProse.prose`; component renders it as a paragraph)
+- **Pool size:** 6 (one per port, lookup by port name) — expanded 2026-05-07
+- **Variety axes:** keyed by port. Each entry leans on its faction and lore (Rajah's drum at Bayan-Kor, Sultan's harbormaster at Kota Pinang, Dutch corporal at Eustace, no flag at the Pelican's Nest, Portuguese fort at Tanjung Cermin, Union flag at Fort Marlborough). Defensive fallback to the old generic line for any port not in the lookup.
+- **Felt quality:** H — once-per-port salience plus port-distinctive sensory detail. Closes the highest-value single fix.
+- **Call frequency:** 6 per charter maximum (one per port, first-visit only)
+- **Expansion priority:** Done (was H) — addressed in commit `fbcbb52`
+- **Target on next pass:** none. If returning visits get their own (different) vignette in the future, that would be a new generator.
+- **Release blocker?:** No
 
 ### genAwayDigest
 
@@ -91,10 +91,10 @@ Captured at the moment live-AI was stripped from the PWA player path. Every entr
 
 These are cosmetic-thinness items deferred per the spec rule (only functional gaps were release blockers). They guide the post-ship pool-expansion priority order:
 
-1. **`genOutcome`** — the journal entry `"A day passed without consequence."` is inserted into the **permanent** in-game journal on every fallback. Most visible repetition, since `genOutcome` is the highest-frequency generator (~50–130 calls per charter). Top expansion priority for player-perceived quality.
-2. **`genArrivalVignette`** — single string for all 6 ports, fires once each. Six unique strings (one per port, with port-distinctive sensory details) is the cheapest high-value patch.
-3. **`genLetter`** — subject + body + response labels identical across all senders and moods. Visible the moment a player gets two fallback letters in a row.
-4. **`genAwayDigest`** — ignores the event log just shown to the player. Contextual mismatch is noticeable, especially after a raid.
+1. ~~**`genOutcome`** — the journal entry `"A day passed without consequence."` is inserted into the permanent in-game journal on every fallback.~~ **Addressed 2026-05-07 in commit `1395a75`** (8-entry random pools per branch).
+2. ~~**`genArrivalVignette`** — single string for all 6 ports, fires once each.~~ **Addressed 2026-05-07 in commit `fbcbb52`** (per-port distinctive vignettes).
+3. **`genLetter`** — subject + body + response labels identical across all senders and moods. Visible the moment a player gets two fallback letters in a row. **Open — top remaining priority.**
+4. **`genAwayDigest`** — ignores the event log just shown to the player. Contextual mismatch is noticeable, especially after a raid. **Open.**
 
 ---
 

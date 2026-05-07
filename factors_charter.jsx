@@ -6632,6 +6632,7 @@ function ConsignmentModal({ gs, onConfirm, onDecline }) {
                       max={Math.min(inGodown, PRIVATE_TRADE_LIMIT)}
                       value={picked}
                       onChange={(e) => setQty(k, e.target.value)}
+                      aria-label={`Quantity of ${COMMODITIES[k].name} for private trade`}
                       style={{ width: '3.5rem', textAlign: 'center', fontSize: '0.9em' }}
                     />
                     <button className="ghost-button-sm" onClick={() => bump(k, 1)} disabled={inGodown <= picked || totalCwtChosen >= PRIVATE_TRADE_LIMIT}>+</button>
@@ -6808,6 +6809,7 @@ function IllustrationModal({ prose, onClose }) {
           readOnly
           value={fullPrompt}
           onFocus={(e) => e.currentTarget.select()}
+          aria-label="Image generation prompt"
           style={{
             minHeight: '8rem', width: '100%',
             fontFamily: 'monospace', fontSize: '0.82em',
@@ -6969,6 +6971,7 @@ function ExportModal({ title, content, filename, onClose, helperText, wrap }) {
           readOnly
           value={content}
           onFocus={(e) => e.currentTarget.select()}
+          aria-label={title || 'Manuscript export'}
           style={{
             flex: 1, minHeight: '12rem', width: '100%',
             fontFamily: 'monospace', fontSize: '0.72em',
@@ -7199,6 +7202,7 @@ function Header({ gs, onReturnToTitle, onSuccession, onRenewal, onOpenSettings }
                 value={successorName}
                 onChange={(e) => setSuccessorName(e.target.value)}
                 placeholder="Yr. successor's name"
+                aria-label="Successor's name"
                 maxLength={32}
                 style={{ width: '100%', marginBottom: '0.5rem', boxSizing: 'border-box' }}
               />
@@ -8373,6 +8377,7 @@ function CommissionPanel({ gs, commissionBrigantine }) {
           className="parchment-input"
           value={proposedName}
           onChange={(e) => setProposedName(e.target.value)}
+          aria-label="Ship's name"
           maxLength={32}
           style={{ flex: 1, minWidth: '10rem' }}
         />
@@ -8903,6 +8908,7 @@ function ProvisionsDrawer({ gs, setGs, lastSavedAt }) {
                 value={importText}
                 onChange={(e) => setImportText(e.target.value)}
                 placeholder="Paste the manuscript JSON here..."
+                aria-label="Manuscript JSON to restore"
                 style={{
                   width: '100%', minHeight: '6rem', padding: '0.5rem',
                   fontFamily: 'monospace', fontSize: '0.75em',

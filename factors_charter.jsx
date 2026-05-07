@@ -6440,14 +6440,24 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
     <Page>
       <div style={{ maxWidth: '64rem', margin: '0 auto', padding: '1.25rem 1.0rem', width: '100%' }}>
         <Header gs={gs} onReturnToTitle={onReturnToTitle} onSuccession={onSuccession} onRenewal={onRenewal} viewportMode={viewportMode} />
-        <Tabs tab={tab} setTab={setTab} unread={gs.letters.filter(l => !l.read).length} atHome={atHome} />
+        <Tabs tab={tab} setTab={setTab} unread={gs.letters.filter(l => !l.read).length} atHome={atHome} viewportMode={viewportMode} />
         <div className="parchment" style={{ padding: '1.25rem', minHeight: '24rem', background: 'rgba(255,253,245,0.4)' }}>
-          {tab === 'journal' && <JournalView gs={gs} arrivalProse={arrivalProse} setTab={setTab} openLetterById={openLetterById} pursueThread={handlePursueThread} viewportMode={viewportMode} />}
-          {tab === 'ledger' && <LedgerView gs={gs} />}
-          {tab === 'map' && <MapView gs={gs} sailTo={sailTo} />}
-          {tab === 'port' && <PortView gs={gs} buyGood={buyGood} sellGood={sellGood} refitShip={refitShip} arrivalProse={arrivalProse} setTab={setTab} lodgeGoods={lodgeGoods} withdrawGoods={withdrawGoods} commissionBrigantine={commissionBrigantine} takeBottomry={takeBottomry} liftContractOpium={liftContractOpium} runDutchCustoms={runDutchCustoms} viewportMode={viewportMode} />}
-          {tab === 'outpost' && atHome && <OutpostView gs={gs} startBuild={startBuild} expediteBuild={expediteBuild} />}
-          {tab === 'letters' && <LettersView gs={gs} setGs={setGs} onRespond={handleLetterResponse} openLetterId={openLetterId} setOpenLetterId={setOpenLetterId} viewportMode={viewportMode} />}
+          {(() => {
+            // On desktop, 'map' and 'ledger' are merged into 'overview'.
+            // effectiveTab normalises old tab state if a player resizes mid-session.
+            const effectiveTab = (viewportMode === 'desktop' && (tab === 'map' || tab === 'ledger')) ? 'overview' : tab;
+            return (
+              <>
+                {effectiveTab === 'journal' && <JournalView gs={gs} arrivalProse={arrivalProse} setTab={setTab} openLetterById={openLetterById} pursueThread={handlePursueThread} viewportMode={viewportMode} />}
+                {effectiveTab === 'overview' && viewportMode === 'desktop' && <DesktopOverview gs={gs} sailTo={sailTo} />}
+                {effectiveTab === 'ledger' && viewportMode !== 'desktop' && <LedgerView gs={gs} />}
+                {effectiveTab === 'map' && viewportMode !== 'desktop' && <MapView gs={gs} sailTo={sailTo} />}
+                {effectiveTab === 'port' && <PortView gs={gs} buyGood={buyGood} sellGood={sellGood} refitShip={refitShip} arrivalProse={arrivalProse} setTab={setTab} lodgeGoods={lodgeGoods} withdrawGoods={withdrawGoods} commissionBrigantine={commissionBrigantine} takeBottomry={takeBottomry} liftContractOpium={liftContractOpium} runDutchCustoms={runDutchCustoms} viewportMode={viewportMode} />}
+                {effectiveTab === 'outpost' && atHome && <OutpostView gs={gs} startBuild={startBuild} expediteBuild={expediteBuild} />}
+                {effectiveTab === 'letters' && <LettersView gs={gs} setGs={setGs} onRespond={handleLetterResponse} openLetterId={openLetterId} setOpenLetterId={setOpenLetterId} viewportMode={viewportMode} />}
+              </>
+            );
+          })()}
         </div>
         <ProvisionsDrawer gs={gs} setGs={setGs} lastSavedAt={lastSavedAt} />
       </div>
@@ -7529,15 +7539,23 @@ function Header({ gs, onReturnToTitle, onSuccession, onRenewal, viewportMode }) 
 
 // ─────────── TABS ───────────
 
-function Tabs({ tab, setTab, unread, atHome }) {
-  const tabs = [
-    { key: 'journal',  label: 'Journal' },
-    { key: 'ledger',   label: 'Ledger' },
-    { key: 'map',      label: 'Voyage' },
-    { key: 'port',     label: 'In Port' },
-    ...(atHome ? [{ key: 'outpost', label: 'Outpost' }] : []),
-    { key: 'letters',  label: `Letters${unread ? ` (${unread})` : ''}` },
-  ];
+function Tabs({ tab, setTab, unread, atHome, viewportMode }) {
+  const tabs = viewportMode === 'desktop'
+    ? [
+        { key: 'journal',  label: 'Journal' },
+        { key: 'overview', label: 'Overview' },
+        { key: 'port',     label: 'In Port' },
+        ...(atHome ? [{ key: 'outpost', label: 'Outpost' }] : []),
+        { key: 'letters',  label: `Letters${unread ? ` (${unread})` : ''}` },
+      ]
+    : [
+        { key: 'journal',  label: 'Journal' },
+        { key: 'ledger',   label: 'Ledger' },
+        { key: 'map',      label: 'Voyage' },
+        { key: 'port',     label: 'In Port' },
+        ...(atHome ? [{ key: 'outpost', label: 'Outpost' }] : []),
+        { key: 'letters',  label: `Letters${unread ? ` (${unread})` : ''}` },
+      ];
   return (
     <div className="tab-row">
       {tabs.map(t => (
@@ -8120,6 +8138,21 @@ function MapView({ gs, sailTo }) {
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+// ─────────── DESKTOP OVERVIEW (Map + Ledger side-by-side) ───────────
+
+function DesktopOverview({ gs, sailTo }) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.4fr) minmax(0, 1fr)', gap: '1rem', alignItems: 'start' }}>
+      <div>
+        <MapView gs={gs} sailTo={sailTo} />
+      </div>
+      <div>
+        <LedgerView gs={gs} />
       </div>
     </div>
   );

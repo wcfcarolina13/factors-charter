@@ -9,6 +9,95 @@ Newest research / decisions on top.
 
 ---
 
+## Deterministic Pool Audit — 2026-05-07
+
+Captured at the moment live-AI was stripped from the PWA player path. Every entry is the static fallback that PWA players will see; live-AI in the artifact runtime is unaffected. Update by playthrough — if a generator's fallback feels repetitive after several charters, lower its felt-quality grade and bump expansion priority. When you expand a pool, update the size and date.
+
+**Inventory date:** 2026-05-07
+**Inventoried by:** Phase 1 subagent during the strip-pwa-live-ai PR
+**Release blockers found:** None — all 7 generators have functional fallbacks (the spec rule was "throws / returns null / returns broken placeholder"; cosmetic thinness deferred).
+
+### genVoyageEncounter
+
+- **Pool size:** 1
+- **Variety axes:** none (single fixed weather-and-course scene; no port / faction / ship-state variation)
+- **Felt quality:** M — grammatically sound, period-plausible, but the squalls/wind/bosun image is genre-generic; no hooks, no crew names, no cargo reference
+- **Call frequency:** ~25–65 per 3-year charter (60% encounter chance × ~1 voyage per 15 days)
+- **Expansion priority:** H
+- **Target on expansion:** 12–20 — cover weather / calm / other-vessels / fog / piracy threat as distinct scenario types, each varied by region
+- **Release blocker?:** No (object is well-formed; caller at `factors_charter.jsx:5663` spreads it into encounter state without nullguard)
+
+### genOutcome
+
+- **Pool size:** 1
+- **Variety axes:** `isLetter` flag toggles `days=0` (correctly reflected in fallback) — prose and `changes` are identical regardless of encounter type, location, or choice
+- **Felt quality:** L — "It plays out as you might expect, neither as well nor as ill as feared." is intentionally vague but gives the player zero texture; the journal entry "A day passed without consequence." is the weakest line in any fallback — it renders in the permanent journal and will stand out as placeholder
+- **Call frequency:** ~50–130 per charter (every encounter × some letter responses) — highest frequency of all generators
+- **Expansion priority:** H
+- **Target on expansion:** not a pool problem — the fix is to make the single fallback prose less visibly thin, not to expand a pool; the object shape is correct
+- **Release blocker?:** No (all required fields present — `prose`, `changes.money`, `changes.days`, `changes.reputation`, `changes.goods`, `changes.journal`, `changes.hook`)
+
+### genLetter
+
+- **Pool size:** 1
+- **Variety axes:** `sender.from` is used verbatim in the fallback subject line (FROM varies), but subject, body, and all 3 response labels are identical regardless of sender faction or mood
+- **Felt quality:** L — the generic "A Matter Requiring Your Attention" / "I should wish to lay before you when next our paths cross" body carries no game-state content; sender mood is completely ignored; a player receiving the Brotherhood letter and the Director's letter through the same fallback will see identical text with only the FROM field different
+- **Call frequency:** ~8–20 auto-letters per charter (quarterly + faction triggers), plus any manual `genLetter` calls
+- **Expansion priority:** H
+- **Target on expansion:** 5–8 per sender faction (6 factions × 3 mood states = up to 18 distinct templates)
+- **Release blocker?:** No — caller at `factors_charter.jsx:5452` checks `!result.body` before inserting; fallback body is non-empty. Responses array is sanitized at `factors_charter.jsx:5464` with a hardcoded fallback, so even a truncated result won't break the interaction.
+
+### genIndiamanLetterPayload
+
+- **Pool size:** 0 (function returns `null` on failure — no static fallback prose)
+- **Variety axes:** n/a
+- **Felt quality:** n/a
+- **Call frequency:** 4 per charter (quarterly Indiaman visits)
+- **Expansion priority:** H (but architecture question noted below)
+- **Target on expansion:** n/a — the null-return is intentional design; see release blocker note
+- **Release blocker?:** No — when `genIndiamanLetterPayload` returns `null`, the caller (`factors_charter.jsx:5407–5413`) gracefully marks the letter `aiUpgraded: true` without replacing the body. The letter that lands in the inbox already has a fully-formed deterministic body from `makeIndiamanLetter` (`factors_charter.jsx:3149`), which has 3 branches (empty / light / on-track) with authentic period voice and correct numerical reckoning. The null path leaves that deterministic body in place — the player receives a real letter. The null-return pattern is intentional and the design is correct.
+
+### genPursueThread
+
+- **Pool size:** 1
+- **Variety axes:** thread text is sliced into the fallback prose (first 120 chars), so the prose echoes the chosen thread — meaningfully better than a completely static fallback
+- **Felt quality:** M — fallback reads: "You apply yourself to the matter — [thread] — but the day yields little beyond a confirmation of what was already supposed." Dry, in-period, and the "carry the matter to a confidant" choice is contextually reasonable; the three choices are generic but structurally valid
+- **Call frequency:** ~0–30 per charter (player-driven; irregular)
+- **Expansion priority:** M
+- **Target on expansion:** the thread-echo pattern is already the right approach; real expansion is making the choices thread-aware rather than adding pool size
+- **Release blocker?:** No (prose string + 3 choices with label+seed; caller at `factors_charter.jsx:5702` spreads the result into encounter state without nullguard)
+
+### genArrivalVignette
+
+- **Pool size:** 1
+- **Variety axes:** none — "The [port] pilot comes aboard at first light. The harbor smells of fish and woodsmoke." is identical for all 6 ports (only the port name interpolation varies)
+- **Felt quality:** L — "fish and woodsmoke" is applicable to any harbor in any era; no port differentiation at all
+- **Call frequency:** 6 per charter maximum (one per port, first-visit only) — guaranteed to fire for all 6 ports in a complete playthrough
+- **Expansion priority:** H
+- **Target on expansion:** 1 fallback string per port (6 total) using port-distinctive sensory details; highest-value single fix given that every first-time arrival shows the same line
+- **Release blocker?:** No (caller at `factors_charter.jsx:5612` receives a string directly — `call.parsed?.prose || fallbackProse`; result is set as `arrivalProse.prose`; component renders it as a paragraph)
+
+### genAwayDigest
+
+- **Pool size:** 1
+- **Variety axes:** none — "Returned to find the godown standing and the ledger half-kept. The work of catching up begins tomorrow." fires regardless of what actually happened during the voyage (raid, raid not resolved, goods movements, letter arrivals, etc.)
+- **Felt quality:** L — ignores the actual away-log events entirely; the player just saw a detailed log of what happened, then reads completely generic return prose — the disconnect is noticeable
+- **Call frequency:** ~3–8 per charter (every return from a long voyage with away-events)
+- **Expansion priority:** M (less critical than `genOutcome`/`genLetter` since it fires less often and the event list is still shown on screen)
+- **Target on expansion:** 3–5 variants keyed on raid presence, goods changes, letter arrivals; or a template approach that echoes the event summary
+- **Release blocker?:** No — `AwayDigestScreen` at `factors_charter.jsx:8619` uses `{digest.prose && (...)}` — if prose is null the block is omitted silently; fallback is non-null so it renders; no crash path
+
+### Concerns flagged in this audit
+
+These are cosmetic-thinness items deferred per the spec rule (only functional gaps were release blockers). They guide the post-ship pool-expansion priority order:
+
+1. **`genOutcome`** — the journal entry `"A day passed without consequence."` is inserted into the **permanent** in-game journal on every fallback. Most visible repetition, since `genOutcome` is the highest-frequency generator (~50–130 calls per charter). Top expansion priority for player-perceived quality.
+2. **`genArrivalVignette`** — single string for all 6 ports, fires once each. Six unique strings (one per port, with port-distinctive sensory details) is the cheapest high-value patch.
+3. **`genLetter`** — subject + body + response labels identical across all senders and moods. Visible the moment a player gets two fallback letters in a row.
+4. **`genAwayDigest`** — ignores the event log just shown to the player. Contextual mismatch is noticeable, especially after a raid.
+
+---
+
 ## Session 9 (post-merge): the day-100 slog problem
 
 ### Bradley's complaint

@@ -129,3 +129,59 @@ export function computeRivalPressure(gs) {
 
   return Math.max(0, Math.min(100, Math.round(pressure)));
 }
+
+// Picks one eligible event template from the pool, or null if none qualify.
+// Eligibility:
+//   - day in [minDay, maxDay]
+//   - preconditions(gs) is truthy
+//   - event key not in gs.rivals[rival].eventsFired
+// Cluster cap:
+//   - if 3 or more events have already fired in the last 240 days
+//     (lastEventDay > day - 240), return null
+// Selection:
+//   - rivals weighted by (day - lastEventDay) so stale rivals are picked
+//     more often, evening out cadence
+//   - within the chosen rival's eligible pool, uniform random
+export function pickRivalEvent(gs, eventPool) {
+  if (!Array.isArray(eventPool) || eventPool.length === 0) return null;
+
+  const day = gs?.day ?? 0;
+
+  // Cluster cap: count events fired in the last 240 days across all rivals.
+  const recent = RIVAL_KEYS.filter(k => {
+    const r = gs.rivals?.[k];
+    return r?.lastEventDay && r.lastEventDay > day - 240;
+  });
+  if (recent.length >= 3) return null;
+
+  // Filter pool to eligible templates.
+  const eligible = eventPool.filter(t => {
+    if (day < t.minDay || day > t.maxDay) return false;
+    if (typeof t.preconditions === 'function' && !t.preconditions(gs)) return false;
+    const fired = gs.rivals?.[t.rival]?.eventsFired ?? [];
+    if (fired.includes(t.key)) return false;
+    return true;
+  });
+
+  if (eligible.length === 0) return null;
+
+  // Weighted-by-rival pick: weight = max(1, day - lastEventDay).
+  const byRival = new Map();
+  for (const t of eligible) {
+    if (!byRival.has(t.rival)) byRival.set(t.rival, []);
+    byRival.get(t.rival).push(t);
+  }
+  const rivals = [...byRival.keys()];
+  const weights = rivals.map(k => Math.max(1, day - (gs.rivals[k]?.lastEventDay ?? 0)));
+  const totalWeight = weights.reduce((a, b) => a + b, 0);
+  let r = Math.random() * totalWeight;
+  let chosenRival = rivals[0];
+  for (let i = 0; i < rivals.length; i++) {
+    r -= weights[i];
+    if (r <= 0) { chosenRival = rivals[i]; break; }
+  }
+
+  // Uniform random within the chosen rival's eligible pool.
+  const candidates = byRival.get(chosenRival);
+  return candidates[Math.floor(Math.random() * candidates.length)];
+}

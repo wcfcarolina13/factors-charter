@@ -194,3 +194,99 @@ describe('computeRivalPressure', () => {
     expect(computeRivalPressure(low)).toBeGreaterThanOrEqual(0);
   });
 });
+
+import { pickRivalEvent } from './rivalry.js';
+
+describe('pickRivalEvent', () => {
+  function gsWith(overrides = {}) {
+    return {
+      day: 200,
+      rivals: makeInitialRivals(),
+      letters: [],
+      ...overrides,
+    };
+  }
+
+  // Test event templates (will be replaced by real RIVAL_EVENTS in Phase 6).
+  const fakeEvents = [
+    { key: 'hardacre-fire',   rival: 'hardacre', minDay: 100, maxDay: 720, preconditions: () => true,  build: () => ({ id: 1 }) },
+    { key: 'terborch-prom',   rival: 'terborch', minDay: 200, maxDay: 720, preconditions: () => true,  build: () => ({ id: 2 }) },
+    { key: 'lowji-glut',      rival: 'lowji',    minDay: 100, maxDay: 720, preconditions: () => true,  build: () => ({ id: 3 }) },
+    { key: 'gated',           rival: 'hardacre', minDay: 100, maxDay: 720, preconditions: (s) => s.day >= 999, build: () => ({ id: 4 }) },
+  ];
+
+  it('returns null when pool is empty', () => {
+    expect(pickRivalEvent(gsWith(), [])).toBeNull();
+  });
+
+  it('returns an eligible event from the pool', () => {
+    const gs = gsWith();
+    const ev = pickRivalEvent(gs, fakeEvents);
+    expect(ev).not.toBeNull();
+    expect(['hardacre-fire', 'terborch-prom', 'lowji-glut']).toContain(ev.key);
+  });
+
+  it('skips events outside their minDay window', () => {
+    const gs = gsWith({ day: 50 });   // before minDay of all real events
+    expect(pickRivalEvent(gs, fakeEvents)).toBeNull();
+  });
+
+  it('skips events outside their maxDay window', () => {
+    const gs = gsWith({ day: 800 });
+    expect(pickRivalEvent(gs, fakeEvents)).toBeNull();
+  });
+
+  it('skips events whose preconditions fail', () => {
+    const gs = gsWith();
+    const onlyGated = [fakeEvents[3]];
+    expect(pickRivalEvent(gs, onlyGated)).toBeNull();
+  });
+
+  it('skips events already in eventsFired for that rival', () => {
+    const gs = gsWith();
+    gs.rivals.hardacre.eventsFired = ['hardacre-fire'];
+    gs.rivals.terborch.eventsFired = ['terborch-prom'];
+    gs.rivals.lowji.eventsFired = ['lowji-glut'];
+    expect(pickRivalEvent(gs, fakeEvents)).toBeNull();
+  });
+
+  it('returns null if 240-day cluster cap is hit (3 events fired in last 240 days)', () => {
+    const gs = gsWith({ day: 300 });
+    gs.rivals.hardacre.lastEventDay = 100;
+    gs.rivals.terborch.lastEventDay = 150;
+    gs.rivals.lowji.lastEventDay = 200;
+    expect(pickRivalEvent(gs, fakeEvents)).toBeNull();
+  });
+
+  it('does NOT trigger the cluster cap if events are spread over more than 240 days', () => {
+    const gs = gsWith({ day: 600 });
+    gs.rivals.hardacre.lastEventDay = 100;   // 500 days ago
+    gs.rivals.terborch.lastEventDay = 350;
+    gs.rivals.lowji.lastEventDay = 500;
+    const ev = pickRivalEvent(gs, fakeEvents);
+    expect(ev).not.toBeNull();
+  });
+
+  it('weights selection toward rivals with the oldest lastEventDay', () => {
+    // Statistical test — repeated calls should favour the oldest.
+    // Uses a local pool with maxDay: 1100 so events remain eligible at day 1000.
+    const gs = gsWith({ day: 1000 });
+    gs.rivals.hardacre.lastEventDay = 0;     // very stale
+    gs.rivals.terborch.lastEventDay = 900;   // recent
+    gs.rivals.lowji.lastEventDay = 950;      // recent
+
+    const wideEvents = [
+      { key: 'hardacre-fire', rival: 'hardacre', minDay: 100, maxDay: 1100, preconditions: () => true, build: () => ({ id: 1 }) },
+      { key: 'terborch-prom', rival: 'terborch', minDay: 200, maxDay: 1100, preconditions: () => true, build: () => ({ id: 2 }) },
+      { key: 'lowji-glut',    rival: 'lowji',    minDay: 100, maxDay: 1100, preconditions: () => true, build: () => ({ id: 3 }) },
+    ];
+
+    const counts = { hardacre: 0, terborch: 0, lowji: 0 };
+    for (let i = 0; i < 200; i++) {
+      const ev = pickRivalEvent(gs, wideEvents);
+      if (ev) counts[ev.rival]++;
+    }
+    expect(counts.hardacre).toBeGreaterThan(counts.terborch);
+    expect(counts.hardacre).toBeGreaterThan(counts.lowji);
+  });
+});

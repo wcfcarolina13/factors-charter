@@ -46,7 +46,7 @@ Was deliberately deferred from the two-mode spec. Period ambient (wind, wharf, q
 
 ### 5. Sync UX polish (sub-items, all low priority)
 
-- Concurrent-pull race: `pullNow` lacks an `inFlight` guard; on first opt-in the pull and immediate push race. Status display can flicker; no data corruption. Low-priority.
+- ~~Concurrent-pull race: `pullNow` lacks an `inFlight` guard~~ — **shipped 2026-05-07.** Separate `pullInFlight` ref guards `pullNow`; concurrent calls return `{ status: 'busy' }` (no-op for existing callers). Push and pull stay independent.
 - Conflict-detection sensitivity: `localStorage.setItem` failure (quota) is silent in `writePointer`. On the next launch, missing pointer → false-positive conflict modal. Worth a `setError` surfacing if it ever becomes felt.
 - The retroactive "Sync this charter" menu entry currently exposes raw `setGs` to `Header` rather than an `onEnableSync` callback. Consistent with other Header consumers but worth a small refactor when next touching that surface.
 

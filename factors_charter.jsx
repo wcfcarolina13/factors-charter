@@ -44,6 +44,7 @@ function useSyncState(slot) {
   const [error, setError] = useState(null);
   const debounceTimer = useRef(null);
   const inFlight = useRef(false);
+  const pullInFlight = useRef(false);
 
   const pointerKey = `factor_save_${slot}_sync`;
 
@@ -133,6 +134,12 @@ function useSyncState(slot) {
 
   const pullNow = async (playthroughId) => {
     if (!playthroughId) return { status: 'none' };
+    // Guard against concurrent pulls (e.g. React-strict-mode double-fire of the
+    // pull-on-launch effect, or an opt-in pull racing a manual menu pull). The
+    // 'busy' return is a no-op for callers — none of their result.status
+    // branches match, so they simply do nothing this round.
+    if (pullInFlight.current) return { status: 'busy' };
+    pullInFlight.current = true;
     setStatus('pulling');
     try {
       const res = await fetch(`/api/save?id=${encodeURIComponent(playthroughId)}`);
@@ -152,6 +159,8 @@ function useSyncState(slot) {
       setStatus('offline');
       setError(e.message || String(e));
       return { status: 'error' };
+    } finally {
+      pullInFlight.current = false;
     }
   };
 

@@ -90,3 +90,42 @@ RIVALS_REGISTRY[2].baselineFn = lowjiBaseline;
 for (const entry of RIVALS_REGISTRY) Object.freeze(entry);
 Object.freeze(RIVALS_REGISTRY);
 Object.freeze(RIVAL_KEYS);
+
+// Computes the 0-100 rivalPressure scalar consumed by makeQuarterlyNagLetter
+// to shift its tone band. Inputs:
+//   - Hardacre tonnage relative to player quota progress
+//   - terborch / lowji standing relative to baseline 50
+//   - recent-event modifiers in gs.rivalPressureModifiers, each linearly
+//     decaying over its lifetime
+//
+// Output is clamped to [0, 100].
+export function computeRivalPressure(gs) {
+  const rivals = gs?.rivals;
+  if (!rivals) return 50;
+
+  let pressure = 50;
+
+  // Hardacre tonnage axis. If Hardacre is significantly ahead, +10 per
+  // commodity; if behind, -10 per commodity.
+  const ourPep = gs.quotas?.pepper?.have   ?? 0;
+  const ourCin = gs.quotas?.cinnamon?.have ?? 0;
+  if (rivals.hardacre.pepper   > ourPep + 30) pressure += 10;
+  else if (rivals.hardacre.pepper   < ourPep - 30) pressure -= 10;
+  if (rivals.hardacre.cinnamon > ourCin + 15) pressure += 10;
+  else if (rivals.hardacre.cinnamon < ourCin - 15) pressure -= 10;
+
+  // ter Borch / Lowji standing axis. Each rival adds up to ±5 from baseline.
+  pressure += 5 * ((rivals.terborch.standing - 50) / 50);
+  pressure += 5 * ((rivals.lowji.standing    - 50) / 50);
+
+  // Recent-event modifiers with linear decay over their lifetime.
+  const day = gs.day ?? 0;
+  for (const mod of (gs.rivalPressureModifiers || [])) {
+    const elapsed = day - mod.fromDay;
+    if (elapsed < 0 || elapsed >= mod.lifetimeDays) continue;
+    const remaining = 1 - (elapsed / mod.lifetimeDays);
+    pressure += mod.delta * remaining;
+  }
+
+  return Math.max(0, Math.min(100, Math.round(pressure)));
+}

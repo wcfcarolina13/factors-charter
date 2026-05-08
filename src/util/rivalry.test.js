@@ -63,6 +63,8 @@ import {
   lowjiBaseline,
 } from './rivalry.js';
 
+import { computeRivalPressure } from './rivalry.js';
+
 describe('hardacreBaseline', () => {
   it('writes pepper and cinnamon based on Indiaman visits', () => {
     const rival = makeInitialRivals().hardacre;
@@ -111,5 +113,84 @@ describe('lowjiBaseline', () => {
     lowjiBaseline(rival, { indiamanVisits: 1 });
     expect(rival.standing).toBeGreaterThan(50);
     expect(rival.standing).toBeLessThanOrEqual(60);
+  });
+});
+
+describe('computeRivalPressure', () => {
+  function gsWith(overrides = {}) {
+    return {
+      day: 200,
+      rivals: makeInitialRivals(),
+      rivalPressureModifiers: [],
+      quotas: {
+        pepper:   { have: 0, target: 400 },
+        cinnamon: { have: 0, target: 200 },
+      },
+      ...overrides,
+    };
+  }
+
+  it('returns 50 (baseline) when nothing varies', () => {
+    expect(computeRivalPressure(gsWith())).toBe(50);
+  });
+
+  it('rises when Hardacre is ahead of player on pepper quota', () => {
+    const gs = gsWith();
+    gs.rivals.hardacre.pepper = 200;     // Hardacre at 50% of quota
+    gs.quotas.pepper.have = 50;          // Player at 12.5%
+    const p = computeRivalPressure(gs);
+    expect(p).toBeGreaterThan(50);
+  });
+
+  it('falls when player is ahead of Hardacre on quota', () => {
+    const gs = gsWith();
+    gs.rivals.hardacre.pepper = 50;
+    gs.quotas.pepper.have = 200;
+    const p = computeRivalPressure(gs);
+    expect(p).toBeLessThan(50);
+  });
+
+  it('rises with terborch.standing above 50', () => {
+    const gs = gsWith();
+    gs.rivals.terborch.standing = 90;
+    const p = computeRivalPressure(gs);
+    expect(p).toBeGreaterThan(50);
+  });
+
+  it('rises with lowji.standing above 50', () => {
+    const gs = gsWith();
+    gs.rivals.lowji.standing = 90;
+    expect(computeRivalPressure(gs)).toBeGreaterThan(50);
+  });
+
+  it('applies recent-event pressure modifiers with linear decay', () => {
+    const gs = gsWith();
+    // -10 modifier 30 days into a 60-day lifetime → -5 effective
+    gs.rivalPressureModifiers = [{ delta: -10, fromDay: 170, lifetimeDays: 60 }];
+    const p = computeRivalPressure(gs);
+    expect(p).toBe(45);   // 50 - 5 (linear decay: 30/60 elapsed)
+  });
+
+  it('drops fully-elapsed modifiers (treats them as zero contribution)', () => {
+    const gs = gsWith();
+    gs.rivalPressureModifiers = [{ delta: -20, fromDay: 100, lifetimeDays: 60 }];  // expired at day 160; current day 200
+    expect(computeRivalPressure(gs)).toBe(50);
+  });
+
+  it('clamps to [0, 100]', () => {
+    const high = gsWith();
+    high.rivals.hardacre.pepper = 500;
+    high.rivals.terborch.standing = 100;
+    high.rivals.lowji.standing = 100;
+    high.rivalPressureModifiers = [{ delta: 80, fromDay: 200, lifetimeDays: 60 }];
+    expect(computeRivalPressure(high)).toBeLessThanOrEqual(100);
+
+    const low = gsWith();
+    low.quotas.pepper.have = 500;
+    low.quotas.cinnamon.have = 250;
+    low.rivals.terborch.standing = 0;
+    low.rivals.lowji.standing = 0;
+    low.rivalPressureModifiers = [{ delta: -80, fromDay: 200, lifetimeDays: 60 }];
+    expect(computeRivalPressure(low)).toBeGreaterThanOrEqual(0);
   });
 });

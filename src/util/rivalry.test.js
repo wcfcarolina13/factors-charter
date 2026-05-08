@@ -56,3 +56,60 @@ describe('RIVALS_REGISTRY', () => {
     expect(map.lowji).toBe('cama');
   });
 });
+
+import {
+  hardacreBaseline,
+  terBorchBaseline,
+  lowjiBaseline,
+} from './rivalry.js';
+
+describe('hardacreBaseline', () => {
+  it('writes pepper and cinnamon based on Indiaman visits', () => {
+    const rival = makeInitialRivals().hardacre;
+    hardacreBaseline(rival, { indiamanVisits: 0 });
+    expect(rival.pepper).toBe(0);
+    expect(rival.cinnamon).toBe(0);
+
+    hardacreBaseline(rival, { indiamanVisits: 1 });
+    expect(rival.pepper).toBe(75);    // 70 + 1*5 = 75
+    expect(rival.cinnamon).toBe(37);  // 35 + 1*2 = 37
+
+    hardacreBaseline(rival, { indiamanVisits: 6 });
+    expect(rival.pepper).toBe(450);   // 70*6 + 6*5
+    expect(rival.cinnamon).toBe(222); // 35*6 + 6*2
+  });
+
+  it('does not mutate visits or other fields', () => {
+    const rival = makeInitialRivals().hardacre;
+    rival.standing = 70;
+    hardacreBaseline(rival, { indiamanVisits: 3 });
+    expect(rival.standing).toBe(70);
+  });
+});
+
+describe('terBorchBaseline', () => {
+  it('drifts standing toward 55 on each Indiaman call (slight positive bias)', () => {
+    const rival = makeInitialRivals().terborch;
+    rival.standing = 50;
+    terBorchBaseline(rival, { indiamanVisits: 1 });
+    expect(rival.standing).toBeGreaterThan(50);
+    expect(rival.standing).toBeLessThanOrEqual(55);
+  });
+
+  it('does not exceed 100 even after many calls', () => {
+    const rival = makeInitialRivals().terborch;
+    rival.standing = 95;
+    terBorchBaseline(rival, { indiamanVisits: 10 });
+    expect(rival.standing).toBeLessThanOrEqual(100);
+  });
+});
+
+describe('lowjiBaseline', () => {
+  it('drifts standing toward 60 on each Indiaman call (boom-leaning)', () => {
+    const rival = makeInitialRivals().lowji;
+    rival.standing = 50;
+    lowjiBaseline(rival, { indiamanVisits: 1 });
+    expect(rival.standing).toBeGreaterThan(50);
+    expect(rival.standing).toBeLessThanOrEqual(60);
+  });
+});

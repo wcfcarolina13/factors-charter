@@ -4,6 +4,17 @@ The Factor's Charter — a chronological log of what's shipped. Newest first.
 
 ---
 
+## 2026-05-08 — Sync UX polish (writePointer surface, Header onEnableSync)
+
+Two small follow-ups from the 2026-05-07 sync handoff:
+
+- `writePointer` no longer swallows `localStorage.setItem` failures. On quota-exceeded or storage-disabled, it now surfaces via `setStatus('error')` + `setError(...)` so the SyncBadge reflects the problem at write time. Previously a silent failure left the next launch with a missing pointer, which read as a false-positive conflict modal.
+- The retroactive "⁂ Sync this charter" menu entry now takes a focused `onEnableSync` callback instead of raw `setGs`. `Header` no longer needs `setGs` at all; the prop is removed from its signature. State-shape concerns stay in `GameHub`.
+
+No user-visible behavior change in the happy path; tests still 33/33; build clean.
+
+---
+
 ## 2026-05-07 — genLetter per-sender pools (last open audit item)
 
 The final concern from the deterministic pool audit is closed. `genLetter`'s fallback was a single generic body fired regardless of sender — every fallback letter from every faction read identically. Replaced with per-sender pools: 18 templates across the 6 AUTO_SENDERS (3 each for Wexley, Faulke, Pyke, the Anonymous Hand, ter Borch, Dryden), mirroring each sender's stated mood description and the bradley-approved voice references from `WORLD_NOTES.md`'s "Inspirations Landed" section. Each template is `{subject, body, responses[3]}` with response seeds that plant rep changes and narrative hooks. The generic legacy fallback is preserved as a defensive default for any future sender without a pool entry.

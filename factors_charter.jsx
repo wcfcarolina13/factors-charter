@@ -56,9 +56,20 @@ function useSyncState(slot) {
     } catch (e) { return null; }
   };
 
+  // Returns true on success, false on failure (quota exceeded, storage
+  // disabled, etc.). When the write fails we surface it via status/error so
+  // the SyncBadge reflects the problem — without this, the next launch sees
+  // a missing pointer and triggers a false-positive conflict modal.
   const writePointer = (p) => {
-    if (typeof window === 'undefined') return;
-    try { window.localStorage.setItem(pointerKey, JSON.stringify(p)); } catch (e) {}
+    if (typeof window === 'undefined') return false;
+    try {
+      window.localStorage.setItem(pointerKey, JSON.stringify(p));
+      return true;
+    } catch (e) {
+      setStatus('error');
+      setError(`pointer write failed: ${e?.message || String(e)}`);
+      return false;
+    }
   };
 
   const pushNow = async (gs) => {
@@ -6815,7 +6826,20 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
   return (
     <Page>
       <div style={{ maxWidth: '64rem', margin: '0 auto', padding: '1.25rem 1.0rem', width: '100%' }}>
-        <Header gs={gs} setGs={setGs} onReturnToTitle={onReturnToTitle} onSuccession={onSuccession} onRenewal={onRenewal} viewportMode={viewportMode} sync={sync} />
+        <Header
+          gs={gs}
+          onEnableSync={() => setGs(prev => ({
+            ...prev,
+            syncEnabled: true,
+            playthroughId: prev.playthroughId || generatePlaythroughId(),
+            syncPromptShown: true,
+          }))}
+          onReturnToTitle={onReturnToTitle}
+          onSuccession={onSuccession}
+          onRenewal={onRenewal}
+          viewportMode={viewportMode}
+          sync={sync}
+        />
         <Tabs tab={tab} setTab={setTab} unread={gs.letters.filter(l => !l.read).length} atHome={atHome} viewportMode={viewportMode} />
         <div className="parchment" style={{ padding: '1.25rem', minHeight: '24rem', background: 'rgba(255,253,245,0.4)' }}>
           {(() => {
@@ -7806,7 +7830,7 @@ function SyncBadge({ gs, sync }) {
   );
 }
 
-function Header({ gs, setGs, onReturnToTitle, onSuccession, onRenewal, viewportMode, sync }) {
+function Header({ gs, onEnableSync, onReturnToTitle, onSuccession, onRenewal, viewportMode, sync }) {
   const [confirmingSuccession, setConfirmingSuccession] = useState(false);
   const [successorName, setSuccessorName] = useState('');
   const [confirmingRenewal, setConfirmingRenewal] = useState(false);
@@ -8041,12 +8065,7 @@ function Header({ gs, setGs, onReturnToTitle, onSuccession, onRenewal, viewportM
               className="ghost-button"
               style={{ width: '100%', textAlign: 'left', marginBottom: '0.3rem' }}
               onClick={() => {
-                setGs(prev => ({
-                  ...prev,
-                  syncEnabled: true,
-                  playthroughId: prev.playthroughId || generatePlaythroughId(),
-                  syncPromptShown: true,
-                }));
+                onEnableSync && onEnableSync();
                 setMenuOpen(false);
               }}
             >

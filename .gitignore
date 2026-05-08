@@ -5,3 +5,6 @@ dev-dist/
 *.log
 .env
 .env.local
+
+# Worktrees for parallel feature work
+.worktrees/

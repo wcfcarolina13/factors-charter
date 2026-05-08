@@ -4395,6 +4395,194 @@ Reputation deltas should be small (-15 to +15). Only include factions that actua
   return { result, log };
 }
 
+// Per-sender deterministic fallback pools for genLetter. Each entry is a
+// {subject, body, responses} object — sender.from is added at lookup time.
+// 6 senders × 3 templates each = 18 entries. Templates mirror the AUTO_SENDERS
+// mood descriptions (Wexley familial, Faulke mariner-Brotherhood, Pyke pious-pastoral,
+// Anonymous Hand quiet-Brotherhood, ter Borch Calvinist-trader, Dryden private-Director).
+// Static prose — no gs interpolation — for safety and predictability.
+const FALLBACK_LETTERS = {
+  wexley: [
+    {
+      subject: 'A News from Bristol of the Family',
+      body: 'Sister, — The summer here has been a kind one, and yr. nephew Thomas has begun his first quarter at the Charterhouse, where he lasts at his Latin better than I had hoped. Father’s leg troubles him still in the wet, but he reads the Gazette each morning with his pipe and asks after you when the East Indian returns are listed. We had Mrs. Albright to tea on Thursday last; she sends her regards and a small comb of Cheshire she pressed upon me to send you, though it has likely come to nothing in the heat. — Yr. loving sister, Eliza.',
+      responses: [
+        { label: 'Send a remittance for Thomas’s fees', seed: 'family hook, money out' },
+        { label: 'Reply with news of yr. work', seed: 'kept connection, no money' },
+        { label: 'Set aside, do not reply', seed: 'silence' },
+      ],
+    },
+    {
+      subject: 'Concerning Yr. Long Silence',
+      body: 'Brother, — It has been three packets now without a line from you, and the rumour at Wapping has it that the wet season was a hard one in those latitudes. Father will not say so, but he reads each Gazette as if to find a name. Mr. Albright tells us the Charlestowne came in three weeks past with no letter aboard; this troubles me more than you would credit. Pray, write a line, even if it be only to say you are well. — Yr. loving sister, Eliza.',
+      responses: [
+        { label: 'Write a long account of yr. health and prospects', seed: 'family reassured' },
+        { label: 'Send a brief note saying only that you are well', seed: 'minimal reassurance' },
+        { label: 'Set aside, do not reply', seed: 'silence, family hook' },
+      ],
+    },
+    {
+      subject: 'Of Father’s Health and a Matter in the Will',
+      body: 'Sister, — I write with heavy news. Father has had a turn of it this past month and the apothecary is grave; he speaks of his affairs as though they were near concluded, and Mr. Hall the attorney has been sent for. He has asked twice now after yr. charter and whether you might be summoned home before the Spring tides. I cannot tell you what to do, but I will tell you what the matter is. — Yr. loving sister, Eliza.',
+      responses: [
+        { label: 'Promise return upon completion of the charter', seed: 'family hook, no immediate cost' },
+        { label: 'Send instructions to the attorney as to yr. share', seed: 'practical, hook plants' },
+        { label: 'Set aside, do not reply', seed: 'silence' },
+      ],
+    },
+  ],
+
+  faulke: [
+    {
+      subject: 'Of Pepper at Madras and Yr. Ship',
+      body: 'Sir, — I write from the road of Madras, where pepper has reached eight pence the pound and rising — a Dutch fleet was driven off the coast of Sumatra last month and the fork has narrowed. Yr. own returns from the Strait should profit by it if they reach London before the corner closes. The Albatross sails for Bayan-Kor inside the fortnight; if you have private goods you would lay aboard, send word by the next packet. — In trade, Faulke.',
+      responses: [
+        { label: 'Lay private goods aboard the Albatross', seed: 'opens trade hook' },
+        { label: 'Reply asking for further news', seed: 'neutral, may yield more' },
+        { label: 'Set aside, do not reply', seed: 'silence' },
+      ],
+    },
+    {
+      subject: 'A Matter Discussed at the Coffee-house',
+      body: 'Sir, — I had occasion last week at the Madras coffee-house to overhear a conversation between two gentlemen of the Crown service that touched upon yr. own station. The substance was not flattering and the sources unclear, but the names were named. I cannot say more in writing, but if you would have the particulars, I will keep them in hand till we next meet — and I make Bayan-Kor before the wet season at any rate. — In friendship, Faulke.',
+      responses: [
+        { label: 'Ask for the particulars by safe hand', seed: 'accepts hook' },
+        { label: 'Reply that you will hear them in person', seed: 'neutral' },
+        { label: 'Set aside, do not reply', seed: 'silence, hook plants' },
+      ],
+    },
+    {
+      subject: 'A Passage Eastward, if you will',
+      body: 'Sir, — I have a charter for the Banda islands at the close of next month, and there is a free berth in the after-cabin if you have business that side of the Strait. The freight is at the usual rate, and I would not press the offer if I did not think you might profit by it; the spice quotas at the new Dutch establishment there are open to a few names, of which I might whisper yours. — At yr. service, Faulke.',
+      responses: [
+        { label: 'Take the berth, set affairs in order', seed: 'voyage hook' },
+        { label: 'Decline civilly, with thanks', seed: 'neutral' },
+        { label: 'Set aside, do not reply', seed: 'silence' },
+      ],
+    },
+  ],
+
+  pyke: [
+    {
+      subject: 'Yr. Subscription to the Chapel Library',
+      body: 'Sir, — The chapel library at the Mission is in want of a new Donne and a complete Tillotson, the present copies being so eaten by damp that the lessons are read from memory. A subscription of fifty pounds would set us in good order for a generation. I am told the Factor has been generous in past matters, and I write in the same spirit of trust. The Lord prospers those who prosper His house. — In Christian fellowship, J. Pyke.',
+      responses: [
+        { label: 'Subscribe fifty pounds to the library', seed: 'Mission +5, money out' },
+        { label: 'Subscribe a small sum (£10)', seed: 'Mission +2' },
+        { label: 'Set aside, do not reply', seed: 'silence' },
+      ],
+    },
+    {
+      subject: 'A Matter of Conscience at Yr. Godown',
+      body: 'Sir, — I have been told — and I would not write if the source were less plain — that goods of an opium nature have been seen to come and go from yr. godown of late. I do not pry into the affairs of the Company, but I do pry into matters of the soul. There is a price for such trade that no ledger will reckon. I should value an hour’s conversation upon it when next you have the leisure. — In Christian concern, J. Pyke.',
+      responses: [
+        { label: 'Reply that the goods are lawful and necessary', seed: 'Mission -3' },
+        { label: 'Promise to call upon him at the Chapel', seed: 'Mission +2, hook' },
+        { label: 'Set aside, do not reply', seed: 'silence, hook' },
+      ],
+    },
+    {
+      subject: 'Of Yr. Health in this Heat',
+      body: 'Sir, — The wet season presses heavy upon us all, but I have not seen you at chapel this past month, and Hodge tells me you have looked unwell. I write in no spirit of reproach but in friendship. There is a quiet in Sunday mornings that the godown does not give, and I should be glad to see you in the pew when you are next able. — Yr. faithful friend in Christ, J. Pyke.',
+      responses: [
+        { label: 'Promise to attend on Sunday next', seed: 'Mission +2' },
+        { label: 'Reply citing the work, but with respect', seed: 'neutral' },
+        { label: 'Set aside, do not reply', seed: 'silence' },
+      ],
+    },
+  ],
+
+  pirates: [
+    {
+      subject: 'An Arrangement Profitable to Both',
+      body: 'Sir, — A friend of yr. acquaintance at the Pelican’s Nest has asked me to lay a small matter before you. Yr. ship has been remarked at sea on the late voyages and the remarks have not been to her detriment. A token of common interest paid this Quarter would see that the remarks remain so. The figure is not large; the courtesy is. The bearer of this letter is known to the Pelican’s keeper. — Yrs. discreetly.',
+      responses: [
+        { label: 'Pay the token (£100) by the bearer', seed: 'Pirates +10, Crown -5' },
+        { label: 'Reply that you cannot oblige', seed: 'Pirates -5' },
+        { label: 'Set aside, do not reply', seed: 'silence, hook' },
+      ],
+    },
+    {
+      subject: 'A Past Matter Remembered',
+      body: 'Sir, — There is a matter from some months past that I had thought concluded but which the keeper at the Nest has bid me write of. The man you put off the Albatross at the strait was known to friends of ours; he is now in good health and asks after you by name. I think you would prefer that the asking remain courteous. A small remembrance — the figure of which I leave to yr. judgement — would be welcome. — Yrs. discreetly.',
+      responses: [
+        { label: 'Send fifty pounds with a private note', seed: 'Pirates +5' },
+        { label: 'Reply that the matter is closed', seed: 'Pirates -10, hook plants' },
+        { label: 'Set aside, do not reply', seed: 'silence, hook' },
+      ],
+    },
+    {
+      subject: 'A Small Service in the Strait',
+      body: 'Sir, — There is a packet to be carried east on yr. next voyage if you should be so kind. The bearer at Bayan-Kor will give it into yr. hand the night before sailing; the hand at the Pelican’s Nest will receive it. The contents are not yr. concern, and yr. discretion will be appreciated by parties who are in a position to appreciate. — Yrs. quietly.',
+      responses: [
+        { label: 'Accept the packet for the next voyage', seed: 'Pirates +5, plants Brotherhood favour' },
+        { label: 'Reply that you cannot carry it this voyage', seed: 'Pirates 0' },
+        { label: 'Set aside, do not reply', seed: 'Pirates -2, silence' },
+      ],
+    },
+  ],
+
+  terborch: [
+    {
+      subject: 'Concerning the Cinnamon Returns',
+      body: 'Sir, — It is known to me, as is its way, that yr. cinnamon returns of the present season have run favourable; my own factor at Eustace makes mention of them in his last accounting. I write only to suggest that, should you find yrself in want of carriage to Cape Town for any portion of those returns, the Vrouwe Albertina sails from Eustace at the end of the month, and her hold is partly free. The terms could be discussed when next you put in. — Yr. servant, Adriaan ter Borch.',
+      responses: [
+        { label: 'Reply with interest in the carriage terms', seed: 'Dutch +3, hook' },
+        { label: 'Reply politely declining', seed: 'Dutch 0' },
+        { label: 'Set aside, do not reply', seed: 'silence' },
+      ],
+    },
+    {
+      subject: 'Concerning a Rumour',
+      body: 'Sir, — I am told — and Calvinists do not invent rumours — that an arrangement has been quietly struck between yr. station and the Brotherhood for the safe passage of yr. shipping. I express no judgement on the practice, which is older than either of our companies, but I should observe that such arrangements are not durable, and that the Crown’s memory is long. I write as a friend of trade. — Adriaan ter Borch.',
+      responses: [
+        { label: 'Reply with formal denial', seed: 'Dutch -2' },
+        { label: 'Reply that the matter is not his concern', seed: 'Dutch -5' },
+        { label: 'Set aside, do not reply', seed: 'silence, hook plants' },
+      ],
+    },
+    {
+      subject: 'An Offer concerning the Pepper Quota',
+      body: 'Sir, — There is at present a quota of pepper open at Eustace for which my Company has not yet found a counterparty. Yr. own returns would more than fill it, and the price is generous — I am at liberty to say it would be the better part of one shilling above the Madras market. There are conditions, of course, of which the chief is that no portion of the returns be remarked at any other Dutch port for one calendar year. — At yr. service, A. ter Borch.',
+      responses: [
+        { label: 'Accept the quota and the condition', seed: 'Dutch +8, exclusivity hook' },
+        { label: 'Reply asking to negotiate the condition', seed: 'Dutch +2' },
+        { label: 'Set aside, do not reply', seed: 'silence' },
+      ],
+    },
+  ],
+
+  dryden: [
+    {
+      subject: 'Private — A Matter at Court',
+      body: 'Sir, — I write on private paper, the Court not yet having taken the matter up. The recent loss of the Antelope off the Cape has shaken several of our older Court members, and a faction now agitates for tighter management of the country trade. You should know that yr. own private speculations have been remarked upon in the most discreet of corners — favourably, but remarked. I would have you know it before the fact reaches you any other way. — Yr. friend, E. Dryden.',
+      responses: [
+        { label: 'Reply with thanks and a careful enclosure', seed: 'Company +2, hook' },
+        { label: 'Reply requesting further detail', seed: 'Company +1' },
+        { label: 'Set aside, do not reply', seed: 'silence' },
+      ],
+    },
+    {
+      subject: 'Private — Of the Forthcoming Audit',
+      body: 'Sir, — The Court has resolved upon an audit of the eastern stations to be conducted by Mr. Vansittart, who you will recall is a man of the strict party. He will not depart England before the next sailing of the Halifax, but his arrival in the East thereafter is certain. I cannot say what particulars he will look into; I can say that yr. station will not be among the first he attends to, but neither will it be among the last. — Yr. friend, E. Dryden.',
+      responses: [
+        { label: 'Begin to set the books in good order', seed: 'Company +3, hook' },
+        { label: 'Reply that yr. books are in order', seed: 'Company +1' },
+        { label: 'Set aside, do not reply', seed: 'silence' },
+      ],
+    },
+    {
+      subject: 'Private — A Question of Some Delicacy',
+      body: 'Sir, — There is a matter the Court will not put in writing but which several of us would value yr. private opinion upon. The sum of it is this: are the conditions at yr. station, in yr. honest reckoning, such that the Company’s interest is best served by the present arrangement, or by an enlargement? I do not ask for figures; I ask for yr. judgement. The matter will reach yr. ear no other way. — Yr. friend, E. Dryden.',
+      responses: [
+        { label: 'Reply with frank judgement on enlargement', seed: 'Company +5, late-game hook' },
+        { label: 'Reply that you would prefer to defer', seed: 'Company 0' },
+        { label: 'Set aside, do not reply', seed: 'silence' },
+      ],
+    },
+  ],
+};
+
 async function genLetter(gs, sender) {
   // Caller (the auto-letter scheduler) selects the sender. The mood line +
   // stateContext drive the AI to write something the Factor's actual
@@ -4425,16 +4613,22 @@ Return JSON:
     { "label": "Set aside, do not reply", "seed": "ignore, possible drift" }
   ]
 }`;
-  const fallback = {
-    from: sender.from,
-    subject: 'A Matter Requiring Your Attention',
-    body: 'Sir, — I trust this finds you in such health as the climate permits. There is a matter I should wish to lay before you when next our paths cross. Yr. obedient servant, &c.',
-    responses: [
-      { label: 'Reply with cautious interest', seed: 'opens dialogue' },
-      { label: 'Reply with formal refusal', seed: 'closes door politely' },
-      { label: 'Set aside, do not reply', seed: 'silence' },
-    ],
-  };
+  // Pick from the per-sender pool if one exists; otherwise use the generic
+  // fallback. The generic stays as a defensive default for any future sender
+  // whose pool isn't yet authored.
+  const senderPool = FALLBACK_LETTERS[sender.key];
+  const fallback = (senderPool && senderPool.length > 0)
+    ? { from: sender.from, ...senderPool[Math.floor(Math.random() * senderPool.length)] }
+    : {
+        from: sender.from,
+        subject: 'A Matter Requiring Your Attention',
+        body: 'Sir, — I trust this finds you in such health as the climate permits. There is a matter I should wish to lay before you when next our paths cross. Yr. obedient servant, &c.',
+        responses: [
+          { label: 'Reply with cautious interest', seed: 'opens dialogue' },
+          { label: 'Reply with formal refusal', seed: 'closes door politely' },
+          { label: 'Set aside, do not reply', seed: 'silence' },
+        ],
+      };
   const call = await callClaude(prompt);
   const result = call.parsed || fallback;
   const log = {

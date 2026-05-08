@@ -207,17 +207,26 @@ Adding more of the same won't fix it. What's needed:
   returns with the cove's location. Step 3 — Crown route or Brotherhood route,
   each with real consequence.
 
-#### 3. Household crises — DEFERRED
-- Once per ~120 days, one of Hodge / Dass / the Vizier hits a personal
-  crisis that demands a choice.
-- Hodge's relapse turning ruinous. Dass receiving a recall to Madras. The
-  Vizier proposing his clerk's marriage.
-- Each is a one-off scripted letter, deterministic outcomes, real stakes.
-- Solves "the household is just stat ticks."
+#### 3. Household crises — SHIPPED
+- Once per charter, each of Hodge / Dass / the Vizier hits a personal crisis
+  that demands a choice. Triggers in `tickDays` (`makeHodgeCrisisLetter` at
+  1625, `makeDassRecallLetter` at 1704, `makeVizierMarriageLetter` at 1770).
+- Hodge's relapse — 4 branches: reformed (£40 to the Reverend) / sent home
+  (Mr. Tyler replaces him) / junior hired (Mr. Coombe joins) / accepted.
+- Dass's recall — 3 branches: retained (£50 to Madras) / released (Lance
+  Naik Anandan replaces him) / commissioned into the Rajah's service.
+- Vizier's marriage gambit — 3 branches: stand for the family / decline /
+  counter-propose for an open boon (`vizierBoonOwed`).
+- Resolution flags read at HUD (8540), charter-end branching, and
+  `makeSuccessorState`. Each branch's `newAcquaintances` lands a named NPC
+  in the household roster.
+- Solved "the household is just stat ticks."
 
-#### 4. Generational continuation — DEFERRED
+#### 4. Generational continuation — SHIPPED
 - When the charter ends, the title screen offers "Take up the Charter — yr.
-  successor."
+  successor." `makeSuccessorState` (2941) carries forward standing, godown,
+  brigantine, outpost, while resetting per-Factor state. `makeRenewedState`
+  (3061) handles success-path renewal.
 - Same world state, fresh Factor name, new 3-year clock, the godown /
   brigantine / outpost / standing-with-factions all persist.
 - Patrician's lesson: you don't lose; you continue.
@@ -249,9 +258,14 @@ Each crisis offers concrete choices that change staffing:
 a junior clerk arrives (Hodge's apprentice). When you build the Barracks,
 a Sepoy corporal arrives (under Dass). Each named NPC.
 
-**For now this is documented but not built.** Higher priority right now is
-making the existing playthrough rhythm work via private trade and quest
-chains. Staff levers come in the Session 10 batch.
+**Shipped via the household crises.** Each crisis returns a real staff
+choice: Hodge can be reformed / sent home (Mr. Tyler) / paired with a junior
+clerk (Mr. Coombe) / accepted as-is. Dass can be retained (£50) / released
+(Lance Naik Anandan) / commissioned into the Rajah's service. The Vizier's
+marriage gambit returns a held-open boon when counter-proposed. New named
+NPCs land via `newAcquaintances` on resolution; the household HUD reads the
+flags directly. Building completions deliver further named NPCs via
+`BUILDING_ARRIVALS`.
 
 ---
 
@@ -271,20 +285,30 @@ chains. Staff levers come in the Session 10 batch.
 
 ## Backlog (ordered, roughly)
 
-1. ~~Private trade allowance~~ (this session)
-2. ~~Brotherhood operative questline~~ (this session)
-3. ~~"Pursue a thread" action~~ (player-driven invocation of accumulated state — shipped)
-4. ~~Curated period plates~~ (six 1720s engravings inlined as base64 with ImagePlate matcher)
-5. **Cylinder / sealed-letter questlines** — the AI has planted strong "open this!" hooks that have no follow-up
-6. **Household crises** — Hodge relapse, Dass recall, Vizier marriage
-7. **Generational continuation** — successor charter on charter-end
-8. **Crown-gated port** — mirrors the pirate progression; Royal Navy water station unlocks at Crown ≥ +10
-9. **New commodities** — camphor (native), tobacco, coffee (Mocha-routed), indigo
-10. **Fine-goods cargo class** — pearls, diamonds, bezoars: high-value, near-zero weight, occasional offers
-11. **Rivalry mechanics** — periodic news of other Factors' returns
-12. **Internal Company faction split** — a second Director voice contesting the official line
-13. **Building → person arrives** — Counting House → junior clerk; Barracks → Sepoy corporal; Chapel → catechist
-14. **Bottomry loans** — leverage a voyage with consequences if it sinks
+**Reconciled 2026-05-08** — most items below shipped during Sessions 9–10
+without a synchronous backlog update. Strikethroughs reflect what's
+verifiably in `factors_charter.jsx`. Open items follow.
+
+1. ~~Private trade allowance~~ (Session 9)
+2. ~~Brotherhood operative questline~~ (Session 9 — Faulke 3-step chain)
+3. ~~"Pursue a thread" action~~ (Session 9 — player-driven invocation of accumulated state)
+4. ~~Curated period plates~~ (Session 9 — six 1720s engravings inlined as base64 with ImagePlate matcher)
+5. ~~Cylinder / sealed-letter questlines~~ (Cylinder steps 1–2 at 1972/2027, Pale Man 1–2 at 2187/2244, Wilbraham 1–3 at 2350/2402/2532)
+6. ~~Household crises~~ (Hodge / Dass / Vizier — see "Four candidate moves" #3 above)
+7. ~~Generational continuation~~ (`makeSuccessorState` 2941, `makeRenewedState` 3061; charter-end Director letter)
+8. ~~Crown-gated port~~ (Fort Marlborough / Bencoolen in `PORTS`)
+9. ~~New commodities~~ (camphor, tobacco, pearls, diamonds, teak, indigo, ambergris, gambier — `COMMODITIES` is 16-strong)
+10. ~~Fine-goods cargo class~~ (pearls / diamonds / ambergris — high value, near-zero weight)
+11. **Rivalry mechanics** — *partial.* `rivalLine` shipped at 1128: Mr. Hardacre's tonnage at Bencoolen is referenced in `makeQuarterlyNagLetter`, and `rivalRisk: true` shows on MapView for Eustace. **Open:** a richer Port-Royale-4-style periodic-news system — independent rival arrivals/departures at other stations, named rival factors with their own trajectories, occasional windfalls or losses that pressure the player's quota standing.
+12. ~~Internal Company faction split~~ (Dryden's Speculative Bench → Lord Mountfair; `companyFaction` flag drives variant Director correspondence)
+13. ~~Building → person arrives~~ (`BUILDING_ARRIVALS` at 498 — watchman, junior clerk, catechist, plantation overseer, sepoy corporal, shipwright, godown-keeper, master gunner)
+14. ~~Bottomry loans~~ (`gs.bottomry` field at 960 — period-accurate leverage with sink-risk)
+
+### Genuinely open
+
+- **#11 rivalry mechanics** (above) — the only design-shape gameplay item
+  left from the Session 9 backlog.
+- Items collected since — append below.
 
 Append additions below with a date stamp; I'll triage them in the next
 session that touches gameplay.

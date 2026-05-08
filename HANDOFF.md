@@ -15,7 +15,7 @@
 In one long session today, the project went from "PWA with live-AI provider config" to:
 
 1. **Live-AI stripped from PWA** — deterministic-only player path; mobile-first onboarding fixed.
-2. **Pool expansions** — `genOutcome`, `genArrivalVignette`, `genVoyageEncounter`, `genAwayDigest` all expanded with audit-driven random pools. Only `genLetter` faction × mood remains open.
+2. **Pool expansions** — every concern from the deterministic pool audit closed in same-day same-PR work: `genOutcome`, `genArrivalVignette`, `genVoyageEncounter`, `genAwayDigest`, and `genLetter` (per-sender pools, 18 templates × 6 senders).
 3. **Desktop rendering mode** — `useViewportMode()` gates four desktop variants (Letters reading pane, Map+Ledger Overview, Outpost three-pane, encounters/arrivals/letters with inline illustrations from a content-hash-keyed cache).
 4. **Cross-device save sync** — Cloudflare Pages Function + KV; themed playthrough IDs; silent push-on-save / pull-on-launch; conflict modal with auto-export of the loser; live-`gs` ref to avoid the launch-time-stale-closure bug; `aiLog` stripped from synced payload to stay under the 256 KB cap.
 
@@ -28,27 +28,23 @@ In one long session today, the project went from "PWA with live-AI provider conf
 
 ## Deferred items — pick up here
 
-### 1. genLetter faction × mood pool
-
-The only remaining concern from the original deterministic pool audit. Faction voices need Bradley's tonal authoring. See `DESIGN_NOTES.md` "Concerns flagged" section. Six factions × 3 moods = up to 18 letter templates.
-
-### 2. Polished PWA icons
+### 1. Polished PWA icons
 
 Chrome's manifest validation still flags `icon-192.png`. Replacing the placeholder PNGs with hand-designed icons closes this out.
 
-### 3. Lazy-load mid-game views (lower priority)
+### 2. Lazy-load mid-game views (lower priority)
 
 The 1.13+ MB main chunk is still hefty. Lower priority than #1.
 
-### 4. Trusted Types in CSP
+### 3. Trusted Types in CSP
 
 Closes out Lighthouse Best Practices. Not blocking.
 
-### 5. Background audio for desktop mode
+### 4. Background audio for desktop mode
 
 Was deliberately deferred from the two-mode spec. Period ambient (wind, wharf, quill) on desktop title and letter screens. Its own future spec.
 
-### 6. Sync UX polish (sub-items, all low priority)
+### 5. Sync UX polish (sub-items, all low priority)
 
 - Concurrent-pull race: `pullNow` lacks an `inFlight` guard; on first opt-in the pull and immediate push race. Status display can flicker; no data corruption. Low-priority.
 - Conflict-detection sensitivity: `localStorage.setItem` failure (quota) is silent in `writePointer`. On the next launch, missing pointer → false-positive conflict modal. Worth a `setError` surfacing if it ever becomes felt.

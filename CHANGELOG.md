@@ -4,6 +4,14 @@ The Factor's Charter — a chronological log of what's shipped. Newest first.
 
 ---
 
+## 2026-05-07 — genLetter per-sender pools (last open audit item)
+
+The final concern from the deterministic pool audit is closed. `genLetter`'s fallback was a single generic body fired regardless of sender — every fallback letter from every faction read identically. Replaced with per-sender pools: 18 templates across the 6 AUTO_SENDERS (3 each for Wexley, Faulke, Pyke, the Anonymous Hand, ter Borch, Dryden), mirroring each sender's stated mood description and the bradley-approved voice references from `WORLD_NOTES.md`'s "Inspirations Landed" section. Each template is `{subject, body, responses[3]}` with response seeds that plant rep changes and narrative hooks. The generic legacy fallback is preserved as a defensive default for any future sender without a pool entry.
+
+All five concerns from the original 2026-05-07 deterministic pool audit are now addressed in same-day same-PR work.
+
+---
+
 ## 2026-05-07 — Cross-device save sync
 
 A charter can now follow the player between devices. First save of a new charter prompts "Sync this charter across devices?"; on yes, an unguessable themed playthrough ID is generated (`pelican-salt-pepper-1923` style) and the save pushes to Cloudflare KV via `functions/api/save.js` (a Pages Function deployed alongside the site). On launch, the cloud version is checked: if newer, it silently replaces local; if both have progressed since the last sync, a conflict modal shows stats from each version and the player picks one — the discarded version auto-exports as a Manuscript JSON. Existing pre-sync charters can opt in via "⁂ Sync this charter" in the in-game `☰ Menu`.

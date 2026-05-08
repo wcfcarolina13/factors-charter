@@ -39,13 +39,13 @@ Captured at the moment live-AI was stripped from the PWA player path. Every entr
 
 ### genLetter
 
-- **Pool size:** 1
-- **Variety axes:** `sender.from` is used verbatim in the fallback subject line (FROM varies), but subject, body, and all 3 response labels are identical regardless of sender faction or mood
-- **Felt quality:** L — the generic "A Matter Requiring Your Attention" / "I should wish to lay before you when next our paths cross" body carries no game-state content; sender mood is completely ignored; a player receiving the Brotherhood letter and the Director's letter through the same fallback will see identical text with only the FROM field different
-- **Call frequency:** ~8–20 auto-letters per charter (quarterly + faction triggers), plus any manual `genLetter` calls
-- **Expansion priority:** H
-- **Target on expansion:** 5–8 per sender faction (6 factions × 3 mood states = up to 18 distinct templates)
-- **Release blocker?:** No — caller at `factors_charter.jsx:5452` checks `!result.body` before inserting; fallback body is non-empty. Responses array is sanitized at `factors_charter.jsx:5464` with a hardcoded fallback, so even a truncated result won't break the interaction.
+- **Pool size:** 18 (3 templates per sender × 6 senders) — expanded 2026-05-07 in commit `fb779ef`
+- **Variety axes:** keyed by `sender.key`. Each sender has 3 distinct `{subject, body, responses[3]}` templates mirroring that sender's stated mood description in `AUTO_SENDERS`. Random pick within sender. The generic legacy fallback is preserved as a defensive default for senders without a pool entry.
+- **Felt quality:** H — each template captures the sender's specific voice (Wexley familial / Faulke mariner-Brotherhood / Pyke pious-pastoral / Anonymous Hand quiet-pirates / ter Borch Calvinist-trader / Dryden private-Director). Response choices plant rep changes and narrative hooks consistent with the existing scripted-letter design pattern.
+- **Call frequency:** ~8–20 auto-letters per charter
+- **Expansion priority:** Done (was H) — addressed in `fb779ef`
+- **Target on next pass:** if specific senders feel repetitive after several charters, double their individual pool to 6 entries; or layer a "first-time vs returning" axis (the first ter Borch letter could differ from his fifth). Not warranted yet.
+- **Release blocker?:** No
 
 ### genIndiamanLetterPayload
 
@@ -93,7 +93,7 @@ These are cosmetic-thinness items deferred per the spec rule (only functional ga
 
 1. ~~**`genOutcome`** — the journal entry `"A day passed without consequence."` is inserted into the permanent in-game journal on every fallback.~~ **Addressed 2026-05-07 in commit `1395a75`** (8-entry random pools per branch).
 2. ~~**`genArrivalVignette`** — single string for all 6 ports, fires once each.~~ **Addressed 2026-05-07 in commit `fbcbb52`** (per-port distinctive vignettes).
-3. **`genLetter`** — subject + body + response labels identical across all senders and moods. Visible the moment a player gets two fallback letters in a row. **Open — top remaining priority.** Faction voices (Brotherhood, Crown, Mission, Dutch, Rajah, Company) need Bradley's authoring or close review.
+3. ~~**`genLetter`** — subject + body + response labels identical across all senders and moods.~~ **Addressed 2026-05-07 in commit `fb779ef`** (per-sender pools: 18 templates across 6 senders, mirroring each sender's stated mood description).
 4. ~~**`genAwayDigest`** — ignores the event log just shown to the player.~~ **Addressed 2026-05-07 in commit `4db5b84`** (event-aware branched pools).
 5. ~~**`genVoyageEncounter`** — single squall scene every voyage.~~ **Addressed 2026-05-07 in commit `e74efb7`** (12-entry random pool).
 

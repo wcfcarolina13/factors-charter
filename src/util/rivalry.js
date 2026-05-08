@@ -51,9 +51,9 @@ export const RIVALS_REGISTRY = [
 // Each function MUTATES the rival object in place — consistent with the
 // project's existing tickDays mutation pattern.
 
-// Hardacre: ~70 cwt pepper + 35 cwt cinnamon per Indiaman call, slightly
-// ahead of pace. Six calls → 420/210, just over quota. Existing pattern
-// from factors_charter.jsx:1134.
+// Hardacre: 75 cwt pepper + 37 cwt cinnamon per Indiaman call (70+5 and
+// 35+2). Six calls → 450/222 — well ahead of quota (400/200). Existing
+// pattern from factors_charter.jsx:1134.
 export function hardacreBaseline(rival, ctx) {
   const visits = ctx?.indiamanVisits ?? 0;
   rival.pepper   = Math.round(70 * visits + visits * 5);

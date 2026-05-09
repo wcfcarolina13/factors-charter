@@ -8402,7 +8402,7 @@ function IllustrationModal({ prose, onClose }) {
   const seed = Math.abs(
     cleanProse.split('').reduce((h, c) => ((h << 5) - h) + c.charCodeAt(0), 0) || 1
   );
-  const imgUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(fullPrompt)}?width=480&height=320&nologo=true&seed=${seed}&model=flux`;
+  const imgUrl = `/api/illustrate?prompt=${encodeURIComponent(fullPrompt)}&seed=${seed}`;
 
   // Auto-copy on open. If both modern and legacy paths fail, leave the
   // user with a clear instruction to manually select.

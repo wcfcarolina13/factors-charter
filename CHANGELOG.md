@@ -4,6 +4,20 @@ The Factor's Charter — a chronological log of what's shipped. Newest first.
 
 ---
 
+## 2026-05-09 — Image-gen migrated to Cloudflare Workers AI
+
+The fetch+blob shipped earlier in the day was the right shape but the wrong provider. Probing Pollinations directly turned up two distinct failures: (a) `flux` no longer exists — `GET https://image.pollinations.ai/models` returns `["sana"]` and the server silently rewrites every `model=` value to `sana`; (b) the free tier now caps each IP at **one in-flight request**, returning `HTTP 429 {"error":"Too Many Requests","message":"Queue full for IP: …: 1 requests already queued (max: 1). Get unlimited access at https://enter.pollinations.ai"}`. Brad's residential IP in Guadalajara was hitting this on every retry.
+
+New path: a same-origin Cloudflare Pages Function at `functions/api/illustrate.js` proxies Workers AI's `@cf/black-forest-labs/flux-1-schnell`. Real flux, no per-IP queue throttle, deterministic seeds, edge-cached for free by Cloudflare (the URL is content-hash keyed so identical scenes hit cache). The client-side LRU in `src/util/illustration-cache.js` is unchanged in shape — `buildPollinationsUrl` was renamed to `buildIllustrationUrl` and now emits `/api/illustrate?prompt=…&seed=…`. The fetch+blob delivery wrapper from earlier today stays — it's right for this provider too — only the URL changed.
+
+CSP tightened: `https://image.pollinations.ai` removed from both `img-src` and `connect-src`. Same-origin `'self'` now covers the whole illustration path.
+
+Tests 75/75; build clean. **One-time deploy step required:** add an **AI** binding (`AI` → Workers AI) to the Cloudflare Pages project under Settings → Functions → Bindings, alongside the existing `SAVES_KV` binding. Until that's set, the function returns `503 {"error":"AI binding not configured"}` and the modal shows the existing failure message — no regression vs. current state.
+
+Diagnosis context preserved in `~/.claude/projects/-Users-roti/memory/project_pollinations_image_gen.md`.
+
+---
+
 ## 2026-05-09 — Image-gen fetch+blob with explicit timeout
 
 Players were consistently hitting "The in-game generator could not be reached" on both mobile and desktop browsers, despite Pollinations.ai itself being operational. Diagnosis: voyage-prose prompts take 10–15s to respond from Pollinations, and the previous `<img src={url}>` direct path was tripping browser-internal abort heuristics on slow networks — `<img onError>` fired before the bytes arrived even though the response was 200 with valid JPEG.

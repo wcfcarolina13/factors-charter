@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
   getOrFetch, markLoaded, readCache, writeCache,
-  CACHE_KEY, MAX_ENTRIES, buildPollinationsUrl,
+  CACHE_KEY, MAX_ENTRIES, buildIllustrationUrl,
 } from './illustration-cache.js';
 
 function makeStorage() {
@@ -21,7 +21,7 @@ describe('getOrFetch', () => {
   it('returns fetching status for a fresh prose', () => {
     const { url, status, hash } = getOrFetch(storage, 'a sail to leeward');
     expect(status).toBe('fetching');
-    expect(url).toMatch(/^https:\/\/image\.pollinations\.ai/);
+    expect(url).toMatch(/^\/api\/illustrate\?/);
     expect(hash).toBeTruthy();
   });
 
@@ -48,7 +48,7 @@ describe('getOrFetch', () => {
   it('handles null storage gracefully', () => {
     const result = getOrFetch(null, 'a junk passes close');
     expect(result.status).toBe('fetching');
-    expect(result.url).toMatch(/^https:\/\//);
+    expect(result.url).toMatch(/^\/api\/illustrate\?/);
   });
 });
 
@@ -78,12 +78,11 @@ describe('LRU eviction', () => {
   });
 });
 
-describe('buildPollinationsUrl', () => {
+describe('buildIllustrationUrl', () => {
   it('encodes prose into the URL', () => {
-    const url = buildPollinationsUrl('a junk passes close to leeward');
-    expect(url).toMatch(/^https:\/\/image\.pollinations\.ai\/prompt\//);
-    expect(url).toContain('width=480');
-    expect(url).toContain('height=320');
+    const url = buildIllustrationUrl('a junk passes close to leeward');
+    expect(url).toMatch(/^\/api\/illustrate\?/);
+    expect(url).toContain('prompt=');
     expect(url).toContain('seed=');
   });
 });

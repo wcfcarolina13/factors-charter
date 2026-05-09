@@ -516,7 +516,7 @@ const BUILDING_ARRIVALS = {
     role: 'Apprentice Clerk',
     location: 'Bayan-Kor',
     notes: 'A Cornish boy of seventeen, nephew to a Madras factor; sent to learn the trade under Mr. Hodge.',
-    arrivalText: 'Mr. Penhaligon, an apprentice clerk of seventeen, has come down from Madras to learn the trade in the new Counting House. Hodge is, by his own report, gratified.',
+    arrivalText: 'Mr. Penhaligon, an apprentice clerk of seventeen, has come down from Madras to learn the trade in the new Counting House. Hodge is, by his own report, gratified. (His cousin Reginald, by report, writes from Bencoolen under Mr. Hardacre.)',
   },
   chapel: {
     name: 'Catechist Joseph',
@@ -598,7 +598,7 @@ const portTaxRate = (gs, portKey) => {
   else mult = 1.6;
   // The pass is a Dutch instrument; only honoured at Dutch ports.
   if (port.faction === 'dutch' && gs.flags?.dutchTradePass) {
-    mult *= 0.5;
+    mult *= gs.flags?.dutchTradePassReduced ? 0.75 : 0.5;
   }
   return base * mult;
 };
@@ -2872,9 +2872,9 @@ const RIVAL_EVENTS = [
     standingAfter: 'troubled',
     pressureDelta: -10,
     pressureLifetime: 60,
-    priceWindow: { port: 'Bayan-Kor', commodity: 'pepper', sellMult: 1.25, days: 60 },
+    priceWindow: { port: 'Kota Pinang', commodity: 'pepper', sellMult: 1.25, days: 60 },
     build: (s, opts) => ({
-      id: 9400000 + s.day,
+      id: 9405000 + s.day,
       from: 'A correspondent, by the next packet',
       subject: 'News of Bencoolen',
       body: opts.anticipated
@@ -2952,7 +2952,7 @@ const RIVAL_EVENTS = [
               money: -10,
               journal: 'Engaged Mr. Reginald Penhaligon, late of Bencoolen, as a junior writer. £36/year on review.',
               newAcquaintances: [
-                { name: 'Mr. Reginald Penhaligon', role: 'Junior Writer', location: 'Bayan-Kor', notes: 'Defected from Hardacre\'s establishment at Bencoolen. Sober, careful, fair hand.' },
+                { name: 'Mr. Reginald Penhaligon', role: 'Junior Writer', location: 'Bayan-Kor', notes: 'Defected from Hardacre\'s establishment at Bencoolen. Sober, careful, fair hand. — Cousin to the apprentice writer Mr. Penhaligon already in the household.' },
               ],
             },
           },
@@ -2976,10 +2976,10 @@ const RIVAL_EVENTS = [
     preconditions: (s) => true,
     standingDelta: -10,
     pressureDelta: -8, pressureLifetime: 45,
-    priceWindow: { port: 'Bayan-Kor', commodity: 'cinnamon', sellMult: 1.15, days: 45 },
+    priceWindow: { port: 'Kota Pinang', commodity: 'cinnamon', sellMult: 1.15, days: 45 },
     build: (s, opts) => ({
       id: 9400300 + s.day,
-      from: 'Capt. Faulke of the Albatross',
+      from: 'Capt. Thomas Faulke, of the Albatross',
       subject: 'A matter from the strait',
       body: opts.anticipated
         ? `Sir, — As foretold. Mr. Hardacre's chief pilot, Bugis, has been pressed into service by the Royal Navy at Trincomalee for an Indian Ocean station. Bencoolen is, for the present quarter, navigating with green hands.`
@@ -3058,7 +3058,7 @@ const RIVAL_EVENTS = [
     preconditions: (s) => true,
     standingDelta: -8,
     pressureDelta: -5, pressureLifetime: 45,
-    priceWindow: { port: 'Port St. Eustace', commodity: 'sandalwood', sellMult: 1.15, days: 45 },
+    priceWindow: { port: 'Port St. Eustace', commodity: 'sandalwood', buyMult: 1.15, days: 45 },
     build: (s, opts) => ({
       id: 9410000 + s.day,
       from: 'Mynheer Hendrik Boom',
@@ -3083,7 +3083,7 @@ const RIVAL_EVENTS = [
     key: 'terborch-promotion-attempted',
     rival: 'terborch',
     minDay: 360, maxDay: 900,
-    preconditions: (s) => true,
+    preconditions: (s) => !(s.rivals?.terborch?.eventsFired?.includes('terborch-scandal')),
     standingDelta: 10,
     standingAfter: 'rising',
     pressureDelta: 6, pressureLifetime: 60,
@@ -3304,7 +3304,7 @@ const RIVAL_EVENTS = [
     pressureDelta: -6, pressureLifetime: 45,
     build: (s, opts) => ({
       id: 9420200 + s.day,
-      from: 'Capt. Faulke of the Albatross',
+      from: 'Capt. Thomas Faulke, of the Albatross',
       subject: 'A pilot for the strait',
       body: `Sir, — There is in Bayan-Kor at present, looking for employment, one Khojah Avedik — a Persian pilot of fifteen years\' service in the bay, late of Mr. Lowji\'s establishment at Bombay. He left under circumstances of which I do not write upon paper. He knows the strait between here and Macao as a man knows his own door.\n\nHe asks £80 per annum, with the use of a clerk to keep his accounts in English. I should not press the matter, but I have seen his hand at the wheel myself, and the matter recommends itself.\n\nYr. obedt. servant,\nFaulke`,
       responses: [
@@ -3366,7 +3366,7 @@ const RIVAL_EVENTS = [
     preconditions: (s) => true,
     standingDelta: -5,
     pressureDelta: -3, pressureLifetime: 30,
-    priceWindow: { port: 'Bayan-Kor', commodity: 'calico', sellMult: 0.85, days: 30 },
+    priceWindow: { port: 'Bayan-Kor', commodity: 'calico', buyMult: 0.85, days: 30 },
     build: (s, opts) => ({
       id: 9420400 + s.day,
       from: 'Mr. Pestonji Cama',

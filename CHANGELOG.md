@@ -4,6 +4,28 @@ The Factor's Charter — a chronological log of what's shipped. Newest first.
 
 ---
 
+## 2026-05-09 — Bundle slimming: plates moved to static assets
+
+The PWA was shipping a 1.21 MB main JS chunk and a 1.33 MiB precache. Brad's typical play surface (Mexican mobile, cold load) felt the weight. The HANDOFF item framed this as "lazy-load mid-game views" — code-splitting questline letter helpers, AUTO_SENDERS pools, etc. — but a measurement exposed that framing as wrong: the six `PLATE_*_DATA` base64-inlined JPEGs accounted for **814 KB of 1,361 KB** in `factors_charter.jsx` (60 % of the source). Splitting code chunks would have saved 20–50 KB; rounding error against the inlined PNG payload.
+
+Extracted the six engravings to `public/plates/plate-{vii..xii}.jpg` (six 800×600 baseline JPEGs, ~610 KB on disk total — base64 has ~33 % overhead vs raw bytes). `ART_PLATES` and `pickPlate` extracted to a new `src/util/plates.js`, mirroring the existing `src/util/*` pattern; the JSX monolith now does `import { pickPlate } from './src/util/plates.js'` and is 850 KB lighter on disk. Workbox runtime caching at `urlPattern: /plates/` (`CacheFirst`, max 6, 30-day TTL) keeps second encounter instant; plates are explicitly excluded from precache via `globIgnores: ['plates/**']` so install stays slim.
+
+Artifact-runtime fallback preserved: `src/util/plates.js` detects `window.storage` and prefixes paths with `https://factors-charter.pages.dev/plates/` so the legacy artifact target keeps loading the engravings.
+
+| Metric | Before | After |
+|---|---:|---:|
+| Main JS chunk | 1,213.99 KB | **379.86 KB** |
+| Main JS gzipped | 743.98 KB | **113.19 KB** |
+| Precache | 1,331.11 KiB | **517.79 KiB** |
+| Tests | 75 | **83** (8 new in `plates.test.js`) |
+| Vite "chunks > 500 kB" warning | YES | gone |
+
+Phase 2 (code-splitting questline helpers, AUTO_SENDERS, RIVAL_EVENTS, SVG vignettes) is unnecessary — Phase 1 alone trounced the spec targets. Re-evaluate only if the bundle creeps back over 500 KB.
+
+Spec at `docs/superpowers/specs/2026-05-09-bundle-slimming-design.md`; plan at `docs/superpowers/plans/2026-05-09-bundle-slimming.md`.
+
+---
+
 ## 2026-05-09 — Image-gen fetch+blob with explicit timeout
 
 Players were consistently hitting "The in-game generator could not be reached" on both mobile and desktop browsers, despite Pollinations.ai itself being operational. Diagnosis: voyage-prose prompts take 10–15s to respond from Pollinations, and the previous `<img src={url}>` direct path was tripping browser-internal abort heuristics on slow networks — `<img onError>` fired before the bytes arrived even though the response was 200 with valid JPEG.

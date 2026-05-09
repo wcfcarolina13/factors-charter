@@ -26,6 +26,12 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,png,svg,woff2}'],
+        // /plates/*.jpg are 6 × ~100 KB period engravings only encountered
+        // after a player action that masks load latency (opening a letter,
+        // completing a voyage). Excluding them from precache keeps the SW
+        // install slim; the runtimeCaching rule below makes second
+        // encounter instant.
+        globIgnores: ['plates/**'],
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/fonts\.(googleapis|gstatic)\.com\/.*/,
@@ -33,6 +39,15 @@ export default defineConfig({
             options: {
               cacheName: 'google-fonts',
               expiration: { maxEntries: 20, maxAgeSeconds: 60 * 60 * 24 * 365 },
+            },
+          },
+          {
+            urlPattern: ({ url }) => url.pathname.startsWith('/plates/'),
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'plates',
+              expiration: { maxEntries: 6, maxAgeSeconds: 60 * 60 * 24 * 30 },
+              cacheableResponse: { statuses: [0, 200] },
             },
           },
         ],

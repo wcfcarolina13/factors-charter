@@ -4696,6 +4696,75 @@ const FALLBACK_LETTERS = {
         { label: 'Set aside, do not reply', seed: 'Pirates -2, silence' },
       ],
     },
+    {
+      subject: 'Of yr. peers in these waters',
+      body: `Sir, — A small voice in the strait writes: there is news of yr. peer at Bencoolen, kept close by the high office, of which we have laid eyes. The matter would interest you, perhaps, before it is general talk.
+
+The price for yr. private knowledge of it is forty pounds, paid as before — through the boy at the wharf with the broken cap. We do not write again on the matter; we hold it for two weeks. After that the news is no longer ours alone.
+
+—`,
+      responses: [
+        {
+          label: 'Pay the £40; learn what is known',
+          seed: 'pay; intel plant; small pirate rep',
+          fixedOutcome: {
+            prose: 'You send the boy at the wharf with the agreed sum. A note returns the same evening, in a hand the Factor does not know — three sentences only, but enough to anticipate what the next packet from Bencoolen will say.',
+            changes: {
+              money: -40,
+              flags: { hardacreIntelPlant: true },
+              journal: 'Bought intelligence on Mr. Hardacre at Bencoolen — £40 to a Brotherhood hand, by the boy at the wharf.',
+            },
+          },
+        },
+        {
+          label: 'Decline; let the news come in its own time',
+          seed: 'decline cleanly',
+          fixedOutcome: {
+            prose: 'You write nothing in reply. The strait keeps its own counsel; the boy at the wharf is not seen at the gangway.',
+            changes: { journal: 'Declined the Brotherhood\'s offer of intelligence on Mr. Hardacre.' },
+          },
+        },
+        {
+          label: 'Refuse; the matter is unbecoming',
+          seed: 'refuse plainly; small pirate -1',
+          fixedOutcome: {
+            prose: 'You write a polite refusal — \'such intelligence as is offered, the Factor does not seek\' — and seal it with the household stamp. The boy at the wharf does not return to it; the small voice in the strait, the Factor suspects, takes the refusal personally.',
+            changes: {
+              reputation: { pirates: -1 },
+              journal: 'Refused the Brotherhood\'s offer plainly. They will remember.',
+            },
+          },
+        },
+      ],
+    },
+    {
+      subject: 'A second hand on the Bencoolen matter',
+      body: `Sir, — The strait writes again. The price has been put at sixty pounds — yr. peer at Bencoolen has had a turn, and the news will weight against him within the month. You may wish to lay yr. plans accordingly; if not, the matter passes us by.
+
+—`,
+      responses: [
+        {
+          label: 'Pay the £60; the matter is known to me',
+          seed: 'pay; intel plant',
+          fixedOutcome: {
+            prose: 'Sixty pounds to the boy at the wharf, in a sealed packet of the household colour. The intelligence returns: a misadventure at Bencoolen, of the kind that does not appear in the Court\'s correspondence for some weeks yet. The Factor lays his plans accordingly.',
+            changes: {
+              money: -60,
+              flags: { hardacreIntelPlant: true },
+              journal: 'Paid £60 for further news of Mr. Hardacre. The strait knew it before the Court did.',
+            },
+          },
+        },
+        {
+          label: 'Decline; £60 is heavy',
+          seed: 'decline; no cost',
+          fixedOutcome: {
+            prose: 'You send back a single line: \'such matters as the Court will hear in due course, the Factor is content to wait upon.\' The strait shrugs, in the way the strait shrugs.',
+            changes: { journal: 'Declined the Brotherhood\'s second offer; £60 was the price of a private fortnight.' },
+          },
+        },
+      ],
+    },
   ],
 
   terborch: [

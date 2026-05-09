@@ -2797,6 +2797,11 @@ function pickAutoSender(s) {
   return eligible[eligible.length - 1];
 }
 
+// Rival-event template pool. Populated in Phase 6. The scheduler in
+// tickDays handles the empty-pool case gracefully (pickRivalEvent
+// returns null).
+const RIVAL_EVENTS = [];
+
 // ─────────── CHARTER-END LETTER ───────────
 // At day 0 the Court closes the file. The letter the Director writes is
 // templated by completeness — three tonal variants. Returns both the
@@ -3863,6 +3868,82 @@ function tickDays(gs, days) {
         s.awayLog.push({ day: s.day, type: 'letter', text: 'A reply from Mynheer ter Borch by the next Dutch packet — the tone is what yr. standing has earned.' });
       }
     }
+
+    // ── Rivalry events. Fires roughly every 90-150 days from a per-rival
+    // template pool. Pool is RIVAL_EVENTS (Phase 6 — empty during
+    // structural phases). pickRivalEvent enforces eligibility, no-repeats,
+    // and the 240-day cluster cap.
+    if (!s.charterClosed) {
+      // Initialize first-event day with 60-120-day jitter from charter start.
+      if (!s.flags?.firstRivalEventDay) {
+        s.flags = {
+          ...(s.flags || {}),
+          firstRivalEventDay: 60 + Math.floor(Math.random() * 60),
+        };
+      }
+      const nextEventDay = s.flags?.nextRivalEventDay ?? s.flags.firstRivalEventDay;
+      if (s.day >= nextEventDay) {
+        const event = pickRivalEvent(s, RIVAL_EVENTS);
+        if (event) {
+          const intelFlag = `${event.rival}IntelPlant`;
+          const wasAnticipated = !!s.flags?.[intelFlag];
+          const letter = event.build(s, { anticipated: wasAnticipated });
+          s.letters = [...s.letters, letter];
+          s.lettersGenerated = (s.lettersGenerated || 0) + 1;
+          s.rivals[event.rival].eventsFired = [
+            ...(s.rivals[event.rival].eventsFired || []),
+            event.key,
+          ];
+          if (event.standingAfter) s.rivals[event.rival].state = event.standingAfter;
+          if (event.standingDelta) {
+            s.rivals[event.rival].standing = Math.max(0, Math.min(100,
+              (s.rivals[event.rival].standing || 50) + event.standingDelta));
+          }
+          s.rivals[event.rival].lastEventDay = s.day;
+
+          // Apply priceWindow if any.
+          if (event.priceWindow) {
+            s.priceWindows = [
+              ...(s.priceWindows || []),
+              { ...event.priceWindow, expiresDay: s.day + event.priceWindow.days },
+            ];
+          }
+          // Apply pressure modifier (use defaults if event doesn't override).
+          const pressureDelta    = event.pressureDelta    ?? (event.standingDelta < 0 ? -8 : 8);
+          const pressureLifetime = event.pressureLifetime ?? 60;
+          s.rivalPressureModifiers = [
+            ...(s.rivalPressureModifiers || []),
+            { delta: pressureDelta, fromDay: s.day, lifetimeDays: pressureLifetime },
+          ];
+          // Consume the intel-plant flag.
+          if (wasAnticipated) {
+            const flagsNext = { ...(s.flags || {}) };
+            delete flagsNext[intelFlag];
+            s.flags = flagsNext;
+          }
+          s.awayLog.push({ day: s.day, type: 'letter', text: 'A note from London concerning the affairs of yr. peers.' });
+        }
+        s.flags = {
+          ...(s.flags || {}),
+          nextRivalEventDay: s.day + 90 + Math.floor(Math.random() * 60),
+        };
+      }
+    }
+
+    // ── Cleanup expired priceWindows.
+    if (s.priceWindows && s.priceWindows.length > 0) {
+      s.priceWindows = pruneExpiredWindows(s.priceWindows, s.day);
+    }
+
+    // ── Prune fully-elapsed pressure modifiers (lifetime exhausted).
+    if (s.rivalPressureModifiers && s.rivalPressureModifiers.length > 0) {
+      s.rivalPressureModifiers = s.rivalPressureModifiers.filter(
+        m => (s.day - m.fromDay) < m.lifetimeDays
+      );
+    }
+
+    // ── Recompute rivalPressure.
+    s.rivalPressure = computeRivalPressure(s);
 
     // ── Raid: opportunists at the godown. Stockade halves the chance, the
     // Barracks halves it again. The Magazine caps any single loss at 10%.

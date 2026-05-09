@@ -29,4 +29,4 @@ function setOverride(mode) {
   } catch (e) { /* localStorage unavailable */ }
 }
 
-export { detectMode, setOverride, OVERRIDE_KEY, DESKTOP_QUERY };
+export { detectMode, setOverride, DESKTOP_QUERY };

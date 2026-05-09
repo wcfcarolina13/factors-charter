@@ -4573,9 +4573,11 @@ Reputation deltas should be small (-15 to +15). Only include factions that actua
 
 // Per-sender deterministic fallback pools for genLetter. Each entry is a
 // {subject, body, responses} object — sender.from is added at lookup time.
-// 6 senders × 3 templates each = 18 entries. Templates mirror the AUTO_SENDERS
-// mood descriptions (Wexley familial, Faulke mariner-Brotherhood, Pyke pious-pastoral,
-// Anonymous Hand quiet-Brotherhood, ter Borch Calvinist-trader, Dryden private-Director).
+// Templates mirror the AUTO_SENDERS mood descriptions (Wexley familial,
+// Faulke mariner-Brotherhood, Pyke pious-pastoral, Anonymous Hand
+// quiet-Brotherhood, ter Borch Calvinist-trader, Dryden private-Director,
+// Cama careful-Parsi). Pool sizes vary by sender; pirates carries extra
+// rivalry intel-buy templates.
 // Static prose — no gs interpolation — for safety and predictability.
 const FALLBACK_LETTERS = {
   wexley: [

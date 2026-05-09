@@ -290,3 +290,17 @@ describe('pickRivalEvent', () => {
     expect(counts.hardacre).toBeGreaterThan(counts.lowji);
   });
 });
+
+describe('RIVAL_EVENTS pool sufficiency (smoke)', () => {
+  // This test does NOT import RIVAL_EVENTS — that lives in the JSX
+  // monolith. It documents the size requirement and is a placeholder
+  // for an integration test that imports the pool when the project
+  // adopts a pool-export pattern. For now, the assertion is on the
+  // registry shape: 3 rivals, each with an intel channel.
+  it('has three rivals each bound to an intel channel', () => {
+    expect(RIVALS_REGISTRY.length).toBe(3);
+    for (const r of RIVALS_REGISTRY) {
+      expect(r.intelChannel).toMatch(/^(brotherhood|vizier|cama)$/);
+    }
+  });
+});

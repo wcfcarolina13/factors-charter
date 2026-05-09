@@ -1,10 +1,10 @@
 # HANDOFF — The Factor's Charter
 
-**Date:** 2026-05-09 (end of session — three branches merged)
+**Date:** 2026-05-09 (later same day — sabotage arcs landed)
 **For:** Bradley (or a fresh Claude session) resuming this project
 **Branch:** `main`
 **Live build:** https://factors-charter.pages.dev (auto-deploys from `main`)
-**Status:** Three branches landed on `main` in one sitting. Tests **92/92**; build clean. Main JS bundle dropped from 1.21 MB → 380 KB (744 → 113 KB gzipped). One blocking action remains in the Cloudflare Pages dashboard before the new image-gen path is live (see "Deploy step" below).
+**Status:** Four branches landed on `main` today. Tests **120/120**; build clean (main 399 KB / 118 KB gz — +20 KB / +5 KB gz over the post-bundle-slimming baseline, attributable to ~390 lines of new sabotage prose). Workers AI binding action below is still pending.
 
 > Previous handoff archived in `git log` at commit `145ad16`.
 
@@ -17,6 +17,8 @@ Continuous workflow across two calendar days:
 1. **DESIGN_NOTES backlog reconciliation** — 8 of 9 "deferred" backlog items verified as already shipped during Sessions 9–10. Only #11 (rivalry mechanics) was genuinely open.
 
 2. **Rivalry mechanics** — Three named rivals (Hardacre at Bencoolen, ter Borch at Eustace, Lowji at Bombay) with deterministic baseline trajectories + per-rival template pool of 18 events. Four player-facing levers (read pressure, trade arbitrage, staff poaching, intel buy via three channels). Merged via `--no-ff` as `7a48210`. Closes the design-shape backlog.
+
+2a. **Sabotage arcs (the 5th rivalry lever)** — Three two-step letter-mediated arcs, one per rival, each routed through the rival's existing intel channel. Step 1 lands when the player is in Year 2+, under genuine pressure (rivalPressure ≥ 60), and has a prior relationship with the channel (a new persistent `*IntelEverBought` flag set wherever the volatile `*IntelPlant` flag is set). Player chooses Commission / Negotiate / Decline; Step 2 fires 45 days later with a deterministic Success / Partial / Failure roll modulated by channel rapport. Outcomes flip the rival to `state: 'broken'` (success), apply pressure modifiers, and in the ter Borch failure case lock the player out of Eustace for 90 days via a new `flags.banned_eustace_until`. Pure-logic resolver in `src/util/sabotage.js` with 28 vitest cases. Spec: `docs/superpowers/specs/2026-05-09-sabotage-arcs-design.md`. Plan: `docs/superpowers/plans/2026-05-09-sabotage-arcs.md`.
 
 3. **Image-gen fetch+blob refactor** (commit `4b83179`) — Pollinations responses take 10–15s; `<img src={url}>` was tripping browser-internal abort heuristics. Switched to `fetch()` + 60s `AbortController` + `URL.createObjectURL(blob)`.
 
@@ -83,9 +85,11 @@ If Workers AI regresses, fall back to a different model (e.g. `@cf/stabilityai/s
 ### 6. Rivalry follow-ups (low priority, all flagged in code review)
 
 - **Cama £5 school subscription** plants no tracking flag. The "warmer hand" prose is currently flavour-only; if a future Cama-loyalty mechanic is wanted, add `flags.camaSchoolPaid: true` in the Subscribe branch.
-- **Sabotage lever** — the v1's deliberately-deferred 5th rivalry lever (sponsoring a rival's downfall via Brotherhood-bribe / customs-tip). The `gs.rivals[X].state = 'broken'` machinery already exists — would land as a separate spec.
+- ~~**Sabotage lever**~~ — shipped 2026-05-09 (see "Sabotage arcs" under What shipped this session).
 - **Dyad/triad rival events** — currently each rival's events are independent. Cross-rival events ("Hardacre and ter Borch fight over a cargo") would be a separate expansion.
 - **Two-step `terborch-promotion-attempted` arc** — currently a single firing. Could become a 2-step arc (announcement → resolution) like Cylinder/Wilbraham.
+- **Re-triggerable sabotage** — sabotage offers fire once per rival per charter; declined arcs are gone. If a "channel comes back later with a better offer" mechanic is wanted, add a 180-day-delay re-offer gated on `sabotage_<rival>_method === 'declined'`.
+- **Charter-end sabotage flavour** — `gs.sabotagesCommitted` is exposed but not yet read by the final Director letter. A small prose-flavour pass on `makeCharterEndLetter` could mention "rumours followed you to London" when the count is high.
 
 ### 7. ~~Sync UX polish~~ — all sub-items shipped 2026-05-07/08
 

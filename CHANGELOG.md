@@ -4,6 +4,28 @@ The Factor's Charter — a chronological log of what's shipped. Newest first.
 
 ---
 
+## 2026-05-09 — Sabotage arcs: the deferred 5th rivalry lever
+
+The rivalry v1 spec (2026-05-08) deliberately deferred sabotage with the boundary that *"if a Hardacre downfall arc is wanted later, it lands as a new questline alongside Cylinder/Pale Man/Wilbraham, not within rivalry mechanics."* This ships exactly that — three two-step letter-mediated arcs, one per rival, each routed through the rival's existing intel channel.
+
+Per-rival shape (mirrors the Faulke / Cylinder / Pale Man / Wilbraham pattern):
+
+- **Hardacre** — Brotherhood lifting in the Mentawai Strait. £500 commission / £300 negotiate.
+- **ter Borch** — Vizier-arranged customs forgery, recall to Batavia. £700 / £450.
+- **Lowji** — Cama-coordinated loan-recall through Bombay bills-of-exchange houses. £600 / £400.
+
+Step 1 lands when (a) charter not closed, (b) day ≥ 365, (c) `computeRivalPressure ≥ 60`, (d) the channel relationship is on the books — gated by a new persistent `<rival>IntelEverBought` flag set wherever the volatile `<rival>IntelPlant` is set (the volatile flag is consumed when its anticipated event fires, so it can't double as the "have we worked together" signal). Step 2 fires 45 days after commitment with a deterministic Success / Partial / Failure roll modulated by the channel rapport axis (`pirates` / `rajah` / `company` reputation). Outcomes flip the rival to `state: 'broken'` (success), apply pressure modifiers (-25 lifetime 480 d on success; -10 lifetime 240 d on partial; +15 lifetime 360 d on failure), and in the ter Borch failure case lock the player out of Eustace for 90 days via a new `flags.banned_eustace_until` honored in MapView.
+
+Pure-logic resolver in `src/util/sabotage.js` (canOfferSabotage / resolveSabotage / sabotageChannel) with **28 vitest cases** covering every gate, both methods, the rapport modifier, the volatile-vs-persistent flag distinction, and the frozen-table invariants. Six new letter-helper functions in the JSX monolith mirror the established questline shape; six guarded `if` blocks in `tickDays` post Step 1 / Step 2 letters when conditions hold. `applyOutcomeChangesPure` extended with three new clauses (`changes.rivals` patch, `changes.rivalPressureModifierPush`, `changes.sabotagesCommitted` delta) so all three arcs route their effects through the standard letter-resolve path. Six `MAJOR_COMMITMENTS` entries surface in-flight and resolved arcs as Standing Arrangements; `commitmentsFor` learned to suppress the "awaiting word" line once an arc is resolved so the ledger doesn't double-up.
+
+Per-charter resets: succession (`makeSuccessorState`) and renewal (`makeRenewedState`) both strip `^sabotage_` flags and `banned_eustace_until`, and reset `sabotagesCommitted` to 0 — fresh competitive curve each charter, consistent with rivalry's existing reset.
+
+Tests **92 → 120**. Main bundle 380 KB → 399 KB (gzip 113 → 118 KB), +20 KB / +5 KB gz, attributable to ~390 lines of period-appropriate prose in the six letter helpers; well under the 500 KB warning threshold.
+
+Spec at `docs/superpowers/specs/2026-05-09-sabotage-arcs-design.md`; plan at `docs/superpowers/plans/2026-05-09-sabotage-arcs.md`.
+
+---
+
 ## 2026-05-09 — Hygiene pass: drop unused viewport export, add test suite
 
 A scan over `src/util/*`, `functions/*`, and the JSX monolith for TODO/FIXME/HACK markers, stray `console.log`, dead imports, unused exports, and stale comments. Single dead export found and removed: `OVERRIDE_KEY` in `viewport.js`, exported but only referenced internally. Added 9 vitest cases to `src/util/viewport.test.js` (the only `src/util` module without coverage worth testing — `style-prefix.js` is a single-string constant, not worth a test). Tests 83 → 92.

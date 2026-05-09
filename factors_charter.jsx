@@ -817,6 +817,9 @@ const ensureShape = (gs) => {
   if (!Array.isArray(next.rivalPressureModifiers)) {
     next.rivalPressureModifiers = [];
   }
+  if (typeof next.sabotagesCommitted !== 'number') {
+    next.sabotagesCommitted = 0;
+  }
   return next;
 };
 
@@ -934,6 +937,7 @@ Mr. W. died this morning at half past four. The Reverend will not come down from
   priceWindows: [],
   rivalPressure: 50,
   rivalPressureModifiers: [],
+  sabotagesCommitted: 0,
   reputation: { company: 0, crown: 0, rajah: 0, pirates: 0, mission: 0, dutch: 0 },
   crew: [
     { name: 'Mr. Hodge', role: 'Clerk', trait: 'drunkard' },
@@ -3650,6 +3654,8 @@ function makeSuccessorState(prev, newName) {
   for (const [k, v] of Object.entries(prev.flags || {})) {
     if (/LetterSent$/.test(k)) continue;            // letter triggers reset
     if (/QuestStep$/.test(k)) continue;             // multi-step quests reset
+    if (/^sabotage_/.test(k)) continue;             // sabotage arcs reset per charter
+    if (k === 'banned_eustace_until') continue;     // travel bans expire with the charter
     if (k === 'firstLetterPresented') continue;
     carryFlags[k] = v;
   }
@@ -3706,6 +3712,7 @@ function makeSuccessorState(prev, newName) {
     priceWindows: [],                   // no inherited arbitrage windows
     rivalPressure: 50,                  // baseline; recomputed first tick
     rivalPressureModifiers: [],
+    sabotagesCommitted: 0,             // sabotage record does not carry forward
     lettersGenerated: 0,
     // Preserved as-is: outpost, ship, npcs, reputation
   };
@@ -3753,6 +3760,8 @@ function makeRenewedState(prev) {
   for (const [k, v] of Object.entries(prev.flags || {})) {
     if (/LetterSent$/.test(k)) continue;
     if (/QuestStep$/.test(k)) continue;
+    if (/^sabotage_/.test(k)) continue;             // sabotage arcs reset per charter
+    if (k === 'banned_eustace_until') continue;     // travel bans expire with the charter
     if (k === 'firstLetterPresented') continue;
     carryFlags[k] = v;
   }
@@ -3789,6 +3798,7 @@ function makeRenewedState(prev) {
     priceWindows: [],
     rivalPressure: 50,
     rivalPressureModifiers: [],
+    sabotagesCommitted: 0,
     lettersGenerated: 0,
     // Preserved as-is: outpost, ship, npcs, reputation, acquaintances, crew
   };

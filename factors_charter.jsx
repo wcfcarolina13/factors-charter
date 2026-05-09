@@ -5262,6 +5262,38 @@ const MAJOR_COMMITMENTS = [
       v === 'closed-refused'       ? 'You refused the unnamed caller; the watch is heavier.' :
       v === 'closed-forged'        ? 'A forged copy was given; the original sleeps in yr. strongbox.' :
       null },
+
+  // Sabotage arcs (committed-but-unresolved surface as a Standing
+  // Arrangement; resolved outcomes surface for the rest of the charter).
+  // The 'declined' value is intentionally not surfaced — declining closes
+  // the arc cleanly and there is nothing to remember in the ledger.
+  { key: 'sabotage_hardacre_method', label: (v) =>
+      v === 'commission' ? 'A Brotherhood lifting at Bencoolen — committed; awaiting word.' :
+      v === 'negotiate'  ? 'A Brotherhood matter at Bencoolen — bargained-for; awaiting word.' :
+      null },
+  { key: 'sabotage_hardacre_resolved', label: (v) =>
+      v === 'success' ? 'Mr. Hardacre walks the Bencoolen wharf with no command.' :
+      v === 'partial' ? 'Mr. Hardacre lost a freight in the strait; he kept his bottom.' :
+      v === 'failure' ? 'A Brotherhood matter at Bencoolen — done badly; yr. name was named.' :
+      null },
+  { key: 'sabotage_terborch_method', label: (v) =>
+      v === 'commission' ? 'A customs matter against Mynheer ter Borch — committed; awaiting word.' :
+      v === 'negotiate'  ? 'A customs matter against Mynheer ter Borch — bargained-for; awaiting word.' :
+      null },
+  { key: 'sabotage_terborch_resolved', label: (v) =>
+      v === 'success' ? 'Mynheer ter Borch is at Batavia under inquiry.' :
+      v === 'partial' ? 'Mynheer ter Borch was lightly fined; he kept Eustace.' :
+      v === 'failure' ? 'A customs matter against ter Borch — done badly; Eustace was closed to you.' :
+      null },
+  { key: 'sabotage_lowji_method', label: (v) =>
+      v === 'commission' ? 'A loan-recall against Mr. Lowji — Cama is moving on it.' :
+      v === 'negotiate'  ? 'A loan-recall against Mr. Lowji — bargained-for; Cama is moving on it.' :
+      null },
+  { key: 'sabotage_lowji_resolved', label: (v) =>
+      v === 'success' ? 'Mr. Lowji is gone home to Surat; Bombay is the smaller place for it.' :
+      v === 'partial' ? 'Mr. Lowji is the smaller man for two bottoms.' :
+      v === 'failure' ? 'A loan-recall against Lowji — Cama\'s hand was seen; £200 was called against you.' :
+      null },
 ];
 
 function commitmentsFor(gs) {
@@ -5270,6 +5302,10 @@ function commitmentsFor(gs) {
   for (const c of MAJOR_COMMITMENTS) {
     const v = gs.flags[c.key];
     if (v === undefined || v === null || v === false) continue;
+    // Sabotage: once resolved, suppress the "awaiting word" method line —
+    // the resolved-line carries the ledger entry from then on.
+    const sabotageMethodMatch = /^sabotage_(\w+)_method$/.exec(c.key);
+    if (sabotageMethodMatch && gs.flags[`sabotage_${sabotageMethodMatch[1]}_resolved`]) continue;
     const line = c.label(v);
     if (line) out.push({ key: c.key, line });
   }
@@ -10068,6 +10104,8 @@ function MapView({ gs, sailTo }) {
       <div>
         {ports.map(([k, p]) => {
           const blocked = p.requiresRep && Object.entries(p.requiresRep).some(([f, n]) => gs.reputation[f] < n);
+          const eustaceBannedUntil = gs.flags?.banned_eustace_until ?? 0;
+          const eustaceBanned = (k === 'Port St. Eustace') && eustaceBannedUntil > gs.day;
           const visited = gs.visited.includes(k);
           const sells = Object.entries(p.sells || {});
           const buys = Object.entries(p.buys || {});
@@ -10085,15 +10123,20 @@ function MapView({ gs, sailTo }) {
                 </div>
                 <button
                   className="wax-button"
-                  disabled={blocked || tooDamaged}
+                  disabled={blocked || tooDamaged || eustaceBanned}
                   onClick={() => sailTo(k)}
                 >
-                  {blocked ? 'Not Welcome' : tooDamaged ? 'Ship Unfit' : 'Sail Here'}
+                  {eustaceBanned ? 'Closed to You' : blocked ? 'Not Welcome' : tooDamaged ? 'Ship Unfit' : 'Sail Here'}
                 </button>
               </div>
               {blocked && (
                 <div className="italic" style={{ fontSize: '0.85em', color: '#8b1a1a', marginTop: '0.5rem' }}>
                   &mdash; Requires standing with {Object.entries(p.requiresRep).map(([f]) => FACTIONS[f].short).join(', ')}.
+                </div>
+              )}
+              {eustaceBanned && (
+                <div className="italic" style={{ fontSize: '0.85em', color: '#8b1a1a', marginTop: '0.5rem' }}>
+                  &mdash; Eustace is closed to yr. brigantine until day {eustaceBannedUntil}.
                 </div>
               )}
 

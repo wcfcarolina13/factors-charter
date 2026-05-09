@@ -4,6 +4,14 @@ import { getOrFetch as getOrFetchIllustration, markLoaded as markIllustrationLoa
 import { STYLE_PREFIX } from './src/util/style-prefix.js';
 import { generatePlaythroughId } from './src/util/playthrough-id.js';
 import { detectConflict } from './src/util/sync-conflict.js';
+import {
+  makeInitialRivals,
+  RIVAL_KEYS,
+  RIVALS_REGISTRY,
+  computeRivalPressure,
+  pickRivalEvent,
+} from './src/util/rivalry.js';
+import { priceWindowMult, pruneExpiredWindows } from './src/util/price-windows.js';
 
 // React hook wrapping the viewport detection. Subscribes to media-query
 // changes and to localStorage changes (so toggling the override in one tab

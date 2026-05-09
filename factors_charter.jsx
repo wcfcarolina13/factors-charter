@@ -1893,6 +1893,57 @@ The Vizier`,
   };
 }
 
+// ─────────── VIZIER INTEL CHANNEL ───────────
+// One to two times per charter, the Vizier writes offering palace-network
+// intelligence on ter Borch at Eustace. Cost is an unspoken favour —
+// vizierBoonOwed = true is planted if not already set, otherwise the player
+// owes a second favour (the Vizier tracks them).
+//
+// Trigger: visitedEustace (unique-set, so just includes check), day >= 150,
+//          90-day spacing, vizierIntelLetterCount < 2, !charterClosed.
+
+function makeVizierIntelLetter(s) {
+  const second = (s.flags?.vizierIntelLetterCount ?? 0) >= 1;
+  return {
+    id: 9300000 + s.day,
+    from: 'The Rajah\'s Vizier',
+    subject: second ? 'A second word from Kota Pinang' : 'A word from the palace',
+    body: `Sir, — The houses at Kota Pinang are not blind, and the wind from Eustace blows toward this palace as readily as toward yours. There is a matter concerning the Hollander ter Borch which ${second ? 'continues to develop' : 'I should be willing to share with you'}, for the courtesies between us.
+
+I write upon it now, and not later, because the matter is the kind which does not keep. The price is no money — that is for the bazaar. The price is yr. word, given quietly, that you remember the courtesy when called.
+
+Yr. obedt. servant,
+The Vizier`,
+    responses: [
+      {
+        label: 'Accept; the Vizier shall be remembered',
+        seed: 'accept; vizier boon owed; intel plant',
+        fixedOutcome: {
+          prose: 'You write a careful acceptance, in the language the Vizier will recognise. A folded note returns within the week — three sentences in his own hand, written under the lamp, naming a thing about the Hollander\'s recent correspondence which the Court will not hear of for some time yet.',
+          changes: {
+            flags: { terborchIntelPlant: true, vizierBoonOwed: true,
+                     vizierIntelLetterCount: (s.flags?.vizierIntelLetterCount ?? 0) + 1 },
+            journal: 'Accepted the Vizier\'s intelligence on ter Borch. A favour is owed, to be called.',
+            hook: 'The Vizier\'s favour is on the books. He will name it when it suits him.',
+          },
+        },
+      },
+      {
+        label: 'Decline politely; the courtesies are not equal',
+        seed: 'decline; small rajah neutral',
+        fixedOutcome: {
+          prose: 'You decline by note, with thanks for the regard. The Vizier accepts the refusal with the smallest motion of his head — and writes nothing more for some weeks.',
+          changes: {
+            flags: { vizierIntelLetterCount: (s.flags?.vizierIntelLetterCount ?? 0) + 1 },
+            journal: 'Declined the Vizier\'s offer. The favours-book remains as it was.',
+          },
+        },
+      },
+    ],
+    read: false,
+  };
+}
+
 // ─────────── BROTHERHOOD OPERATIVE QUESTLINE (3 STEPS) ───────────
 // First multi-step plot in the game. Pattern: each step is a letter with
 // fixedOutcome responses. Each response sets a flag that gates the next
@@ -3692,6 +3743,22 @@ function tickDays(gs, days) {
       s.lettersGenerated = (s.lettersGenerated || 0) + 1;
       s.flags = { ...(s.flags || {}), vizierMarriageLetterSent: true };
       s.awayLog.push({ day: s.day, type: 'letter', text: 'A folded note from the palace, the Vizier’s small personal seal upon it.' });
+    }
+
+    // ── Vizier intel: one to two per charter, gated visited Eustace (unique-set
+    // so .includes suffices), 90-day spacing, capped at 2.
+    if (
+      !s.charterClosed &&
+      (s.flags?.vizierIntelLetterCount ?? 0) < 2 &&
+      s.day >= 150 &&
+      (s.visited || []).includes('Port St. Eustace') &&
+      (s.day - (s.flags?.lastVizierIntelDay ?? 0)) >= 90
+    ) {
+      const letter = makeVizierIntelLetter(s);
+      s.letters = [...s.letters, letter];
+      s.lettersGenerated = (s.lettersGenerated || 0) + 1;
+      s.flags = { ...(s.flags || {}), lastVizierIntelDay: s.day };
+      s.awayLog.push({ day: s.day, type: 'letter', text: 'A folded note from the palace, the Vizier\'s small personal seal upon it.' });
     }
 
     // ── Brotherhood operative questline (Faulke).

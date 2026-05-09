@@ -1227,14 +1227,30 @@ function makeQuarterlyNagLetter(s) {
   const rival = rivalLine(s);
   const dryden = drydenQuarterlyAddendum(s);
 
+  // Pick base band — same logic as before.
+  let band;
+  if (nothingYet)                    band = 'first';
+  else if (finalStretch && !onTrack) band = 'pointed';
+  else if (onTrack)                  band = 'progress';
+  else                               band = 'reminder';
+
+  // Apply rivalPressure shift to the middle bands only. nothingYet and
+  // finalStretch short-circuits remain untouched (they reflect player-
+  // observable facts that rivalry shouldn't override).
+  const pressure = s.rivalPressure ?? 50;
+  if      (band === 'progress' && pressure > 70) band = 'reminder';  // pleased → reminding
+  else if (band === 'progress' && pressure < 30) band = 'progress';  // already softest mid-band
+  else if (band === 'reminder' && pressure > 70) band = 'pointed';   // reminding → pointed
+  else if (band === 'reminder' && pressure < 30) band = 'progress';  // reminding → pleased
+
   let subject, body;
-  if (nothingYet) {
+  if (band === 'first') {
     subject = 'A First Quarterly Note';
     body = `Sir, — We open yr. file at the Court for the present charter. The first Indiaman is despatched in due course; we shall expect a return at her holds. We pray you have laid the ground.\n\nWe are mindful of the climate, the politics, and the price of plank. We are mindful also that the late Mr. Wilbraham held the post for two years on similar excuses.\n\nYr. obedt. servants, the Court of Directors.${dryden}`;
-  } else if (finalStretch && !onTrack) {
+  } else if (band === 'pointed') {
     subject = 'A Pointed Word';
     body = `Sir, — A reckoning at this hand: ${reckoning}${rival} The third year is upon us, and the figures are not what we are owed. The Court has the names of two replacements before it. We trust you take our meaning.\n\nYr. servants, the Court of Directors.${dryden}`;
-  } else if (onTrack) {
+  } else if (band === 'progress') {
     subject = 'Yr. Progress Noted';
     body = `Sir, — Returns reckon ${reckoning}${rival} The Court is content with the present pace. Press on.\n\nYr. obedt. servants, the Court of Directors.${dryden}`;
   } else {

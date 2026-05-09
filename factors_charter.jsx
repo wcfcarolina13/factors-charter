@@ -1163,27 +1163,52 @@ function hardacreReckoning(visits) {
     cinnamon: Math.round(35 * visits + visits * 2),
   };
 }
-function rivalLine(s) {
+// Returns a multi-rival snippet for the quarterly nag letter. Three
+// sentences max — one per rival when each has something noteworthy
+// to say, omitted otherwise. Hardacre uses tonnage comparison
+// (existing pattern); ter Borch and Lowji use standing as a
+// qualitative tone band.
+function rivalsLines(s) {
+  const lines = [];
+
+  // Hardacre — existing 3-band pattern by tonnage.
   const visits = s.indiaman?.visits || 0;
-  if (visits === 0) return '';
-  const h = hardacreReckoning(visits);
-  const ourPep = Math.floor(s.quotas?.pepper?.have || 0);
-  const ourCin = Math.floor(s.quotas?.cinnamon?.have || 0);
-  const aheadPep = h.pepper > ourPep + 30;
-  const aheadCin = h.cinnamon > ourCin + 15;
-  const muchAhead = h.pepper > ourPep + 80 || h.cinnamon > ourCin + 50;
-  if (muchAhead) {
-    return ` ${HARDACRE.name} at ${HARDACRE.station} reckons ${h.pepper} cwt of pepper and ${h.cinnamon} cwt of cinnamon to date — a comparison we shall not press, but which sits visibly upon the Court's table.`;
+  if (visits > 0) {
+    const h = hardacreReckoning(visits);
+    const ourPep = Math.floor(s.quotas?.pepper?.have   || 0);
+    const ourCin = Math.floor(s.quotas?.cinnamon?.have || 0);
+    const aheadPep = h.pepper > ourPep + 30;
+    const aheadCin = h.cinnamon > ourCin + 15;
+    const muchAhead = h.pepper > ourPep + 80 || h.cinnamon > ourCin + 50;
+    if (muchAhead) {
+      lines.push(`${HARDACRE.name} at ${HARDACRE.station} reckons ${h.pepper} cwt of pepper and ${h.cinnamon} cwt of cinnamon to date — a comparison we shall not press, but which sits visibly upon the Court's table.`);
+    } else if (aheadPep || aheadCin) {
+      lines.push(`${HARDACRE.name} at ${HARDACRE.station} stands at ${h.pepper}/${h.cinnamon} cwt; the comparison is not yet flattering to yr. station.`);
+    } else if (ourPep >= h.pepper && ourCin >= h.cinnamon) {
+      lines.push(`${HARDACRE.name} at ${HARDACRE.station} reckons ${h.pepper}/${h.cinnamon} cwt — yr. own returns, the Court is pleased to note, are no less.`);
+    }
   }
-  if (aheadPep || aheadCin) {
-    return ` ${HARDACRE.name} at ${HARDACRE.station} stands at ${h.pepper}/${h.cinnamon} cwt; the comparison is not yet flattering to yr. station.`;
+
+  // ter Borch — qualitative band by standing.
+  if (s.rivals?.terborch) {
+    const st = s.rivals.terborch.standing;
+    if (st >= 75)      lines.push(`Mynheer ter Borch at Eustace continues to gain ground in the High Government's regard.`);
+    else if (st <= 25) lines.push(`Word from Amsterdam: Mynheer ter Borch's hand at Eustace is tested.`);
   }
-  // Player is at or above Hardacre
-  if (ourPep >= h.pepper && ourCin >= h.cinnamon) {
-    return ` ${HARDACRE.name} at ${HARDACRE.station} reckons ${h.pepper}/${h.cinnamon} cwt — yr. own returns, the Court is pleased to note, are no less.`;
+
+  // Lowji — qualitative band by standing.
+  if (s.rivals?.lowji) {
+    const st = s.rivals.lowji.standing;
+    if (st >= 75)      lines.push(`The Bombay accounts speak of Mr. Lowji Nusserwanji's tonnage in terms a Director may not lightly dismiss.`);
+    else if (st <= 25) lines.push(`The Bombay houses report Mr. Lowji Nusserwanji to be in the unkind weather of his year.`);
   }
-  return '';
+
+  return lines.length === 0 ? '' : ' ' + lines.join(' ');
 }
+
+// Backwards-compatibility shim — keeps the old call sites in
+// makeQuarterlyNagLetter working while the next task migrates them.
+function rivalLine(s) { return rivalsLines(s); }
 
 function makeQuarterlyNagLetter(s) {
   const visits      = s.indiaman?.visits || 0;

@@ -71,7 +71,11 @@ export async function onRequest(context) {
     return errorResponse(`AI run failed: ${err.message || 'unknown'}`, 502);
   }
 
-  // flux-1-schnell on Workers AI returns { image: '<base64-png>' }.
+  // flux-1-schnell on Workers AI returns { image: '<base64>' }. The bytes
+  // are actually JPEG (FF D8 FF E0 ... JFIF magic) despite the field name
+  // — verified empirically against the live binding. Setting content-type
+  // accordingly so x-content-type-options: nosniff doesn't fight the
+  // browser's sniff.
   if (!aiResponse || typeof aiResponse.image !== 'string') {
     return errorResponse('unexpected AI response shape', 502);
   }
@@ -81,7 +85,7 @@ export async function onRequest(context) {
   return new Response(binary, {
     status: 200,
     headers: {
-      'content-type': 'image/png',
+      'content-type': 'image/jpeg',
       'cache-control': 'public, max-age=31536000, immutable',
       'x-content-type-options': 'nosniff',
     },

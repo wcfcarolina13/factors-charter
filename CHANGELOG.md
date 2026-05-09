@@ -4,6 +4,37 @@ The Factor's Charter — a chronological log of what's shipped. Newest first.
 
 ---
 
+## 2026-05-09 — Image-gen fetch+blob with explicit timeout
+
+Players were consistently hitting "The in-game generator could not be reached" on both mobile and desktop browsers, despite Pollinations.ai itself being operational. Diagnosis: voyage-prose prompts take 10–15s to respond from Pollinations, and the previous `<img src={url}>` direct path was tripping browser-internal abort heuristics on slow networks — `<img onError>` fired before the bytes arrived even though the response was 200 with valid JPEG.
+
+`IllustrationModal` and `InlineIllustration` now fetch the URL via `fetch()` with a 60s `AbortController` timeout, materialize the response as a blob, and feed `URL.createObjectURL(blob)` to the `<img>`. Memory cleanup on unmount via `URL.revokeObjectURL`. CSP `_headers` patched: `blob:` added to `img-src`, `https://image.pollinations.ai` added to `connect-src` (the latter required because `fetch()` is governed by `connect-src`, not `img-src`).
+
+The cache contract in `src/util/illustration-cache.js` is unchanged — deterministic URL keying still drives cache hits; only the byte-delivery mechanism changed. Tests still 75/75; build clean.
+
+Diagnosis context preserved in `~/.claude/projects/-Users-roti/memory/project_pollinations_image_gen.md`.
+
+---
+
+## 2026-05-08 — Rivalry mechanics
+
+Closes the only design-shape gameplay item left from `DESIGN_NOTES.md` backlog (#11) after the same-day reconciliation pass. Three named rivals with deterministic baseline trajectories punctuated by 6–8 events per charter from an 18-template pool, plus four player-facing levers:
+
+- **Read** — `gs.rivalPressure` (0–100) shifts the Court's quarterly nag tone band ±1 step at >70 / <30 thresholds; `nothingYet` and `finalStretch` short-circuits unchanged
+- **Trade arbitrage** — events ship `priceWindow { port, commodity, sellMult|buyMult, days }` consumed by `priceFor`; affects port + sublocation prices alike
+- **Staff poaching** — three potential defections: Mr. Reginald Penhaligon (junior writer, £36/yr, late of Bencoolen), Mynheer Cornelis de Witt (secretary, £40/yr, late of Eustace), Khojah Avedik (Persian pilot, £80/yr, late of Bombay)
+- **Intel buy** — three channels with distinct cost textures: Brotherhood for Hardacre (£40/£60, gated pirates ≥ +5), the Vizier for ter Borch (unspoken `vizierBoonOwed`, gated visited Eustace), Mr. Pestonji Cama for Lowji (cash, new AUTO_SENDERS entry — cast 6 → 7)
+
+The cast: **Mr. Hardacre at Bencoolen** (existing fictitious EIC benchmark, now a full rival), **Mynheer ter Borch at Port St. Eustace** (promoted from auto-letter sender to senior VOC factor), **Mr. Lowji Nusserwanji at Bombay** (new Parsi country trader, after the historical Wadia shipbuilder). All three documented in `WORLD_NOTES.md` under "Inspirations Landed."
+
+Pure logic in `src/util/rivalry.js` and `src/util/price-windows.js` (TDD, +42 new vitest cases — suite total 33 → 75/75 passing). Integration in `factors_charter.jsx` (+948 lines): `ensureShape` migration, three state-initialiser updates, `rivalsLines` (replaces single-rival `rivalLine`), `makeQuarterlyNagLetter` tone-band shift, `tickDays` scheduler block + housekeeping, `priceFor` patch, AUTO_SENDERS Cama entry + 3-template pool, `makeVizierIntelLetter` + tickDays trigger, RIVAL_EVENTS pool of 18 templates.
+
+20 commits on `feat/rivalry-mechanics` merged as `7a48210` via `--no-ff`. Spec at `docs/superpowers/specs/2026-05-08-rivalry-mechanics-design.md`; plan at `docs/superpowers/plans/2026-05-08-rivalry-mechanics.md`.
+
+The `DESIGN_NOTES.md` backlog was also reconciled in the same session: items #5–#10, #12–#14 were verified as already-shipped during Sessions 9–10 and marked accordingly; only #11 (rivalry) was genuinely open before this session, and now it isn't either.
+
+---
+
 ## 2026-05-08 — Sync UX polish (writePointer surface, Header onEnableSync)
 
 Two small follow-ups from the 2026-05-07 sync handoff:

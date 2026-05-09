@@ -3,7 +3,10 @@ import { STYLE_PREFIX } from './style-prefix.js';
 
 const CACHE_KEY = 'factor_illustration_cache_v1';
 const MAX_ENTRIES = 50;
-const POLLINATIONS_PREFIX = 'https://image.pollinations.ai/prompt/';
+// Same-origin Cloudflare Pages Function, see functions/api/illustrate.js.
+// Replaces a previous direct call to image.pollinations.ai, which started
+// throttling free traffic to "1 in-flight request per IP" in May 2026.
+const ILLUSTRATE_ENDPOINT = '/api/illustrate';
 
 // Read the cache from localStorage. Returns {} on parse failure or absence.
 function readCache(storage) {
@@ -33,14 +36,15 @@ function writeCache(storage, cache) {
   return cache;
 }
 
-// Build the Pollinations URL for a given prose string. Same logic as the
+// Build the illustration URL for a given prose string. Same logic as the
 // existing IllustrationModal so cached + on-demand paths produce identical
-// images for identical scenes.
-function buildPollinationsUrl(prose) {
+// images for identical scenes. Hits a same-origin Pages Function that
+// proxies Cloudflare Workers AI (flux-1-schnell).
+function buildIllustrationUrl(prose) {
   const clean = cleanProse(prose);
   const fullPrompt = STYLE_PREFIX + clean;
   const seed = parseInt(stableHash(clean), 36) || 1;
-  return `${POLLINATIONS_PREFIX}${encodeURIComponent(fullPrompt)}?width=480&height=320&nologo=true&seed=${seed}&model=flux`;
+  return `${ILLUSTRATE_ENDPOINT}?prompt=${encodeURIComponent(fullPrompt)}&seed=${seed}`;
 }
 
 // getOrFetch returns { url, status, hash } for a given prose. Status is
@@ -62,7 +66,7 @@ export function getOrFetch(storage, prose) {
     writeCache(storage, cache);
     return { url: cache[hash].url, status: 'cached', hash };
   }
-  return { url: buildPollinationsUrl(prose), status: 'fetching', hash };
+  return { url: buildIllustrationUrl(prose), status: 'fetching', hash };
 }
 
 // Called by the consumer after an <img> successfully loads. Commits the
@@ -79,4 +83,4 @@ export function markLoaded(storage, hash, url) {
   }
 }
 
-export { CACHE_KEY, MAX_ENTRIES, buildPollinationsUrl, readCache, writeCache };
+export { CACHE_KEY, MAX_ENTRIES, buildIllustrationUrl, readCache, writeCache };

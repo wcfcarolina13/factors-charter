@@ -4,6 +4,14 @@ The Factor's Charter — a chronological log of what's shipped. Newest first.
 
 ---
 
+## 2026-05-09 — Hygiene pass: drop unused viewport export, add test suite
+
+A scan over `src/util/*`, `functions/*`, and the JSX monolith for TODO/FIXME/HACK markers, stray `console.log`, dead imports, unused exports, and stale comments. Single dead export found and removed: `OVERRIDE_KEY` in `viewport.js`, exported but only referenced internally. Added 9 vitest cases to `src/util/viewport.test.js` (the only `src/util` module without coverage worth testing — `style-prefix.js` is a single-string constant, not worth a test). Tests 83 → 92.
+
+Wider audit found nothing else worth shipping. Codebase is clean.
+
+---
+
 ## 2026-05-09 — Bundle slimming: plates moved to static assets
 
 The PWA was shipping a 1.21 MB main JS chunk and a 1.33 MiB precache. Brad's typical play surface (Mexican mobile, cold load) felt the weight. The HANDOFF item framed this as "lazy-load mid-game views" — code-splitting questline letter helpers, AUTO_SENDERS pools, etc. — but a measurement exposed that framing as wrong: the six `PLATE_*_DATA` base64-inlined JPEGs accounted for **814 KB of 1,361 KB** in `factors_charter.jsx` (60 % of the source). Splitting code chunks would have saved 20–50 KB; rounding error against the inlined PNG payload.
@@ -23,6 +31,20 @@ Artifact-runtime fallback preserved: `src/util/plates.js` detects `window.storag
 Phase 2 (code-splitting questline helpers, AUTO_SENDERS, RIVAL_EVENTS, SVG vignettes) is unnecessary — Phase 1 alone trounced the spec targets. Re-evaluate only if the bundle creeps back over 500 KB.
 
 Spec at `docs/superpowers/specs/2026-05-09-bundle-slimming-design.md`; plan at `docs/superpowers/plans/2026-05-09-bundle-slimming.md`.
+
+---
+
+## 2026-05-09 — Image-gen migrated to Cloudflare Workers AI
+
+The fetch+blob shipped earlier in the day was the right shape but the wrong provider. Probing Pollinations directly turned up two distinct failures: (a) `flux` no longer exists — `GET https://image.pollinations.ai/models` returns `["sana"]` and the server silently rewrites every `model=` value to `sana`; (b) the free tier now caps each IP at **one in-flight request**, returning `HTTP 429 {"error":"Too Many Requests","message":"Queue full for IP: …: 1 requests already queued (max: 1). Get unlimited access at https://enter.pollinations.ai"}`. Brad's residential IP in Guadalajara was hitting this on every retry.
+
+New path: a same-origin Cloudflare Pages Function at `functions/api/illustrate.js` proxies Workers AI's `@cf/black-forest-labs/flux-1-schnell`. Real flux, no per-IP queue throttle, deterministic seeds, edge-cached for free by Cloudflare (the URL is content-hash keyed so identical scenes hit cache). The client-side LRU in `src/util/illustration-cache.js` is unchanged in shape — `buildPollinationsUrl` was renamed to `buildIllustrationUrl` and now emits `/api/illustrate?prompt=…&seed=…`. The fetch+blob delivery wrapper from earlier today stays — it's right for this provider too — only the URL changed.
+
+CSP tightened: `https://image.pollinations.ai` removed from both `img-src` and `connect-src`. Same-origin `'self'` now covers the whole illustration path.
+
+Tests 75/75; build clean. **One-time deploy step required:** add an **AI** binding (`AI` → Workers AI) to the Cloudflare Pages project under Settings → Functions → Bindings, alongside the existing `SAVES_KV` binding. Until that's set, the function returns `503 {"error":"AI binding not configured"}` and the modal shows the existing failure message — no regression vs. current state.
+
+Diagnosis context preserved in `~/.claude/projects/-Users-roti/memory/project_pollinations_image_gen.md`.
 
 ---
 

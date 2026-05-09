@@ -1,10 +1,10 @@
 # HANDOFF — The Factor's Charter
 
-**Date:** 2026-05-09 (later same day — sabotage arcs landed)
+**Date:** 2026-05-09 (later same day — sabotage arcs + charter-end coda landed)
 **For:** Bradley (or a fresh Claude session) resuming this project
 **Branch:** `main`
 **Live build:** https://factors-charter.pages.dev (auto-deploys from `main`)
-**Status:** Four branches landed on `main` today. Tests **120/120**; build clean (main 399 KB / 118 KB gz — +20 KB / +5 KB gz over the post-bundle-slimming baseline, attributable to ~390 lines of new sabotage prose). Workers AI binding action below is still pending.
+**Status:** Five branches landed on `main` today. Tests **129/129**; build clean (main 399 KB / 118 KB gz). Workers AI binding action below is still pending.
 
 > Previous handoff archived in `git log` at commit `145ad16`.
 
@@ -89,7 +89,7 @@ If Workers AI regresses, fall back to a different model (e.g. `@cf/stabilityai/s
 - **Dyad/triad rival events** — currently each rival's events are independent. Cross-rival events ("Hardacre and ter Borch fight over a cargo") would be a separate expansion.
 - **Two-step `terborch-promotion-attempted` arc** — currently a single firing. Could become a 2-step arc (announcement → resolution) like Cylinder/Wilbraham.
 - **Re-triggerable sabotage** — sabotage offers fire once per rival per charter; declined arcs are gone. If a "channel comes back later with a better offer" mechanic is wanted, add a 180-day-delay re-offer gated on `sabotage_<rival>_method === 'declined'`.
-- **Charter-end sabotage flavour** — `gs.sabotagesCommitted` is exposed but not yet read by the final Director letter. A small prose-flavour pass on `makeCharterEndLetter` could mention "rumours followed you to London" when the count is high.
+- ~~**Charter-end sabotage flavour**~~ — shipped 2026-05-09 (destiny-shaped coda appended to `makeCharterEndLetter` when `sabotagesCommitted >= 1`).
 
 ### 7. ~~Sync UX polish~~ — all sub-items shipped 2026-05-07/08
 

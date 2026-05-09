@@ -13,7 +13,7 @@ import {
 } from './src/util/rivalry.js';
 import { priceWindowMult, pruneExpiredWindows } from './src/util/price-windows.js';
 import { pickPlate } from './src/util/plates.js';
-import { canOfferSabotage, resolveSabotage } from './src/util/sabotage.js';
+import { canOfferSabotage, resolveSabotage, sabotageCoda } from './src/util/sabotage.js';
 
 // React hook wrapping the viewport detection. Subscribes to media-query
 // changes and to localStorage changes (so toggling the override in one tab
@@ -3927,6 +3927,12 @@ A successor is despatched by the Indiaman next outbound. You will deliver yr. bo
 Yr. servants, the Court of Directors.`;
       break;
   }
+
+  // Sabotage coda: hint at the rougher matters of the past three years
+  // when the Factor commissioned one or more of them. The tone shifts with
+  // the destiny — measured for honourable retirements, plain for the
+  // Brotherhood, the additional weight for failure. Empty when count is 0.
+  body += sabotageCoda(destiny, s.sabotagesCommitted);
 
   return {
     outcome,

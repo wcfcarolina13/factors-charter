@@ -74,6 +74,33 @@ export function canOfferSabotage(rivalKey, gs) {
   return true;
 }
 
+// Charter-end prose coda. Returns a short paragraph hinting at the rougher
+// matters of the past three years, or '' when there is nothing to remark on.
+// The tone shifts with the destiny — honourable retirements get a measured
+// "the Court has chosen not to record" line; the Brotherhood path gets Maas's
+// plain acknowledgement; failure destinies get the additional weight.
+//
+// The string returned has a leading double-newline so it can be concatenated
+// to the body of the charter-end letter without further formatting.
+const HONOURABLE = new Set(['crown-knighthood', 'country-estate', 'bayan-kor-seat', 'senior-factor']);
+const FAILURE    = new Set(['quiet-retirement', 'recall-disgrace']);
+
+export function sabotageCoda(destiny, count) {
+  const n = Math.max(0, Math.floor(count || 0));
+  if (n <= 0) return '';
+  const intensifier = n >= 2 ? 'matters' : 'a matter';
+  if (destiny === 'brotherhood-retirement') {
+    return `\n\nWe note, between us, that yr. hand in ${intensifier} of the strait was the steadier for being the quieter. The Captain who knows this is not the Captain who writes it down.`;
+  }
+  if (HONOURABLE.has(destiny)) {
+    return `\n\nThere are ${intensifier} of yr. tenure which the Court has not seen fit to enter on the record, and which yr. honour will permit us to leave undescribed. The Standing Committee is not, in such things, an exact bookkeeper.`;
+  }
+  if (FAILURE.has(destiny)) {
+    return `\n\nWe shall not detail the ${intensifier} of yr. private commissioning that have also been brought to the Court's attention. The reckoning above is the milder of the two accountings before us.`;
+  }
+  return '';
+}
+
 // Resolves the Step 2 outcome. Roll r in [0, 100):
 //   r < successCutoff               → 'success'
 //   r < successCutoff + 20          → 'partial'

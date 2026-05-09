@@ -4,6 +4,18 @@ The Factor's Charter — a chronological log of what's shipped. Newest first.
 
 ---
 
+## 2026-05-09 — Charter-end sabotage flavour
+
+Closes the loop on the sabotage arcs that landed earlier today. `gs.sabotagesCommitted` was being incremented by Step 1 of every committed arc but no surface read it — the final Director letter said the same thing whether the player commissioned three rivals' downfalls or none. Now `makeCharterEndLetter` appends a destiny-shaped coda when `sabotagesCommitted >= 1`:
+
+- **Honourable destinies** (knighthood, country estate, Bayan-Kor seat, senior-factor): *"There are matters of yr. tenure which the Court has not seen fit to enter on the record, and which yr. honour will permit us to leave undescribed. The Standing Committee is not, in such things, an exact bookkeeper."*
+- **Brotherhood retirement**: *"We note, between us, that yr. hand in matters of the strait was the steadier for being the quieter. The Captain who knows this is not the Captain who writes it down."* (Maas's plain register.)
+- **Failure destinies** (quiet retirement, recall in disgrace): *"We shall not detail the matters of yr. private commissioning that have also been brought to the Court's attention. The reckoning above is the milder of the two accountings before us."*
+
+Singular/plural switches at count 1 vs 2+. Pure logic in `src/util/sabotage.js::sabotageCoda(destiny, count)` with 9 vitest cases covering empty / singular / plural / per-destiny family / unknown-destiny / paragraph-break invariants. Tests **120 → 129**.
+
+---
+
 ## 2026-05-09 — Sabotage arcs: the deferred 5th rivalry lever
 
 The rivalry v1 spec (2026-05-08) deliberately deferred sabotage with the boundary that *"if a Hardacre downfall arc is wanted later, it lands as a new questline alongside Cylinder/Pale Man/Wilbraham, not within rivalry mechanics."* This ships exactly that — three two-step letter-mediated arcs, one per rival, each routed through the rival's existing intel channel.

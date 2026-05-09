@@ -3,6 +3,7 @@ import {
   canOfferSabotage,
   resolveSabotage,
   sabotageChannel,
+  sabotageCoda,
   SABOTAGE_RIVALS,
   SABOTAGE_TABLE,
 } from './sabotage.js';
@@ -193,5 +194,54 @@ describe('SABOTAGE_TABLE / sabotageChannel', () => {
 
   it('SABOTAGE_RIVALS is frozen', () => {
     expect(Object.isFrozen(SABOTAGE_RIVALS)).toBe(true);
+  });
+});
+
+describe('sabotageCoda', () => {
+  it('returns empty when count is 0', () => {
+    expect(sabotageCoda('crown-knighthood', 0)).toBe('');
+    expect(sabotageCoda('recall-disgrace', 0)).toBe('');
+    expect(sabotageCoda('brotherhood-retirement', 0)).toBe('');
+  });
+
+  it('returns empty for missing or negative count', () => {
+    expect(sabotageCoda('senior-factor', undefined)).toBe('');
+    expect(sabotageCoda('senior-factor', -1)).toBe('');
+  });
+
+  it('returns empty for an unknown destiny', () => {
+    expect(sabotageCoda('unrecognised', 1)).toBe('');
+  });
+
+  it('uses the singular phrasing at count 1', () => {
+    const text = sabotageCoda('crown-knighthood', 1);
+    expect(text).toContain('a matter');
+    expect(text).not.toContain('matters of yr. tenure');
+  });
+
+  it('uses the plural phrasing at count 2+', () => {
+    expect(sabotageCoda('crown-knighthood', 2)).toContain('matters of yr. tenure');
+    expect(sabotageCoda('crown-knighthood', 3)).toContain('matters of yr. tenure');
+  });
+
+  it('honourable destinies get the Court coda', () => {
+    for (const d of ['crown-knighthood', 'country-estate', 'bayan-kor-seat', 'senior-factor']) {
+      expect(sabotageCoda(d, 1)).toContain('the Court has not seen fit');
+    }
+  });
+
+  it('brotherhood destiny gets Maas\'s acknowledgement', () => {
+    expect(sabotageCoda('brotherhood-retirement', 1)).toContain('yr. hand');
+    expect(sabotageCoda('brotherhood-retirement', 1)).toContain('strait');
+  });
+
+  it('failure destinies get the additional-weight coda', () => {
+    for (const d of ['quiet-retirement', 'recall-disgrace']) {
+      expect(sabotageCoda(d, 1)).toContain('private commissioning');
+    }
+  });
+
+  it('output begins with a paragraph break for body concatenation', () => {
+    expect(sabotageCoda('senior-factor', 1).startsWith('\n\n')).toBe(true);
   });
 });

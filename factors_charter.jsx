@@ -927,6 +927,10 @@ Mr. W. died this morning at half past four. The Reverend will not come down from
     guns: 0,
   },
   portStocks: initialPortStocks,
+  rivals: makeInitialRivals(),
+  priceWindows: [],
+  rivalPressure: 50,
+  rivalPressureModifiers: [],
   reputation: { company: 0, crown: 0, rajah: 0, pirates: 0, mission: 0, dutch: 0 },
   crew: [
     { name: 'Mr. Hodge', role: 'Clerk', trait: 'drunkard' },
@@ -3040,6 +3044,10 @@ function makeSuccessorState(prev, newName) {
     acquaintances: persistedAcquaintances,
     flags: carryFlags,
     portStocks: freshPortStocks,
+    rivals: makeInitialRivals(),       // fresh trajectories for the new Factor
+    priceWindows: [],                   // no inherited arbitrage windows
+    rivalPressure: 50,                  // baseline; recomputed first tick
+    rivalPressureModifiers: [],
     lettersGenerated: 0,
     // Preserved as-is: outpost, ship, npcs, reputation
   };
@@ -3119,6 +3127,10 @@ function makeRenewedState(prev) {
     aiLog: [],
     flags: carryFlags,
     portStocks: freshPortStocks,
+    rivals: makeInitialRivals(),
+    priceWindows: [],
+    rivalPressure: 50,
+    rivalPressureModifiers: [],
     lettersGenerated: 0,
     // Preserved as-is: outpost, ship, npcs, reputation, acquaintances, crew
   };

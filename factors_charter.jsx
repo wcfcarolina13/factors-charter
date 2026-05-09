@@ -8393,6 +8393,7 @@ function ConflictModal({ localGs, remoteRecord, onResolve }) {
 function IllustrationModal({ prose, onClose }) {
   const [tryImage, setTryImage] = useState(false);
   const [imgState, setImgState] = useState('idle'); // 'idle' | 'loading' | 'loaded' | 'failed'
+  const [blobUrl, setBlobUrl] = useState(null);
   const [copyFlash, setCopyFlash] = useState('');
   const taRef = useRef(null);
 
@@ -8421,6 +8422,47 @@ function IllustrationModal({ prose, onClose }) {
     })();
     return () => { cancelled = true; };
   }, [fullPrompt]);
+
+  // Fetch the image bytes with an explicit 60s timeout, then materialize as
+  // a blob URL. This avoids the browser-internal abort heuristic that kills
+  // <img src> loads on slow networks (Pollinations.ai routinely takes
+  // 10-15s for voyage-prose prompts; mobile browsers were aborting silently
+  // and tripping the onError path before the bytes arrived).
+  useEffect(() => {
+    if (!tryImage) return;
+    let cancelled = false;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
+    fetch(imgUrl, { signal: controller.signal })
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.blob();
+      })
+      .then((blob) => {
+        if (cancelled) return;
+        const url = URL.createObjectURL(blob);
+        setBlobUrl(url);
+        setImgState('loaded');
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setImgState('failed');
+      })
+      .finally(() => clearTimeout(timeoutId));
+    return () => {
+      cancelled = true;
+      controller.abort();
+      clearTimeout(timeoutId);
+    };
+  }, [tryImage, imgUrl]);
+
+  // Revoke the blob URL when it changes or the modal unmounts so we don't
+  // leak object URLs across reopen cycles.
+  useEffect(() => {
+    return () => {
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+    };
+  }, [blobUrl]);
 
   const onCopyClick = async () => {
     const ok = await robustCopy(fullPrompt);
@@ -8532,18 +8574,18 @@ function IllustrationModal({ prose, onClose }) {
                 The in-game generator could not be reached. Use the prompt above with an external tool.
               </div>
             )}
-            <img
-              src={imgUrl}
-              alt="An illustration of the scene"
-              onLoad={() => setImgState('loaded')}
-              onError={() => setImgState('failed')}
-              style={{
-                width: '100%', maxWidth: '480px', height: 'auto',
-                display: imgState === 'loaded' ? 'block' : 'none',
-                border: '1px solid rgba(74,44,20,0.2)',
-                margin: '0 auto',
-              }}
-            />
+            {blobUrl && (
+              <img
+                src={blobUrl}
+                alt="An illustration of the scene"
+                style={{
+                  width: '100%', maxWidth: '480px', height: 'auto',
+                  display: imgState === 'loaded' ? 'block' : 'none',
+                  border: '1px solid rgba(74,44,20,0.2)',
+                  margin: '0 auto',
+                }}
+              />
+            )}
           </div>
         )}
       </div>
@@ -8559,7 +8601,52 @@ function IllustrationModal({ prose, onClose }) {
 function InlineIllustration({ prose }) {
   const storage = (typeof window !== 'undefined') ? window.localStorage : null;
   const { url, status, hash } = getOrFetchIllustration(storage, prose);
-  const [imgState, setImgState] = useState(status === 'cached' ? 'loaded' : 'loading');
+  const [imgState, setImgState] = useState('loading');
+  const [blobUrl, setBlobUrl] = useState(null);
+
+  // Fetch the image bytes with explicit 60s timeout. The browser-internal
+  // abort heuristic on slow networks was tripping <img onError> before the
+  // bytes arrived from Pollinations (which routinely takes 10-15s for
+  // voyage-prose prompts). The cache returns a deterministic URL whether
+  // 'cached' or 'fetching' — re-fetching on cache hits is cheap when the
+  // browser HTTP cache is warm and robust when it isn't.
+  useEffect(() => {
+    if (!url) return;
+    let cancelled = false;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000);
+    fetch(url, { signal: controller.signal })
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.blob();
+      })
+      .then((blob) => {
+        if (cancelled) return;
+        const objectUrl = URL.createObjectURL(blob);
+        setBlobUrl(objectUrl);
+        setImgState('loaded');
+        if (storage && status === 'fetching') {
+          markIllustrationLoaded(storage, hash, url);
+        }
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setImgState('failed');
+      })
+      .finally(() => clearTimeout(timeoutId));
+    return () => {
+      cancelled = true;
+      controller.abort();
+      clearTimeout(timeoutId);
+    };
+  }, [url, status, hash, storage]);
+
+  // Revoke the blob URL when it changes or this component unmounts.
+  useEffect(() => {
+    return () => {
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+    };
+  }, [blobUrl]);
 
   if (status === 'empty' || !url) return null;
 
@@ -8575,15 +8662,10 @@ function InlineIllustration({ prose }) {
       overflow: 'hidden',
       position: 'relative',
     }}>
-      {imgState === 'failed' ? null : (
+      {imgState !== 'failed' && blobUrl && (
         <img
-          src={url}
+          src={blobUrl}
           alt="An illustration of the scene"
-          onLoad={() => {
-            setImgState('loaded');
-            if (storage && status === 'fetching') markIllustrationLoaded(storage, hash, url);
-          }}
-          onError={() => setImgState('failed')}
           style={{
             width: '100%',
             height: '100%',

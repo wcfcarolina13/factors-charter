@@ -1927,7 +1927,7 @@ The Vizier`,
         fixedOutcome: {
           prose: 'You write a careful acceptance, in the language the Vizier will recognise. A folded note returns within the week — three sentences in his own hand, written under the lamp, naming a thing about the Hollander\'s recent correspondence which the Court will not hear of for some time yet.',
           changes: {
-            flags: { terborchIntelPlant: true, vizierBoonOwed: true,
+            flags: { terborchIntelPlant: true, terborchIntelEverBought: true, vizierBoonOwed: true,
                      vizierIntelLetterCount: (s.flags?.vizierIntelLetterCount ?? 0) + 1 },
             journal: 'Accepted the Vizier\'s intelligence on ter Borch. A favour is owed, to be called.',
             hook: 'The Vizier\'s favour is on the books. He will name it when it suits him.',
@@ -4926,6 +4926,47 @@ function tickDays(gs, days) {
       }
     }
 
+    // ── Sabotage arcs. Step 1 offers per rival when canOfferSabotage holds
+    // (Year 2+, pressured player, channel relationship in place, rival not
+    // yet broken, no prior offer for this rival). Step 2 fires 45 days
+    // after commitment, with outcome resolved by resolveSabotage.
+    // Spec: docs/superpowers/specs/2026-05-09-sabotage-arcs-design.md.
+    {
+      const SABOTAGE_LETTERS = {
+        hardacre: { step1: makeSabotageHardacreStep1Letter, step2: makeSabotageHardacreStep2Letter, name: 'Mr. Hardacre' },
+        terborch: { step1: makeSabotageTerBorchStep1Letter, step2: makeSabotageTerBorchStep2Letter, name: 'Mynheer ter Borch' },
+        lowji:    { step1: makeSabotageLowjiStep1Letter,    step2: makeSabotageLowjiStep2Letter,    name: 'Mr. Lowji' },
+      };
+      for (const rk of ['hardacre', 'terborch', 'lowji']) {
+        const cfg = SABOTAGE_LETTERS[rk];
+
+        // Step 1
+        if (canOfferSabotage(rk, s)) {
+          const letter = cfg.step1(s);
+          s.letters = [...s.letters, letter];
+          s.lettersGenerated = (s.lettersGenerated || 0) + 1;
+          s.flags = { ...(s.flags || {}), [`sabotage_${rk}_offered`]: true };
+          s.awayLog.push({ day: s.day, type: 'letter', text: `A folded note at the gate, concerning ${cfg.name}.` });
+        }
+
+        // Step 2
+        if (s.charterClosed) continue;
+        const method = s.flags?.[`sabotage_${rk}_method`];
+        if (method !== 'commission' && method !== 'negotiate') continue;
+        if (s.flags?.[`sabotage_${rk}_step2_sent`]) continue;
+        if (s.flags?.[`sabotage_${rk}_resolved`]) continue;
+        const committedDay = s.flags?.[`sabotage_${rk}_committed_day`] ?? 0;
+        if (committedDay <= 0) continue;
+        if (s.day < committedDay + 45) continue;
+
+        const letter = cfg.step2(s);
+        s.letters = [...s.letters, letter];
+        s.lettersGenerated = (s.lettersGenerated || 0) + 1;
+        s.flags = { ...(s.flags || {}), [`sabotage_${rk}_step2_sent`]: true };
+        s.awayLog.push({ day: s.day, type: 'letter', text: `A return note concerning ${cfg.name}.` });
+      }
+    }
+
     // ── Cleanup expired priceWindows.
     if (s.priceWindows && s.priceWindows.length > 0) {
       s.priceWindows = pruneExpiredWindows(s.priceWindows, s.day);
@@ -5707,7 +5748,7 @@ The price for yr. private knowledge of it is forty pounds, paid as before — th
             prose: 'You send the boy at the wharf with the agreed sum. A note returns the same evening, in a hand the Factor does not know — three sentences only, but enough to anticipate what the next packet from Bencoolen will say.',
             changes: {
               money: -40,
-              flags: { hardacreIntelPlant: true },
+              flags: { hardacreIntelPlant: true, hardacreIntelEverBought: true },
               journal: 'Bought intelligence on Mr. Hardacre at Bencoolen — £40 to a Brotherhood hand, by the boy at the wharf.',
             },
           },
@@ -5746,7 +5787,7 @@ The price for yr. private knowledge of it is forty pounds, paid as before — th
             prose: 'Sixty pounds to the boy at the wharf, in a sealed packet of the household colour. The intelligence returns: a misadventure at Bencoolen, of the kind that does not appear in the Court\'s correspondence for some weeks yet. The Factor lays his plans accordingly.',
             changes: {
               money: -60,
-              flags: { hardacreIntelPlant: true },
+              flags: { hardacreIntelPlant: true, hardacreIntelEverBought: true },
               journal: 'Paid £60 for further news of Mr. Hardacre. The strait knew it before the Court did.',
             },
           },
@@ -5840,7 +5881,7 @@ Pestonji Cama`,
             prose: 'You despatch a draft for twenty pounds by the Madras packet. A second letter returns within the month — a careful list of three matters concerning Mr. Lowji\'s recent shipments, written in a hand which has been schooled by a Parsi master in English commerce.',
             changes: {
               money: -20,
-              flags: { lowjiIntelPlant: true },
+              flags: { lowjiIntelPlant: true, lowjiIntelEverBought: true },
               journal: 'Bought intelligence on Mr. Lowji of Bombay — £20 to Mr. Cama by the Madras packet.',
             },
           },
@@ -5869,7 +5910,7 @@ Pestonji Cama`,
             prose: 'Sixty pounds across the bay. The return packet brings a clean account of the Bombay establishment\'s misadventure — two ships, three commodities, four weeks before the news travels by ordinary channels. The Factor lays his plans on the strength of it.',
             changes: {
               money: -60,
-              flags: { lowjiIntelPlant: true },
+              flags: { lowjiIntelPlant: true, lowjiIntelEverBought: true },
               journal: 'Paid £60 to Mr. Cama for the Bombay matter. The Factor\'s holds are positioned.',
             },
           },

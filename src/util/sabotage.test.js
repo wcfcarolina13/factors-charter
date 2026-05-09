@@ -13,9 +13,9 @@ function baseGs(over = {}) {
     day: 400,
     charterClosed: null,
     flags: {
-      hardacreIntelPlant: true,
-      terborchIntelPlant: true,
-      lowjiIntelPlant: true,
+      hardacreIntelEverBought: true,
+      terborchIntelEverBought: true,
+      lowjiIntelEverBought: true,
     },
     rivals: makeInitialRivals(),
     quotas: {
@@ -79,22 +79,29 @@ describe('canOfferSabotage', () => {
     expect(canOfferSabotage('hardacre', baseGs())).toBe(false);
   });
 
-  it('fails when the channel intel-plant flag is missing', () => {
+  it('fails when the channel ever-bought flag is missing', () => {
     const gs = pressuredGs();
-    gs.flags.hardacreIntelPlant = false;
+    gs.flags.hardacreIntelEverBought = false;
     expect(canOfferSabotage('hardacre', gs)).toBe(false);
   });
 
-  it('terborch gate uses terborchIntelPlant', () => {
+  it('terborch gate uses terborchIntelEverBought', () => {
     const gs = pressuredGs();
-    gs.flags.terborchIntelPlant = false;
+    gs.flags.terborchIntelEverBought = false;
     expect(canOfferSabotage('terborch', gs)).toBe(false);
   });
 
-  it('lowji gate uses lowjiIntelPlant', () => {
+  it('lowji gate uses lowjiIntelEverBought', () => {
     const gs = pressuredGs();
-    gs.flags.lowjiIntelPlant = false;
+    gs.flags.lowjiIntelEverBought = false;
     expect(canOfferSabotage('lowji', gs)).toBe(false);
+  });
+
+  it('volatile *IntelPlant flag alone does not pass the gate', () => {
+    const gs = pressuredGs();
+    delete gs.flags.hardacreIntelEverBought;
+    gs.flags.hardacreIntelPlant = true;     // pending anticipation, never bought again
+    expect(canOfferSabotage('hardacre', gs)).toBe(false);
   });
 });
 

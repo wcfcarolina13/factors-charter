@@ -47,13 +47,14 @@ for (const k of Object.keys(SABOTAGE_TABLE)) {
 Object.freeze(SABOTAGE_TABLE);
 Object.freeze(SABOTAGE_RIVALS);
 
-// Maps rival -> the intel-plant flag the player must hold (proves a prior
-// channel relationship). The Step 1 offer is gated on this flag so that
-// the channel doesn't escalate to a stranger.
-const INTEL_PLANT_FLAG = {
-  hardacre: 'hardacreIntelPlant',
-  terborch: 'terborchIntelPlant',
-  lowji:    'lowjiIntelPlant',
+// Maps rival -> the persistent "ever bought intel" flag (set wherever
+// `<rival>IntelPlant` is set). The volatile `*IntelPlant` flag is consumed
+// when its anticipated event fires, so we use a parallel non-volatile
+// signal for the channel-relationship gate.
+const INTEL_EVER_BOUGHT_FLAG = {
+  hardacre: 'hardacreIntelEverBought',
+  terborch: 'terborchIntelEverBought',
+  lowji:    'lowjiIntelEverBought',
 };
 
 export function sabotageChannel(rivalKey) {
@@ -69,7 +70,7 @@ export function canOfferSabotage(rivalKey, gs) {
   if (gs?.flags?.[`sabotage_${rivalKey}_offered`] === true) return false;
   if (gs?.rivals?.[rivalKey]?.state === 'broken') return false;
   if (computeRivalPressure(gs) < 60) return false;
-  if (gs?.flags?.[INTEL_PLANT_FLAG[rivalKey]] !== true) return false;
+  if (gs?.flags?.[INTEL_EVER_BOUGHT_FLAG[rivalKey]] !== true) return false;
   return true;
 }
 

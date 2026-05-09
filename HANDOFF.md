@@ -36,9 +36,9 @@ A long span across two calendar days, but one continuous workflow:
 
 Chrome's manifest validation still flags `icon-192.png`. Replacing the placeholder PNGs with hand-designed icons closes this out. Highest-priority cosmetic item.
 
-### 2. Lazy-load mid-game views (lower priority)
+### 2. ~~Lazy-load mid-game views~~ — shipped 2026-05-09
 
-The 1.13+ MB main chunk is still hefty. Now larger after rivalry (1.33+ MB precache). Code-split candidates: the questline letter helpers (Faulke / Cylinder / Pale Man / Wilbraham / Dryden / rivals), per-port arrival vignettes, AUTO_SENDERS template pools. Vite's dynamic-import works for these.
+The diagnosis turned out different from the original framing. 60 % of the source was inlined base64 JPEGs in the six `PLATE_*_DATA` constants, not heavy code paths. Extracted them to `public/plates/*.jpg` with a Workbox runtime-cache rule. Main JS chunk dropped 1,214 → 380 KB; precache 1,331 → 518 KiB; gzipped transfer 744 → 113 KB. Phase 2 (code-splitting questline helpers / AUTO_SENDERS / RIVAL_EVENTS) deferred indefinitely — only revisit if the bundle creeps back over 500 KB.
 
 ### 3. Trusted Types in CSP
 
@@ -109,10 +109,11 @@ Image-gen quick check (any in-flight playtest, Network tab on click "Try in-game
 
 ## Architecture invariants (don't break)
 
-- `factors_charter.jsx` stays at repo root. Still monolithic by design (now ~11,300 lines).
+- `factors_charter.jsx` stays at repo root. Still monolithic by design (~11,260 lines after the 2026-05-09 plate extraction; was ~11,300).
+- The six period engravings live as static JPEGs at `public/plates/plate-{vii..xii}.jpg` (~610 KB total, gitted). They are NOT in precache — Workbox runtime-caches them on first encounter via the `CacheFirst` rule in `vite.config.js`. Don't re-inline them as base64 — that's what we just spent 800 KB of bundle weight removing.
 - `legacyAnthropicCall` body unchanged.
 - Mobile UI byte-identical to its pre-PR state.
-- `src/util/` is React-free pure logic. The React hooks (`useViewportMode`, `useSyncState`) and components live in the JSX monolith.
+- `src/util/` is React-free pure logic. The React hooks (`useViewportMode`, `useSyncState`) and components live in the JSX monolith. Pure-logic modules now: `text.js`, `viewport.js`, `illustration-cache.js`, `style-prefix.js`, `playthrough-id.js`, `sync-conflict.js`, `rivalry.js`, `price-windows.js`, `plates.js`.
 - `src/util/style-prefix.js` is the single source of truth for the image-gen style prefix.
 - `src/util/rivalry.js` and `src/util/price-windows.js` are React-free; their `RIVALS_REGISTRY` and `RIVAL_KEYS` exports are `Object.freeze`d after `baselineFn` wiring — don't mutate them at runtime.
 - The illustration cache key is `stableHash(cleanProse(prose))`. Pinned test enforces hash stability — bump `factor_illustration_cache_v1` to `_v2` if the hash function changes.

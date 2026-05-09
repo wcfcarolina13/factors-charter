@@ -56,7 +56,7 @@ The PWA renders differently on mobile and desktop, gated by `useViewportMode()` 
   - **Outpost**: three-pane grid (Standing structures / Under construction / Available for construction).
   - **Encounters / arrivals / letters**: render with an `<InlineIllustration prose={...} />` alongside the prose, drawn by Pollinations.ai. Cached in localStorage (LRU at 50 entries, content-hash keyed) so each scene draws the same image every time.
 
-The pure logic is split out: `src/util/text.js` (stableHash, cleanProse), `src/util/viewport.js` (detectMode, setOverride), `src/util/illustration-cache.js` (LRU cache + getOrFetch + markLoaded), `src/util/style-prefix.js` (the single source of truth for the image-gen style prompt). The React hook `useViewportMode` and the components live in the JSX monolith because they use React.
+The pure logic is split out: `src/util/text.js` (stableHash, cleanProse), `src/util/viewport.js` (detectMode, setOverride), `src/util/illustration-cache.js` (LRU cache + getOrFetch + markLoaded), `src/util/style-prefix.js` (the single source of truth for the image-gen style prompt), `src/util/plates.js` (PLATES + pickPlate, extracted from the JSX monolith 2026-05-09 alongside the base64 → static-asset migration). The React hook `useViewportMode` and the components live in the JSX monolith because they use React.
 
 The existing `<ImaginePanel>` button-on-demand path remains in both modes — `<InlineIllustration>` falls back to `null` on fetch failure and the button stays available.
 
@@ -78,7 +78,7 @@ Pre-deploy infrastructure (one-time): a Cloudflare KV namespace bound to `SAVES_
    - `PORT_SUBLOCATIONS`: gated extra venues at existing ports (Kota Pinang's inland teak yard, Eustace's Dutch back rooms, the Nest's wreckers' market, the inland plantation warehouse). Surfaced in `PortView` only when their flag/concession unlocks.
    - `SHIP_TYPES` (pinnace, brigantine), `FACTIONS` (6), `BUILDINGS`, `BUILDING_ARRIVALS` (a building completion delivers a named NPC).
    - `AUTO_SENDERS`, `LORE`, `MAJOR_COMMITMENTS` (the surfaced "Standing Arrangements"), `SCRIPTED_ARRIVALS`.
-   - `PLATE_*_DATA` constants — six base64-inlined 1720s engravings; `pickPlate(text)` keyword-matches prose; `ImagePlate` renders.
+   - `PLATES` array + `pickPlate(text)` live in `src/util/plates.js` (extracted 2026-05-09); the six 1720s engravings are JPEGs at `public/plates/plate-{vii..xii}.jpg`, served by Cloudflare Pages and runtime-cached by the SW (Workbox `CacheFirst`, max 6, 30-day TTL). The legacy artifact path is preserved by a `window.storage`-detection fallback that prefixes paths with `https://factors-charter.pages.dev/plates/`. `ImagePlate` renders the matched plate; only the JSX component lives in the monolith.
 2. **`makeInitialState(name)`**: returns the starting `gs` object. Pre-populates two letters (Director appointment + Wilbraham's papers) and one open thread (the teak concession hook).
 3. **Game state (`gs`) shape** (high level — `ensureShape(gs)` is the migration funnel for old saves):
    ```

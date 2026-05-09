@@ -2836,6 +2836,14 @@ const AUTO_SENDERS = [
     weight: 2,
     gate: (s) => s.flags?.companyFaction === 'speculative',
   },
+  {
+    key: 'cama',
+    from: 'Mr. Pestonji Cama, of the Bombay establishment',
+    faction: null,
+    mood: 'a careful Parsi shipping clerk, second to a great house, offering small pieces of news for small pieces of money — formal mercantile English with the occasional Zoroastrian touchstone',
+    weight: 1,
+    gate: (s) => s.day >= 90,
+  },
 ];
 
 function pickAutoSender(s) {
@@ -4892,6 +4900,99 @@ The price for yr. private knowledge of it is forty pounds, paid as before — th
         { label: 'Reply with frank judgement on enlargement', seed: 'Company +5, late-game hook' },
         { label: 'Reply that you would prefer to defer', seed: 'Company 0' },
         { label: 'Set aside, do not reply', seed: 'silence' },
+      ],
+    },
+  ],
+  cama: [
+    // Two intel-buy templates + one ambient request, alternated by random pick.
+    {
+      subject: 'A small note from Bombay',
+      body: `Sir, — I write upon a matter you may find of small worth, perhaps of more. Mr. Lowji Nusserwanji's establishment has had a turn this fortnight, of which I am better informed than most by my position. For twenty pounds — paid by the Madras packet — I should be willing to write the matter plainly.
+
+I do not press the matter; I write only because I have written upon similar matters before to gentlemen of yr. station, and they have not regretted the sums.
+
+Yr. obedt. servant,
+Pestonji Cama`,
+      responses: [
+        {
+          label: 'Pay the £20; the matter is of interest',
+          seed: 'pay; lowji intel plant',
+          fixedOutcome: {
+            prose: 'You despatch a draft for twenty pounds by the Madras packet. A second letter returns within the month — a careful list of three matters concerning Mr. Lowji\'s recent shipments, written in a hand which has been schooled by a Parsi master in English commerce.',
+            changes: {
+              money: -20,
+              flags: { lowjiIntelPlant: true },
+              journal: 'Bought intelligence on Mr. Lowji of Bombay — £20 to Mr. Cama by the Madras packet.',
+            },
+          },
+        },
+        {
+          label: 'Decline; the price is enough',
+          seed: 'decline cleanly',
+          fixedOutcome: {
+            prose: 'You write a courteous decline. Mr. Cama answers by return — a single sentence of regret, in the formal Bombay manner.',
+            changes: { journal: 'Declined Mr. Cama\'s offer. He writes again, no doubt.' },
+          },
+        },
+      ],
+    },
+    {
+      subject: 'A further matter from Bombay',
+      body: `Sir, — A second matter, of which the price is sixty pounds, paid as before. Mr. Lowji has put a quantity of [trade good] upon the next ship for Eustace, and the matter — by the time it is general — will weight against him in such-and-such a way. The price is the price; I am not the master of these things.
+
+Yr. obedt. servant,
+Pestonji Cama`,
+      responses: [
+        {
+          label: 'Pay the £60; lay my plans accordingly',
+          seed: 'pay; lowji intel plant',
+          fixedOutcome: {
+            prose: 'Sixty pounds across the bay. The return packet brings a clean account of the Bombay establishment\'s misadventure — two ships, three commodities, four weeks before the news travels by ordinary channels. The Factor lays his plans on the strength of it.',
+            changes: {
+              money: -60,
+              flags: { lowjiIntelPlant: true },
+              journal: 'Paid £60 to Mr. Cama for the Bombay matter. The Factor\'s holds are positioned.',
+            },
+          },
+        },
+        {
+          label: 'Decline; £60 is the run of trade',
+          seed: 'decline cleanly',
+          fixedOutcome: {
+            prose: 'You decline by post. Mr. Cama, predictably, writes no more on the matter — and in due course the news arrives by ordinary channels, when it is no longer of any use to lay plans against.',
+            changes: { journal: 'Declined Mr. Cama\'s second offer. The Bombay matter, when it became general, found me unprepared.' },
+          },
+        },
+      ],
+    },
+    {
+      subject: 'Of my son in the writing-school',
+      body: `Sir, — I beg leave to write upon a matter not of trade. My son, of fifteen years, is engaged in the Madras writing-school under Mr. Wynne; the establishment's subscription is short upon the present quarter. A small donation of five pounds to the master, in the Factor's name, would not be forgotten — by the boy or by yr. obedt. servant.
+
+I do not write thus often; I write only because the boy is industrious and the matter is small.
+
+Yr. obedt. servant,
+Pestonji Cama`,
+      responses: [
+        {
+          label: 'Subscribe £5; the boy shall be remembered',
+          seed: 'subscribe small; cama loyalty hint',
+          fixedOutcome: {
+            prose: 'Five pounds to Mr. Wynne by the next packet, in the Factor\'s name. Mr. Cama writes back in a hand half a degree warmer than before.',
+            changes: {
+              money: -5,
+              journal: 'Subscribed £5 to Mr. Wynne\'s school for the boy Cama. Goodwill in Bombay is, perhaps, worth more than the sum.',
+            },
+          },
+        },
+        {
+          label: 'Decline politely; another year, perhaps',
+          seed: 'decline cleanly',
+          fixedOutcome: {
+            prose: 'You write a polite decline. Mr. Cama answers with a courteous regret and the matter is not raised again.',
+            changes: { journal: 'Declined the subscription. Five pounds is, in the run of accounts, no great matter.' },
+          },
+        },
       ],
     },
   ],

@@ -802,6 +802,18 @@ const ensureShape = (gs) => {
   if (next.syncEnabled === undefined) next.syncEnabled = false;
   if (next.playthroughId === undefined) next.playthroughId = null;
   if (next.syncPromptShown === undefined) next.syncPromptShown = false;
+  if (!next.rivals) {
+    next.rivals = makeInitialRivals();
+  }
+  if (!Array.isArray(next.priceWindows)) {
+    next.priceWindows = [];
+  }
+  if (typeof next.rivalPressure !== 'number') {
+    next.rivalPressure = 50;
+  }
+  if (!Array.isArray(next.rivalPressureModifiers)) {
+    next.rivalPressureModifiers = [];
+  }
   return next;
 };
 

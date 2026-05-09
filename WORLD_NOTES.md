@@ -172,6 +172,39 @@ Cross-reference with the LORE registry in `factors_charter.jsx`.
   framework is generic — future port-arrival encounters land here as
   new entries with their own triggers.
 
+### Mr. Hardacre at Bencoolen → the EIC rival benchmark
+
+- **Inspiration:** Company servants at different stations were held up
+  against each other in private letters from Leadenhall, and the
+  comparison shaped careers. Hardacre was already in code as a fictitious
+  benchmark; rivalry expansion (2026-05-08) makes him a full rival with
+  punctuating events (windfalls, setbacks, scandals).
+- **In code:** `gs.rivals.hardacre`, `hardacreBaseline` in
+  `src/util/rivalry.js`, plus event templates in `RIVAL_EVENTS`.
+
+### Ter Borch promoted to senior factor at Eustace
+
+- **Setup:** ter Borch already exists in AUTO_SENDERS as a Calvinist
+  trader voice and as the second witness in the Vizier marriage gambit.
+  The rivalry expansion (2026-05-08) explicitly establishes him as the
+  *senior* VOC factor at Port St. Eustace, with Boom serving under him as
+  junior. Boom granting the trade pass is now read as a junior-end-run.
+- **In code:** no character-creation work — the existing AUTO_SENDERS
+  entry covers his voice; rivalry events in `RIVAL_EVENTS` portray his
+  promotions, customs disputes, and conflicts with London-via-Amsterdam.
+
+### Mr. Lowji Nusserwanji of Bombay → the country trader
+
+- **Inspiration:** Parsi shipowners dominated 1720s country trade
+  out of Bombay; Lowji Nusserwanji Wadia (1702–1774) is a real
+  historical figure who founded Bombay's shipbuilding dynasty. The
+  rivalry expansion borrows the name as a transposition (he doesn't
+  shipbuild here; he country-trades). He is the player's off-Company-
+  books rival — competing for private trade, not for Company quota.
+- **In code:** `gs.rivals.lowji`, `lowjiBaseline` in
+  `src/util/rivalry.js`, plus event templates. His intel channel is
+  Mr. Pestonji Cama (a new AUTO_SENDERS entry — see Phase 5).
+
 ---
 
 ## INSPIRATIONS PENDING

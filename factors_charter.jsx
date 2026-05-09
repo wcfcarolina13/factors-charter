@@ -4,6 +4,14 @@ import { getOrFetch as getOrFetchIllustration, markLoaded as markIllustrationLoa
 import { STYLE_PREFIX } from './src/util/style-prefix.js';
 import { generatePlaythroughId } from './src/util/playthrough-id.js';
 import { detectConflict } from './src/util/sync-conflict.js';
+import {
+  makeInitialRivals,
+  RIVAL_KEYS,
+  RIVALS_REGISTRY,
+  computeRivalPressure,
+  pickRivalEvent,
+} from './src/util/rivalry.js';
+import { priceWindowMult, pruneExpiredWindows } from './src/util/price-windows.js';
 
 // React hook wrapping the viewport detection. Subscribes to media-query
 // changes and to localStorage changes (so toggling the override in one tab
@@ -508,7 +516,7 @@ const BUILDING_ARRIVALS = {
     role: 'Apprentice Clerk',
     location: 'Bayan-Kor',
     notes: 'A Cornish boy of seventeen, nephew to a Madras factor; sent to learn the trade under Mr. Hodge.',
-    arrivalText: 'Mr. Penhaligon, an apprentice clerk of seventeen, has come down from Madras to learn the trade in the new Counting House. Hodge is, by his own report, gratified.',
+    arrivalText: 'Mr. Penhaligon, an apprentice clerk of seventeen, has come down from Madras to learn the trade in the new Counting House. Hodge is, by his own report, gratified. (His cousin Reginald, by report, writes from Bencoolen under Mr. Hardacre.)',
   },
   chapel: {
     name: 'Catechist Joseph',
@@ -562,12 +570,14 @@ const hashCode = (s) => {
   return Math.abs(h);
 };
 
-const priceFor = (portKey, commodity, day) => {
+const priceFor = (portKey, commodity, day, gs) => {
   const port = PORTS[portKey];
   const base = COMMODITIES[commodity].basePrice;
   const mult = port.sells?.[commodity] ?? port.buys?.[commodity] ?? 1;
   const fluct = ((hashCode(`${day}-${portKey}-${commodity}`) % 21) - 10) / 100;
-  return Math.max(1, Math.round(base * mult * (1 + fluct)));
+  const side = port.sells?.[commodity] != null ? 'sell' : 'buy';
+  const windowMult = gs ? priceWindowMult(gs, portKey, commodity, side) : 1;
+  return Math.max(1, Math.round(base * mult * (1 + fluct) * windowMult));
 };
 
 // Port duty (Dutch tax at Port St. Eustace) — proportion of transaction value.
@@ -588,7 +598,7 @@ const portTaxRate = (gs, portKey) => {
   else mult = 1.6;
   // The pass is a Dutch instrument; only honoured at Dutch ports.
   if (port.faction === 'dutch' && gs.flags?.dutchTradePass) {
-    mult *= 0.5;
+    mult *= gs.flags?.dutchTradePassReduced ? 0.75 : 0.5;
   }
   return base * mult;
 };
@@ -794,6 +804,18 @@ const ensureShape = (gs) => {
   if (next.syncEnabled === undefined) next.syncEnabled = false;
   if (next.playthroughId === undefined) next.playthroughId = null;
   if (next.syncPromptShown === undefined) next.syncPromptShown = false;
+  if (!next.rivals) {
+    next.rivals = makeInitialRivals();
+  }
+  if (!Array.isArray(next.priceWindows)) {
+    next.priceWindows = [];
+  }
+  if (typeof next.rivalPressure !== 'number') {
+    next.rivalPressure = 50;
+  }
+  if (!Array.isArray(next.rivalPressureModifiers)) {
+    next.rivalPressureModifiers = [];
+  }
   return next;
 };
 
@@ -907,6 +929,10 @@ Mr. W. died this morning at half past four. The Reverend will not come down from
     guns: 0,
   },
   portStocks: initialPortStocks,
+  rivals: makeInitialRivals(),
+  priceWindows: [],
+  rivalPressure: 50,
+  rivalPressureModifiers: [],
   reputation: { company: 0, crown: 0, rajah: 0, pirates: 0, mission: 0, dutch: 0 },
   crew: [
     { name: 'Mr. Hodge', role: 'Clerk', trait: 'drunkard' },
@@ -1139,27 +1165,52 @@ function hardacreReckoning(visits) {
     cinnamon: Math.round(35 * visits + visits * 2),
   };
 }
-function rivalLine(s) {
+// Returns a multi-rival snippet for the quarterly nag letter. Three
+// sentences max — one per rival when each has something noteworthy
+// to say, omitted otherwise. Hardacre uses tonnage comparison
+// (existing pattern); ter Borch and Lowji use standing as a
+// qualitative tone band.
+function rivalsLines(s) {
+  const lines = [];
+
+  // Hardacre — existing 3-band pattern by tonnage.
   const visits = s.indiaman?.visits || 0;
-  if (visits === 0) return '';
-  const h = hardacreReckoning(visits);
-  const ourPep = Math.floor(s.quotas?.pepper?.have || 0);
-  const ourCin = Math.floor(s.quotas?.cinnamon?.have || 0);
-  const aheadPep = h.pepper > ourPep + 30;
-  const aheadCin = h.cinnamon > ourCin + 15;
-  const muchAhead = h.pepper > ourPep + 80 || h.cinnamon > ourCin + 50;
-  if (muchAhead) {
-    return ` ${HARDACRE.name} at ${HARDACRE.station} reckons ${h.pepper} cwt of pepper and ${h.cinnamon} cwt of cinnamon to date — a comparison we shall not press, but which sits visibly upon the Court's table.`;
+  if (visits > 0) {
+    const h = hardacreReckoning(visits);
+    const ourPep = Math.floor(s.quotas?.pepper?.have   || 0);
+    const ourCin = Math.floor(s.quotas?.cinnamon?.have || 0);
+    const aheadPep = h.pepper > ourPep + 30;
+    const aheadCin = h.cinnamon > ourCin + 15;
+    const muchAhead = h.pepper > ourPep + 80 || h.cinnamon > ourCin + 50;
+    if (muchAhead) {
+      lines.push(`${HARDACRE.name} at ${HARDACRE.station} reckons ${h.pepper} cwt of pepper and ${h.cinnamon} cwt of cinnamon to date — a comparison we shall not press, but which sits visibly upon the Court's table.`);
+    } else if (aheadPep || aheadCin) {
+      lines.push(`${HARDACRE.name} at ${HARDACRE.station} stands at ${h.pepper}/${h.cinnamon} cwt; the comparison is not yet flattering to yr. station.`);
+    } else if (ourPep >= h.pepper && ourCin >= h.cinnamon) {
+      lines.push(`${HARDACRE.name} at ${HARDACRE.station} reckons ${h.pepper}/${h.cinnamon} cwt — yr. own returns, the Court is pleased to note, are no less.`);
+    }
   }
-  if (aheadPep || aheadCin) {
-    return ` ${HARDACRE.name} at ${HARDACRE.station} stands at ${h.pepper}/${h.cinnamon} cwt; the comparison is not yet flattering to yr. station.`;
+
+  // ter Borch — qualitative band by standing.
+  if (s.rivals?.terborch) {
+    const st = s.rivals.terborch.standing;
+    if (st >= 75)      lines.push(`Mynheer ter Borch at Eustace continues to gain ground in the High Government's regard.`);
+    else if (st <= 25) lines.push(`Word from Amsterdam: Mynheer ter Borch's hand at Eustace is tested.`);
   }
-  // Player is at or above Hardacre
-  if (ourPep >= h.pepper && ourCin >= h.cinnamon) {
-    return ` ${HARDACRE.name} at ${HARDACRE.station} reckons ${h.pepper}/${h.cinnamon} cwt — yr. own returns, the Court is pleased to note, are no less.`;
+
+  // Lowji — qualitative band by standing.
+  if (s.rivals?.lowji) {
+    const st = s.rivals.lowji.standing;
+    if (st >= 75)      lines.push(`The Bombay accounts speak of Mr. Lowji Nusserwanji's tonnage in terms a Director may not lightly dismiss.`);
+    else if (st <= 25) lines.push(`The Bombay houses report Mr. Lowji Nusserwanji to be in the unkind weather of his year.`);
   }
-  return '';
+
+  return lines.length === 0 ? '' : ' ' + lines.join(' ');
 }
+
+// Backwards-compatibility shim — keeps the old call sites in
+// makeQuarterlyNagLetter working while the next task migrates them.
+function rivalLine(s) { return rivalsLines(s); }
 
 function makeQuarterlyNagLetter(s) {
   const visits      = s.indiaman?.visits || 0;
@@ -1178,14 +1229,30 @@ function makeQuarterlyNagLetter(s) {
   const rival = rivalLine(s);
   const dryden = drydenQuarterlyAddendum(s);
 
+  // Pick base band — same logic as before.
+  let band;
+  if (nothingYet)                    band = 'first';
+  else if (finalStretch && !onTrack) band = 'pointed';
+  else if (onTrack)                  band = 'progress';
+  else                               band = 'reminder';
+
+  // Apply rivalPressure shift to the middle bands only. nothingYet and
+  // finalStretch short-circuits remain untouched (they reflect player-
+  // observable facts that rivalry shouldn't override).
+  const pressure = s.rivalPressure ?? 50;
+  if      (band === 'progress' && pressure > 70) band = 'reminder';  // pleased → reminding
+  else if (band === 'progress' && pressure < 30) band = 'progress';  // already softest mid-band
+  else if (band === 'reminder' && pressure > 70) band = 'pointed';   // reminding → pointed
+  else if (band === 'reminder' && pressure < 30) band = 'progress';  // reminding → pleased
+
   let subject, body;
-  if (nothingYet) {
+  if (band === 'first') {
     subject = 'A First Quarterly Note';
     body = `Sir, — We open yr. file at the Court for the present charter. The first Indiaman is despatched in due course; we shall expect a return at her holds. We pray you have laid the ground.\n\nWe are mindful of the climate, the politics, and the price of plank. We are mindful also that the late Mr. Wilbraham held the post for two years on similar excuses.\n\nYr. obedt. servants, the Court of Directors.${dryden}`;
-  } else if (finalStretch && !onTrack) {
+  } else if (band === 'pointed') {
     subject = 'A Pointed Word';
     body = `Sir, — A reckoning at this hand: ${reckoning}${rival} The third year is upon us, and the figures are not what we are owed. The Court has the names of two replacements before it. We trust you take our meaning.\n\nYr. servants, the Court of Directors.${dryden}`;
-  } else if (onTrack) {
+  } else if (band === 'progress') {
     subject = 'Yr. Progress Noted';
     body = `Sir, — Returns reckon ${reckoning}${rival} The Court is content with the present pace. Press on.\n\nYr. obedt. servants, the Court of Directors.${dryden}`;
   } else {
@@ -1818,6 +1885,57 @@ The Vizier`,
             flags: { vizierMarriage: 'counter', vizierBoonOwed: true },
             journal: 'Stood at Subhan’s marriage in exchange for a boon. The Vizier offered teak or pilots; the matter is held open.',
             hook: 'The Vizier owes you a boon — teak or Bugis pilots. The boon is to be called when the Factor names the matter.',
+          },
+        },
+      },
+    ],
+    read: false,
+  };
+}
+
+// ─────────── VIZIER INTEL CHANNEL ───────────
+// One to two times per charter, the Vizier writes offering palace-network
+// intelligence on ter Borch at Eustace. Cost is an unspoken favour —
+// vizierBoonOwed = true is planted if not already set, otherwise the player
+// owes a second favour (the Vizier tracks them).
+//
+// Trigger: visitedEustace (unique-set, so just includes check), day >= 150,
+//          90-day spacing, vizierIntelLetterCount < 2, !charterClosed.
+
+function makeVizierIntelLetter(s) {
+  const second = (s.flags?.vizierIntelLetterCount ?? 0) >= 1;
+  return {
+    id: 9300000 + s.day,
+    from: 'The Rajah\'s Vizier',
+    subject: second ? 'A second word from Kota Pinang' : 'A word from the palace',
+    body: `Sir, — The houses at Kota Pinang are not blind, and the wind from Eustace blows toward this palace as readily as toward yours. There is a matter concerning the Hollander ter Borch which ${second ? 'continues to develop' : 'I should be willing to share with you'}, for the courtesies between us.
+
+I write upon it now, and not later, because the matter is the kind which does not keep. The price is no money — that is for the bazaar. The price is yr. word, given quietly, that you remember the courtesy when called.
+
+Yr. obedt. servant,
+The Vizier`,
+    responses: [
+      {
+        label: 'Accept; the Vizier shall be remembered',
+        seed: 'accept; vizier boon owed; intel plant',
+        fixedOutcome: {
+          prose: 'You write a careful acceptance, in the language the Vizier will recognise. A folded note returns within the week — three sentences in his own hand, written under the lamp, naming a thing about the Hollander\'s recent correspondence which the Court will not hear of for some time yet.',
+          changes: {
+            flags: { terborchIntelPlant: true, vizierBoonOwed: true,
+                     vizierIntelLetterCount: (s.flags?.vizierIntelLetterCount ?? 0) + 1 },
+            journal: 'Accepted the Vizier\'s intelligence on ter Borch. A favour is owed, to be called.',
+            hook: 'The Vizier\'s favour is on the books. He will name it when it suits him.',
+          },
+        },
+      },
+      {
+        label: 'Decline politely; the courtesies are not equal',
+        seed: 'decline; small rajah neutral',
+        fixedOutcome: {
+          prose: 'You decline by note, with thanks for the regard. The Vizier accepts the refusal with the smallest motion of his head — and writes nothing more for some weeks.',
+          changes: {
+            flags: { vizierIntelLetterCount: (s.flags?.vizierIntelLetterCount ?? 0) + 1 },
+            journal: 'Declined the Vizier\'s offer. The favours-book remains as it was.',
           },
         },
       },
@@ -2718,6 +2836,14 @@ const AUTO_SENDERS = [
     weight: 2,
     gate: (s) => s.flags?.companyFaction === 'speculative',
   },
+  {
+    key: 'cama',
+    from: 'Mr. Pestonji Cama, of the Bombay establishment',
+    faction: null,
+    mood: 'a careful Parsi shipping clerk, second to a great house, offering small pieces of news for small pieces of money — formal mercantile English with the occasional Zoroastrian touchstone',
+    weight: 1,
+    gate: (s) => s.day >= 90,
+  },
 ];
 
 function pickAutoSender(s) {
@@ -2731,6 +2857,561 @@ function pickAutoSender(s) {
   }
   return eligible[eligible.length - 1];
 }
+
+// Rival-event template pool. Populated in Phase 6. The scheduler in
+// tickDays handles the empty-pool case gracefully (pickRivalEvent
+// returns null).
+const RIVAL_EVENTS = [
+  // ─── HARDACRE EVENTS (6) ────────────────────────────────────────────
+  {
+    key: 'hardacre-fire',
+    rival: 'hardacre',
+    minDay: 180, maxDay: 720,
+    preconditions: (s) => true,
+    standingDelta: -20,
+    standingAfter: 'troubled',
+    pressureDelta: -10,
+    pressureLifetime: 60,
+    priceWindow: { port: 'Kota Pinang', commodity: 'pepper', sellMult: 1.25, days: 60 },
+    build: (s, opts) => ({
+      id: 9405000 + s.day,
+      from: 'A correspondent, by the next packet',
+      subject: 'News of Bencoolen',
+      body: opts.anticipated
+        ? `Sir, — As you anticipated. A fire at the Bencoolen godowns, three days back, has cost Mr. Hardacre the better part of his pepper stock for the season. The Court will hear of it within the fortnight; the strait, you have heard already.\n\nYr. obedt. servant.`
+        : `Sir, — There is news from Bencoolen, of which the Court does not yet know. A fire at Mr. Hardacre's godowns, three days back, has cost him the better part of his pepper stock for the season. The Court will hear within the fortnight.\n\nYr. obedt. servant.`,
+      responses: [
+        {
+          label: 'Reroute the brigantine to Bencoolen with what pepper we have',
+          seed: 'arbitrage; lay hands on the price',
+          fixedOutcome: {
+            prose: 'The brigantine is laid for Bencoolen at the next favourable wind. The price of pepper in those quarters has risen by the fact of the fire; the Factor positions his hold accordingly.',
+            changes: { journal: 'Rerouted the brigantine to Bencoolen on news of Hardacre\'s fire. The pepper price spike will reward the Factor who is first.' },
+          },
+        },
+        {
+          label: 'Note it; press on with the present quarter',
+          seed: 'no action; private satisfaction',
+          fixedOutcome: {
+            prose: 'You set the news aside. The Court will hear when the Court hears.',
+            changes: { journal: 'Heard of Hardacre\'s misfortune at Bencoolen. We shall press on with the present quarter.' },
+          },
+        },
+      ],
+      read: false,
+    }),
+  },
+  {
+    key: 'hardacre-windfall',
+    rival: 'hardacre',
+    minDay: 240, maxDay: 720,
+    preconditions: (s) => true,
+    standingDelta: 12,
+    standingAfter: 'rising',
+    pressureDelta: 10, pressureLifetime: 90,
+    build: (s, opts) => ({
+      id: 9400100 + s.day,
+      from: 'The Court of Directors',
+      subject: 'A note in passing',
+      body: opts.anticipated
+        ? `Sir, — As you had been forewarned. Mr. Hardacre at Bencoolen has had a quarter of which the Court speaks favourably — a Bugis cargo of cinnamon, salvaged from a wreck at Engano, the proceeds of which weight against you in the present comparison.\n\nYr. servants, the Court of Directors.`
+        : `Sir, — In the last quarter, Mr. Hardacre at Bencoolen has had a windfall — a cargo of cinnamon, salvaged from a wreck at Engano, which weights against you in the present comparison. We do not press the matter — only note that the present figures favour his station.\n\nYr. servants, the Court of Directors.`,
+      responses: [
+        {
+          label: 'Note it; press on',
+          seed: 'no action',
+          fixedOutcome: {
+            prose: 'You set the news aside.',
+            changes: { journal: 'Hardacre had a windfall at Engano. The Court is, at present, in his favour.' },
+          },
+        },
+      ],
+      read: false,
+    }),
+  },
+  {
+    key: 'hardacre-clerk-defect',
+    rival: 'hardacre',
+    minDay: 360, maxDay: 900,
+    preconditions: (s) => (s.rivals?.hardacre?.standing ?? 50) <= 35,
+    standingDelta: -8,
+    standingAfter: 'troubled',
+    pressureDelta: -8, pressureLifetime: 60,
+    build: (s, opts) => ({
+      id: 9400200 + s.day,
+      from: 'Mr. Reginald Penhaligon, Junior Writer',
+      subject: 'A request for employment',
+      body: `Sir, — I write directly, at the suggestion of Mr. Tyler of the Madras establishment with whom I am acquainted. I am at present junior writer in the Bencoolen establishment under Mr. Hardacre, a post which I no longer find — for reasons I shall not put down upon paper — agreeable to my situation.\n\nI write upon yr. office because the Bayan-Kor establishment is reckoned by the Madras gentlemen as a station where industry is rewarded. My present wage at Bencoolen is £36 per annum; I should not press for more than yr. office finds reasonable.\n\nYr. obedt. and humble servant,\nReginald Penhaligon`,
+      responses: [
+        {
+          label: 'Hire him at £36/year; the household is the better for it',
+          seed: 'hire penhaligon; new acquaintance',
+          fixedOutcome: {
+            prose: 'You write Mr. Penhaligon a careful letter of engagement, with the £36/year wage offered against an annual review. He arrives by the next packet — a sober, careful young man of three-and-twenty, with a hand fair enough that Hodge says nothing against him.',
+            changes: {
+              money: -10,
+              journal: 'Engaged Mr. Reginald Penhaligon, late of Bencoolen, as a junior writer. £36/year on review.',
+              newAcquaintances: [
+                { name: 'Mr. Reginald Penhaligon', role: 'Junior Writer', location: 'Bayan-Kor', notes: 'Defected from Hardacre\'s establishment at Bencoolen. Sober, careful, fair hand. — Cousin to the apprentice writer Mr. Penhaligon already in the household.' },
+              ],
+            },
+          },
+        },
+        {
+          label: 'Decline; the household is full enough',
+          seed: 'decline cleanly',
+          fixedOutcome: {
+            prose: 'You write a courteous decline. Mr. Penhaligon, by report, takes a post at Madras instead; we hear of him no more.',
+            changes: { journal: 'Declined Mr. Penhaligon\'s application. The household is full enough.' },
+          },
+        },
+      ],
+      read: false,
+    }),
+  },
+  {
+    key: 'hardacre-pilot-lost',
+    rival: 'hardacre',
+    minDay: 300, maxDay: 720,
+    preconditions: (s) => true,
+    standingDelta: -10,
+    pressureDelta: -8, pressureLifetime: 45,
+    priceWindow: { port: 'Kota Pinang', commodity: 'cinnamon', sellMult: 1.15, days: 45 },
+    build: (s, opts) => ({
+      id: 9400300 + s.day,
+      from: 'Capt. Thomas Faulke, of the Albatross',
+      subject: 'A matter from the strait',
+      body: opts.anticipated
+        ? `Sir, — As foretold. Mr. Hardacre's chief pilot, Bugis, has been pressed into service by the Royal Navy at Trincomalee for an Indian Ocean station. Bencoolen is, for the present quarter, navigating with green hands.`
+        : `Sir, — A matter for yr. ear. Mr. Hardacre's chief pilot — a Bugis whose name I shall not write — has been pressed into Royal Navy service at Trincomalee. Bencoolen will navigate with green hands until a replacement is found, which will not be quickly.`,
+      responses: [
+        {
+          label: 'Note it; trust will follow Faulke for the news',
+          seed: 'no action',
+          fixedOutcome: {
+            prose: 'You make a note in the household book.',
+            changes: { journal: 'Hardacre has lost his chief pilot to the Navy. Bencoolen sails on green hands.' },
+          },
+        },
+      ],
+      read: false,
+    }),
+  },
+  {
+    key: 'hardacre-court-favour',
+    rival: 'hardacre',
+    minDay: 480, maxDay: 1080,
+    preconditions: (s) => (s.rivals?.hardacre?.standing ?? 50) >= 55,
+    standingDelta: 15,
+    standingAfter: 'rising',
+    pressureDelta: 12, pressureLifetime: 90,
+    build: (s, opts) => ({
+      id: 9400400 + s.day,
+      from: 'The Court of Directors',
+      subject: 'A note of relative standing',
+      body: `Sir, — Mr. Hardacre at Bencoolen has been the recipient, this quarter, of a private commendation from the Chairman, on the strength of his returns. We do not press the comparison. We note only that the Chairman's regard, once given, is not lightly transferred.\n\nYr. servants, the Court of Directors.`,
+      responses: [
+        {
+          label: 'Note it; press on',
+          seed: 'no action',
+          fixedOutcome: {
+            prose: 'You set the news aside.',
+            changes: { journal: 'Hardacre has the Chairman\'s private regard. We must do better than the present quarter.' },
+          },
+        },
+      ],
+      read: false,
+    }),
+  },
+  {
+    key: 'hardacre-scandal',
+    rival: 'hardacre',
+    minDay: 540, maxDay: 1080,
+    preconditions: (s) => (s.rivals?.hardacre?.standing ?? 50) <= 30,
+    standingDelta: -20,
+    standingAfter: 'broken',
+    pressureDelta: -15, pressureLifetime: 90,
+    build: (s, opts) => ({
+      id: 9400500 + s.day,
+      from: 'The Court of Directors',
+      subject: 'A grave matter at Bencoolen',
+      body: `Sir, — A grave matter at Bencoolen has come before the Court. Mr. Hardacre is summoned home upon the next Indiaman to answer the matter at Leadenhall, and a successor is to be named in the interval. The comparison, which has weighted hard against you these quarters past, is now removed from yr. file. We trust this finds yr. station in good order, and yr. quarter's returns the equal of expectation.\n\nYr. servants, the Court of Directors.`,
+      responses: [
+        {
+          label: 'Note it; press on',
+          seed: 'no action',
+          fixedOutcome: {
+            prose: 'You set the news aside. The Bencoolen seat is, for the moment, vacant.',
+            changes: { journal: 'Hardacre is summoned home in disgrace. The Court\'s comparison no longer weights against me.' },
+          },
+        },
+      ],
+      read: false,
+    }),
+  },
+
+  // ─── TER BORCH EVENTS (6) ───────────────────────────────────────────
+  {
+    key: 'terborch-customs-spat',
+    rival: 'terborch',
+    minDay: 200, maxDay: 720,
+    preconditions: (s) => true,
+    standingDelta: -8,
+    pressureDelta: -5, pressureLifetime: 45,
+    priceWindow: { port: 'Port St. Eustace', commodity: 'sandalwood', buyMult: 1.15, days: 45 },
+    build: (s, opts) => ({
+      id: 9410000 + s.day,
+      from: 'Mynheer Hendrik Boom',
+      subject: 'A matter at the customs',
+      body: opts.anticipated
+        ? `Sir, — As you had been told. The customs at Eustace are at odds with Mynheer ter Borch this fortnight, over a cargo of sandalwood; he is for the moment occupied. Trade may be had at a smaller fee than is usual, by those who can move quickly.`
+        : `Sir, — The customs at Eustace are at odds with Mynheer ter Borch this fortnight, over a cargo of sandalwood. The matter is small but not nothing — and trade may be had, at present, at a smaller fee than is usual.\n\nYr. obedt. servant,\nBoom`,
+      responses: [
+        {
+          label: 'Note it; the next visit shall be a profitable one',
+          seed: 'no action',
+          fixedOutcome: {
+            prose: 'You make a private note. The Hollanders\' difficulties, occasionally, are the Englishman\'s opportunity.',
+            changes: { journal: 'Boom writes that ter Borch is at odds with the customs at Eustace. A small window for sandalwood.' },
+          },
+        },
+      ],
+      read: false,
+    }),
+  },
+  {
+    key: 'terborch-promotion-attempted',
+    rival: 'terborch',
+    minDay: 360, maxDay: 900,
+    preconditions: (s) => !(s.rivals?.terborch?.eventsFired?.includes('terborch-scandal')),
+    standingDelta: 10,
+    standingAfter: 'rising',
+    pressureDelta: 6, pressureLifetime: 60,
+    build: (s, opts) => ({
+      id: 9410100 + s.day,
+      from: 'Mynheer Hendrik Boom',
+      subject: 'A whisper from the High Government',
+      body: `Sir, — There is talk that Mynheer ter Borch is named for an advance — a station at Batavia, perhaps, or a deputy\'s seat at the Council of the Indies. The matter is not settled; but the wind from Amsterdam is in his sail.\n\nYr. obedt. servant,\nBoom`,
+      responses: [
+        {
+          label: 'Note it; the High Government may yet take him from us',
+          seed: 'no action',
+          fixedOutcome: {
+            prose: 'You set the matter aside. Whether ter Borch goes east or stays at Eustace, the Factor presses on with his charter.',
+            changes: { journal: 'Boom writes that ter Borch is named for advance — Batavia or the Council of the Indies. The matter is not settled.' },
+          },
+        },
+      ],
+      read: false,
+    }),
+  },
+  {
+    key: 'terborch-scandal',
+    rival: 'terborch',
+    minDay: 480, maxDay: 1080,
+    preconditions: (s) => (s.rivals?.terborch?.standing ?? 50) <= 35,
+    standingDelta: -15,
+    standingAfter: 'troubled',
+    pressureDelta: -10, pressureLifetime: 75,
+    build: (s, opts) => ({
+      id: 9410200 + s.day,
+      from: 'A correspondent, by the next Indiaman',
+      subject: 'A matter at Eustace',
+      body: `Sir, — A matter has come to the High Government concerning Mynheer ter Borch — the Brotherhood matter, as it is called in the back rooms — of a kind which does not invite open discussion. He is summoned to Batavia for an interview at the Council. The matter may yet be cleared; or not. — Yr. obedt. servant.`,
+      responses: [
+        {
+          label: 'Note it; the Hollanders\' troubles are not the Factor\'s',
+          seed: 'no action',
+          fixedOutcome: {
+            prose: 'You set the news aside. The Council at Batavia is, in such matters, slow but not unconcerned.',
+            changes: { journal: 'Ter Borch is summoned to Batavia for an interview. The Hollanders\' troubles are not the Englishman\'s — yet.' },
+          },
+        },
+      ],
+      read: false,
+    }),
+  },
+  {
+    key: 'terborch-clerk-defect',
+    rival: 'terborch',
+    minDay: 360, maxDay: 900,
+    preconditions: (s) => (s.rivals?.terborch?.standing ?? 50) <= 35,
+    standingDelta: -8,
+    pressureDelta: -6, pressureLifetime: 45,
+    build: (s, opts) => ({
+      id: 9410300 + s.day,
+      from: 'Mynheer Cornelis de Witt, Secretary',
+      subject: 'A matter of employment',
+      body: `Sir, — I am at present secretary at Mynheer ter Borch\'s establishment at Eustace, a position which has become — by reasons of recent disagreement — no longer agreeable to my situation. I write upon yr. office because the Bayan-Kor establishment is reckoned by the Hollanders themselves as a station where Dutch industry is not held against the man.\n\nMy present wage is forty guilders the month; I should not press for more in pounds than yr. office finds proper.\n\nYr. obedt. servant,\nCornelis de Witt`,
+      responses: [
+        {
+          label: 'Hire him; a Dutch hand is useful at Eustace',
+          seed: 'hire de witt; new acquaintance',
+          fixedOutcome: {
+            prose: 'You engage Mynheer de Witt at £40 per annum, payable quarterly. He arrives by the next Eustace packet — a thin, careful man of perhaps thirty, with a hand which writes Dutch and English with equal facility.',
+            changes: {
+              money: -8,
+              journal: 'Engaged Mynheer Cornelis de Witt as secretary, late of ter Borch\'s establishment. £40/year, paid quarterly.',
+              newAcquaintances: [
+                { name: 'Mynheer Cornelis de Witt', role: 'Secretary', location: 'Bayan-Kor', notes: 'Defected from ter Borch\'s establishment. Bilingual (Dutch + English); thirty; careful.' },
+              ],
+            },
+          },
+        },
+        {
+          label: 'Decline; a Hollander in the household is a complication',
+          seed: 'decline; small dutch -',
+          fixedOutcome: {
+            prose: 'You decline by note. Mynheer de Witt takes ship for Amsterdam, by report, and his use to either establishment is at an end.',
+            changes: {
+              reputation: { dutch: -2 },
+              journal: 'Declined de Witt\'s application. A Hollander in the household was a complication.',
+            },
+          },
+        },
+      ],
+      read: false,
+    }),
+  },
+  {
+    key: 'terborch-trade-pass-revocation',
+    rival: 'terborch',
+    minDay: 540, maxDay: 1080,
+    preconditions: (s) => s.flags?.dutchTradePass === true && (s.rivals?.terborch?.standing ?? 50) >= 65,
+    standingDelta: 10,
+    standingAfter: 'rising',
+    pressureDelta: 10, pressureLifetime: 60,
+    build: (s, opts) => ({
+      id: 9410400 + s.day,
+      from: 'Mynheer ter Borch, formally',
+      subject: 'A revision of yr. trade pass',
+      body: `Sir, — I am instructed by the High Government to revise the trade passes granted by my junior at Eustace to certain English servants in the strait. The pass which yr. office holds is, with my regret, henceforth halved in its application — fifty per cent. of its former privilege. The matter is not personal; it is the run of administration.\n\nYr. obedt. servant,\nter Borch`,
+      responses: [
+        {
+          label: 'Acknowledge; the matter is the run of administration',
+          seed: 'acknowledge; trade pass weakened',
+          fixedOutcome: {
+            prose: 'You write a courteous acknowledgement. The duty at Eustace is, henceforth, only one-quarter halved instead of fully halved — a small but real material loss.',
+            changes: {
+              flags: { dutchTradePassReduced: true },
+              journal: 'Ter Borch revises the trade pass. Eustace duties are no longer fully halved; the privilege is reduced.',
+            },
+          },
+        },
+      ],
+      read: false,
+    }),
+  },
+  {
+    key: 'terborch-glut',
+    rival: 'terborch',
+    minDay: 240, maxDay: 720,
+    preconditions: (s) => true,
+    standingDelta: -5,
+    pressureDelta: -4, pressureLifetime: 30,
+    priceWindow: { port: 'Port St. Eustace', commodity: 'silver', buyMult: 1.10, days: 30 },
+    build: (s, opts) => ({
+      id: 9410500 + s.day,
+      from: 'Mynheer Hendrik Boom',
+      subject: 'A small matter at the warehouses',
+      body: `Sir, — Mynheer ter Borch\'s silver consignment, this fortnight, has run heavier than the warehouses can hold; he is for the moment selling silver below the customary mark. The matter does not last — perhaps a month. — Yr. obedt. servant, Boom`,
+      responses: [
+        {
+          label: 'Note it; the next visit to Eustace shall be a buyer\'s',
+          seed: 'arbitrage',
+          fixedOutcome: {
+            prose: 'A small private note in the household book.',
+            changes: { journal: 'Ter Borch is over-supplied of silver at Eustace. A month of buyer\'s prices.' },
+          },
+        },
+      ],
+      read: false,
+    }),
+  },
+
+  // ─── LOWJI EVENTS (6) ───────────────────────────────────────────────
+  {
+    key: 'lowji-cargo-lost',
+    rival: 'lowji',
+    minDay: 200, maxDay: 720,
+    preconditions: (s) => true,
+    standingDelta: -15,
+    standingAfter: 'troubled',
+    pressureDelta: -7, pressureLifetime: 60,
+    priceWindow: { port: 'Bayan-Kor', commodity: 'calico', buyMult: 0.85, days: 60 },
+    build: (s, opts) => ({
+      id: 9420000 + s.day,
+      from: 'Mr. Pestonji Cama',
+      subject: 'A matter from Bombay',
+      body: opts.anticipated
+        ? `Sir, — As foretold. Mr. Lowji\'s brigantine, the Hormuzd, has been lost in a squall off the Konkan, with the better part of the season\'s calico. The Bombay houses are, for the moment, supplying calico into the bay at prices the Englishman may turn to advantage.`
+        : `Sir, — News from the bay. Mr. Lowji Nusserwanji has lost the Hormuzd, in a squall off the Konkan coast — a brigantine and the better part of his calico for the season. The Bombay houses redirect their supply through Bayan-Kor at less than the customary price for some weeks.\n\nYr. obedt. servant,\nCama`,
+      responses: [
+        {
+          label: 'Buy calico aggressively while the price holds',
+          seed: 'arbitrage',
+          fixedOutcome: {
+            prose: 'You direct Hodge to lay in calico beyond the customary mark, against the future quarter when the price will return.',
+            changes: { journal: 'Lowji has lost the Hormuzd; Cama writes from Bombay. Hodge laying in calico against the season\'s return.' },
+          },
+        },
+        {
+          label: 'Note it; the present hold is full enough',
+          seed: 'no action',
+          fixedOutcome: {
+            prose: 'You set the news aside.',
+            changes: { journal: 'Lowji has lost the Hormuzd. The hold is full enough; the bay\'s prices we leave for another quarter.' },
+          },
+        },
+      ],
+      read: false,
+    }),
+  },
+  {
+    key: 'lowji-windfall',
+    rival: 'lowji',
+    minDay: 240, maxDay: 720,
+    preconditions: (s) => true,
+    standingDelta: 12,
+    standingAfter: 'rising',
+    pressureDelta: 8, pressureLifetime: 60,
+    build: (s, opts) => ({
+      id: 9420100 + s.day,
+      from: 'Mr. Pestonji Cama',
+      subject: 'A small note of standing',
+      body: opts.anticipated
+        ? `Sir, — As you had been told. Mr. Lowji has secured a contract with the Surat Mughal customs — opium licence in country trade for the season. The bay houses are full of his name.`
+        : `Sir, — A matter of small significance, perhaps: Mr. Lowji Nusserwanji has secured an opium licence under the Surat Mughal customs for the present season. The Bombay houses speak of him in the warmer language of country trade.\n\nYr. obedt. servant,\nCama`,
+      responses: [
+        {
+          label: 'Note it; press on',
+          seed: 'no action',
+          fixedOutcome: {
+            prose: 'You set the news aside.',
+            changes: { journal: 'Lowji has the Surat opium licence. The Bombay houses speak well of him.' },
+          },
+        },
+      ],
+      read: false,
+    }),
+  },
+  {
+    key: 'lowji-pilot-defect',
+    rival: 'lowji',
+    minDay: 360, maxDay: 900,
+    preconditions: (s) => (s.rivals?.lowji?.standing ?? 50) <= 35,
+    standingDelta: -10,
+    pressureDelta: -6, pressureLifetime: 45,
+    build: (s, opts) => ({
+      id: 9420200 + s.day,
+      from: 'Capt. Thomas Faulke, of the Albatross',
+      subject: 'A pilot for the strait',
+      body: `Sir, — There is in Bayan-Kor at present, looking for employment, one Khojah Avedik — a Persian pilot of fifteen years\' service in the bay, late of Mr. Lowji\'s establishment at Bombay. He left under circumstances of which I do not write upon paper. He knows the strait between here and Macao as a man knows his own door.\n\nHe asks £80 per annum, with the use of a clerk to keep his accounts in English. I should not press the matter, but I have seen his hand at the wheel myself, and the matter recommends itself.\n\nYr. obedt. servant,\nFaulke`,
+      responses: [
+        {
+          label: 'Hire him at £80/year; a Persian pilot is no small thing',
+          seed: 'hire avedik; new acquaintance',
+          fixedOutcome: {
+            prose: 'You write Faulke a note authorising the engagement. Khojah Avedik is brought to the household by the next packet — a thin, dignified, careful man, who speaks English with the formality of his Bombay schooling. The strait, henceforth, is read by a hand that knows it.',
+            changes: {
+              money: -20,
+              journal: 'Engaged Khojah Avedik as pilot, late of Mr. Lowji\'s. £80/year. The strait is the household\'s now in a way it was not.',
+              newAcquaintances: [
+                { name: 'Khojah Avedik', role: 'Pilot', location: 'Bayan-Kor', notes: 'Persian pilot, fifteen years in the bay, late of Mr. Lowji\'s Bombay establishment. £80/year. Knows the strait to Macao.' },
+              ],
+            },
+          },
+        },
+        {
+          label: 'Decline; £80 is a great wage for a hand at the wheel',
+          seed: 'decline cleanly',
+          fixedOutcome: {
+            prose: 'You decline by note. Khojah Avedik, by report, takes a post with the Hollanders at Eustace within the fortnight.',
+            changes: { journal: 'Declined Avedik\'s application. £80 was the price of a private pilot.' },
+          },
+        },
+      ],
+      read: false,
+    }),
+  },
+  {
+    key: 'lowji-rumour',
+    rival: 'lowji',
+    minDay: 300, maxDay: 720,
+    preconditions: (s) => true,
+    standingDelta: 5,
+    pressureDelta: 4, pressureLifetime: 30,
+    build: (s, opts) => ({
+      id: 9420300 + s.day,
+      from: 'Mr. Pestonji Cama',
+      subject: 'A small rumour from Bombay',
+      body: `Sir, — A rumour, of which I take no certainty: Mr. Lowji is said to be building a new shipyard at Mazagon, on the Bombay establishment\'s western water. If the matter is true, his standing in country trade is materially the larger for it.\n\nYr. obedt. servant,\nCama`,
+      responses: [
+        {
+          label: 'Note the rumour; press on',
+          seed: 'no action',
+          fixedOutcome: {
+            prose: 'You make a private note.',
+            changes: { journal: 'Cama writes of a Lowji shipyard at Mazagon. The matter, if true, places him further ahead.' },
+          },
+        },
+      ],
+      read: false,
+    }),
+  },
+  {
+    key: 'lowji-glut',
+    rival: 'lowji',
+    minDay: 240, maxDay: 720,
+    preconditions: (s) => true,
+    standingDelta: -5,
+    pressureDelta: -3, pressureLifetime: 30,
+    priceWindow: { port: 'Bayan-Kor', commodity: 'calico', buyMult: 0.85, days: 30 },
+    build: (s, opts) => ({
+      id: 9420400 + s.day,
+      from: 'Mr. Pestonji Cama',
+      subject: 'A glut at Bombay',
+      body: `Sir, — The Bombay houses are at present over-supplied of calico — Mr. Lowji has shipped against an expected market that has not materialised. Bombay calico is, this month, at the cheaper price; the matter is not material to yr. station, but the Factor may wish to know.\n\nYr. obedt. servant,\nCama`,
+      responses: [
+        {
+          label: 'Note it; if a sale at Bayan-Kor presents itself, hold for next month',
+          seed: 'arbitrage hint',
+          fixedOutcome: {
+            prose: 'You make a private note. The Bayan-Kor calico price will be the softer for some weeks.',
+            changes: { journal: 'Cama writes of a calico glut at Bombay. Hold the household stock against the next quarter.' },
+          },
+        },
+      ],
+      read: false,
+    }),
+  },
+  {
+    key: 'lowji-bankruptcy-rumour',
+    rival: 'lowji',
+    minDay: 540, maxDay: 1080,
+    preconditions: (s) => (s.rivals?.lowji?.standing ?? 50) <= 25,
+    standingDelta: -25,
+    standingAfter: 'broken',
+    pressureDelta: -12, pressureLifetime: 90,
+    build: (s, opts) => ({
+      id: 9420500 + s.day,
+      from: 'Mr. Pestonji Cama',
+      subject: 'A grave rumour from Bombay',
+      body: `Sir, — A grave rumour, which I record only because I am called upon to record what I hear. Mr. Lowji Nusserwanji\'s establishment is said to be over-extended in the season\'s voyages, and the bills he has written against the Surat customs are said to be coming back protested. If the matter is as the bay houses describe, his establishment will not see out the year.\n\nI do not write upon this matter again unless it confirms.\n\nYr. obedt. servant,\nCama`,
+      responses: [
+        {
+          label: 'Note it; the matter is grave',
+          seed: 'no action',
+          fixedOutcome: {
+            prose: 'You set the news aside, in the careful way a Factor sets aside news of another man\'s ruin.',
+            changes: { journal: 'Cama writes that Lowji\'s establishment may not see out the year. A grave matter, if it confirms.' },
+          },
+        },
+      ],
+      read: false,
+    }),
+  },
+];
 
 // ─────────── CHARTER-END LETTER ───────────
 // At day 0 the Court closes the file. The letter the Director writes is
@@ -3020,6 +3701,10 @@ function makeSuccessorState(prev, newName) {
     acquaintances: persistedAcquaintances,
     flags: carryFlags,
     portStocks: freshPortStocks,
+    rivals: makeInitialRivals(),       // fresh trajectories for the new Factor
+    priceWindows: [],                   // no inherited arbitrage windows
+    rivalPressure: 50,                  // baseline; recomputed first tick
+    rivalPressureModifiers: [],
     lettersGenerated: 0,
     // Preserved as-is: outpost, ship, npcs, reputation
   };
@@ -3099,6 +3784,10 @@ function makeRenewedState(prev) {
     aiLog: [],
     flags: carryFlags,
     portStocks: freshPortStocks,
+    rivals: makeInitialRivals(),
+    priceWindows: [],
+    rivalPressure: 50,
+    rivalPressureModifiers: [],
     lettersGenerated: 0,
     // Preserved as-is: outpost, ship, npcs, reputation, acquaintances, crew
   };
@@ -3614,6 +4303,22 @@ function tickDays(gs, days) {
       s.awayLog.push({ day: s.day, type: 'letter', text: 'A folded note from the palace, the Vizier’s small personal seal upon it.' });
     }
 
+    // ── Vizier intel: one to two per charter, gated visited Eustace (unique-set
+    // so .includes suffices), 90-day spacing, capped at 2.
+    if (
+      !s.charterClosed &&
+      (s.flags?.vizierIntelLetterCount ?? 0) < 2 &&
+      s.day >= 150 &&
+      (s.visited || []).includes('Port St. Eustace') &&
+      (s.day - (s.flags?.lastVizierIntelDay ?? 0)) >= 90
+    ) {
+      const letter = makeVizierIntelLetter(s);
+      s.letters = [...s.letters, letter];
+      s.lettersGenerated = (s.lettersGenerated || 0) + 1;
+      s.flags = { ...(s.flags || {}), lastVizierIntelDay: s.day };
+      s.awayLog.push({ day: s.day, type: 'letter', text: 'A folded note from the palace, the Vizier\'s small personal seal upon it.' });
+    }
+
     // ── Brotherhood operative questline (Faulke).
     // Step 1: Faulke proposes to investigate. Fires once after the Factor
     // has met him AND day >= 90.
@@ -3790,6 +4495,82 @@ function tickDays(gs, days) {
         s.awayLog.push({ day: s.day, type: 'letter', text: 'A reply from Mynheer ter Borch by the next Dutch packet — the tone is what yr. standing has earned.' });
       }
     }
+
+    // ── Rivalry events. Fires roughly every 90-150 days from a per-rival
+    // template pool. Pool is RIVAL_EVENTS (Phase 6 — empty during
+    // structural phases). pickRivalEvent enforces eligibility, no-repeats,
+    // and the 240-day cluster cap.
+    if (!s.charterClosed) {
+      // Initialize first-event day with 60-120-day jitter from charter start.
+      if (!s.flags?.firstRivalEventDay) {
+        s.flags = {
+          ...(s.flags || {}),
+          firstRivalEventDay: 60 + Math.floor(Math.random() * 60),
+        };
+      }
+      const nextEventDay = s.flags?.nextRivalEventDay ?? s.flags.firstRivalEventDay;
+      if (s.day >= nextEventDay) {
+        const event = pickRivalEvent(s, RIVAL_EVENTS);
+        if (event) {
+          const intelFlag = `${event.rival}IntelPlant`;
+          const wasAnticipated = !!s.flags?.[intelFlag];
+          const letter = event.build(s, { anticipated: wasAnticipated });
+          s.letters = [...s.letters, letter];
+          s.lettersGenerated = (s.lettersGenerated || 0) + 1;
+          s.rivals[event.rival].eventsFired = [
+            ...(s.rivals[event.rival].eventsFired || []),
+            event.key,
+          ];
+          if (event.standingAfter) s.rivals[event.rival].state = event.standingAfter;
+          if (event.standingDelta) {
+            s.rivals[event.rival].standing = Math.max(0, Math.min(100,
+              (s.rivals[event.rival].standing || 50) + event.standingDelta));
+          }
+          s.rivals[event.rival].lastEventDay = s.day;
+
+          // Apply priceWindow if any.
+          if (event.priceWindow) {
+            s.priceWindows = [
+              ...(s.priceWindows || []),
+              { ...event.priceWindow, expiresDay: s.day + event.priceWindow.days },
+            ];
+          }
+          // Apply pressure modifier (use defaults if event doesn't override).
+          const pressureDelta    = event.pressureDelta    ?? (event.standingDelta < 0 ? -8 : 8);
+          const pressureLifetime = event.pressureLifetime ?? 60;
+          s.rivalPressureModifiers = [
+            ...(s.rivalPressureModifiers || []),
+            { delta: pressureDelta, fromDay: s.day, lifetimeDays: pressureLifetime },
+          ];
+          // Consume the intel-plant flag.
+          if (wasAnticipated) {
+            const flagsNext = { ...(s.flags || {}) };
+            delete flagsNext[intelFlag];
+            s.flags = flagsNext;
+          }
+          s.awayLog.push({ day: s.day, type: 'letter', text: 'A note from London concerning the affairs of yr. peers.' });
+        }
+        s.flags = {
+          ...(s.flags || {}),
+          nextRivalEventDay: s.day + 90 + Math.floor(Math.random() * 60),
+        };
+      }
+    }
+
+    // ── Cleanup expired priceWindows.
+    if (s.priceWindows && s.priceWindows.length > 0) {
+      s.priceWindows = pruneExpiredWindows(s.priceWindows, s.day);
+    }
+
+    // ── Prune fully-elapsed pressure modifiers (lifetime exhausted).
+    if (s.rivalPressureModifiers && s.rivalPressureModifiers.length > 0) {
+      s.rivalPressureModifiers = s.rivalPressureModifiers.filter(
+        m => (s.day - m.fromDay) < m.lifetimeDays
+      );
+    }
+
+    // ── Recompute rivalPressure.
+    s.rivalPressure = computeRivalPressure(s);
 
     // ── Raid: opportunists at the godown. Stockade halves the chance, the
     // Barracks halves it again. The Magazine caps any single loss at 10%.
@@ -4417,9 +5198,11 @@ Reputation deltas should be small (-15 to +15). Only include factions that actua
 
 // Per-sender deterministic fallback pools for genLetter. Each entry is a
 // {subject, body, responses} object — sender.from is added at lookup time.
-// 6 senders × 3 templates each = 18 entries. Templates mirror the AUTO_SENDERS
-// mood descriptions (Wexley familial, Faulke mariner-Brotherhood, Pyke pious-pastoral,
-// Anonymous Hand quiet-Brotherhood, ter Borch Calvinist-trader, Dryden private-Director).
+// Templates mirror the AUTO_SENDERS mood descriptions (Wexley familial,
+// Faulke mariner-Brotherhood, Pyke pious-pastoral, Anonymous Hand
+// quiet-Brotherhood, ter Borch Calvinist-trader, Dryden private-Director,
+// Cama careful-Parsi). Pool sizes vary by sender; pirates carries extra
+// rivalry intel-buy templates.
 // Static prose — no gs interpolation — for safety and predictability.
 const FALLBACK_LETTERS = {
   wexley: [
@@ -4540,6 +5323,75 @@ const FALLBACK_LETTERS = {
         { label: 'Set aside, do not reply', seed: 'Pirates -2, silence' },
       ],
     },
+    {
+      subject: 'Of yr. peers in these waters',
+      body: `Sir, — A small voice in the strait writes: there is news of yr. peer at Bencoolen, kept close by the high office, of which we have laid eyes. The matter would interest you, perhaps, before it is general talk.
+
+The price for yr. private knowledge of it is forty pounds, paid as before — through the boy at the wharf with the broken cap. We do not write again on the matter; we hold it for two weeks. After that the news is no longer ours alone.
+
+—`,
+      responses: [
+        {
+          label: 'Pay the £40; learn what is known',
+          seed: 'pay; intel plant; small pirate rep',
+          fixedOutcome: {
+            prose: 'You send the boy at the wharf with the agreed sum. A note returns the same evening, in a hand the Factor does not know — three sentences only, but enough to anticipate what the next packet from Bencoolen will say.',
+            changes: {
+              money: -40,
+              flags: { hardacreIntelPlant: true },
+              journal: 'Bought intelligence on Mr. Hardacre at Bencoolen — £40 to a Brotherhood hand, by the boy at the wharf.',
+            },
+          },
+        },
+        {
+          label: 'Decline; let the news come in its own time',
+          seed: 'decline cleanly',
+          fixedOutcome: {
+            prose: 'You write nothing in reply. The strait keeps its own counsel; the boy at the wharf is not seen at the gangway.',
+            changes: { journal: 'Declined the Brotherhood\'s offer of intelligence on Mr. Hardacre.' },
+          },
+        },
+        {
+          label: 'Refuse; the matter is unbecoming',
+          seed: 'refuse plainly; small pirate -1',
+          fixedOutcome: {
+            prose: 'You write a polite refusal — \'such intelligence as is offered, the Factor does not seek\' — and seal it with the household stamp. The boy at the wharf does not return to it; the small voice in the strait, the Factor suspects, takes the refusal personally.',
+            changes: {
+              reputation: { pirates: -1 },
+              journal: 'Refused the Brotherhood\'s offer plainly. They will remember.',
+            },
+          },
+        },
+      ],
+    },
+    {
+      subject: 'A second hand on the Bencoolen matter',
+      body: `Sir, — The strait writes again. The price has been put at sixty pounds — yr. peer at Bencoolen has had a turn, and the news will weight against him within the month. You may wish to lay yr. plans accordingly; if not, the matter passes us by.
+
+—`,
+      responses: [
+        {
+          label: 'Pay the £60; the matter is known to me',
+          seed: 'pay; intel plant',
+          fixedOutcome: {
+            prose: 'Sixty pounds to the boy at the wharf, in a sealed packet of the household colour. The intelligence returns: a misadventure at Bencoolen, of the kind that does not appear in the Court\'s correspondence for some weeks yet. The Factor lays his plans accordingly.',
+            changes: {
+              money: -60,
+              flags: { hardacreIntelPlant: true },
+              journal: 'Paid £60 for further news of Mr. Hardacre. The strait knew it before the Court did.',
+            },
+          },
+        },
+        {
+          label: 'Decline; £60 is heavy',
+          seed: 'decline; no cost',
+          fixedOutcome: {
+            prose: 'You send back a single line: \'such matters as the Court will hear in due course, the Factor is content to wait upon.\' The strait shrugs, in the way the strait shrugs.',
+            changes: { journal: 'Declined the Brotherhood\'s second offer; £60 was the price of a private fortnight.' },
+          },
+        },
+      ],
+    },
   ],
 
   terborch: [
@@ -4598,6 +5450,99 @@ const FALLBACK_LETTERS = {
         { label: 'Reply with frank judgement on enlargement', seed: 'Company +5, late-game hook' },
         { label: 'Reply that you would prefer to defer', seed: 'Company 0' },
         { label: 'Set aside, do not reply', seed: 'silence' },
+      ],
+    },
+  ],
+  cama: [
+    // Two intel-buy templates + one ambient request, alternated by random pick.
+    {
+      subject: 'A small note from Bombay',
+      body: `Sir, — I write upon a matter you may find of small worth, perhaps of more. Mr. Lowji Nusserwanji's establishment has had a turn this fortnight, of which I am better informed than most by my position. For twenty pounds — paid by the Madras packet — I should be willing to write the matter plainly.
+
+I do not press the matter; I write only because I have written upon similar matters before to gentlemen of yr. station, and they have not regretted the sums.
+
+Yr. obedt. servant,
+Pestonji Cama`,
+      responses: [
+        {
+          label: 'Pay the £20; the matter is of interest',
+          seed: 'pay; lowji intel plant',
+          fixedOutcome: {
+            prose: 'You despatch a draft for twenty pounds by the Madras packet. A second letter returns within the month — a careful list of three matters concerning Mr. Lowji\'s recent shipments, written in a hand which has been schooled by a Parsi master in English commerce.',
+            changes: {
+              money: -20,
+              flags: { lowjiIntelPlant: true },
+              journal: 'Bought intelligence on Mr. Lowji of Bombay — £20 to Mr. Cama by the Madras packet.',
+            },
+          },
+        },
+        {
+          label: 'Decline; the price is enough',
+          seed: 'decline cleanly',
+          fixedOutcome: {
+            prose: 'You write a courteous decline. Mr. Cama answers by return — a single sentence of regret, in the formal Bombay manner.',
+            changes: { journal: 'Declined Mr. Cama\'s offer. He writes again, no doubt.' },
+          },
+        },
+      ],
+    },
+    {
+      subject: 'A further matter from Bombay',
+      body: `Sir, — A second matter, of which the price is sixty pounds, paid as before. Mr. Lowji has put a quantity of [trade good] upon the next ship for Eustace, and the matter — by the time it is general — will weight against him in such-and-such a way. The price is the price; I am not the master of these things.
+
+Yr. obedt. servant,
+Pestonji Cama`,
+      responses: [
+        {
+          label: 'Pay the £60; lay my plans accordingly',
+          seed: 'pay; lowji intel plant',
+          fixedOutcome: {
+            prose: 'Sixty pounds across the bay. The return packet brings a clean account of the Bombay establishment\'s misadventure — two ships, three commodities, four weeks before the news travels by ordinary channels. The Factor lays his plans on the strength of it.',
+            changes: {
+              money: -60,
+              flags: { lowjiIntelPlant: true },
+              journal: 'Paid £60 to Mr. Cama for the Bombay matter. The Factor\'s holds are positioned.',
+            },
+          },
+        },
+        {
+          label: 'Decline; £60 is the run of trade',
+          seed: 'decline cleanly',
+          fixedOutcome: {
+            prose: 'You decline by post. Mr. Cama, predictably, writes no more on the matter — and in due course the news arrives by ordinary channels, when it is no longer of any use to lay plans against.',
+            changes: { journal: 'Declined Mr. Cama\'s second offer. The Bombay matter, when it became general, found me unprepared.' },
+          },
+        },
+      ],
+    },
+    {
+      subject: 'Of my son in the writing-school',
+      body: `Sir, — I beg leave to write upon a matter not of trade. My son, of fifteen years, is engaged in the Madras writing-school under Mr. Wynne; the establishment's subscription is short upon the present quarter. A small donation of five pounds to the master, in the Factor's name, would not be forgotten — by the boy or by yr. obedt. servant.
+
+I do not write thus often; I write only because the boy is industrious and the matter is small.
+
+Yr. obedt. servant,
+Pestonji Cama`,
+      responses: [
+        {
+          label: 'Subscribe £5; the boy shall be remembered',
+          seed: 'subscribe small; cama loyalty hint',
+          fixedOutcome: {
+            prose: 'Five pounds to Mr. Wynne by the next packet, in the Factor\'s name. Mr. Cama writes back in a hand half a degree warmer than before.',
+            changes: {
+              money: -5,
+              journal: 'Subscribed £5 to Mr. Wynne\'s school for the boy Cama. Goodwill in Bombay is, perhaps, worth more than the sum.',
+            },
+          },
+        },
+        {
+          label: 'Decline politely; another year, perhaps',
+          seed: 'decline cleanly',
+          fixedOutcome: {
+            prose: 'You write a polite decline. Mr. Cama answers with a courteous regret and the matter is not raised again.',
+            changes: { journal: 'Declined the subscription. Five pounds is, in the run of accounts, no great matter.' },
+          },
+        },
       ],
     },
   ],
@@ -8679,7 +9624,7 @@ function MapView({ gs, sailTo }) {
                         <div style={{ fontStyle: 'italic', color: '#6b4423', marginBottom: '0.2rem' }}>they sell</div>
                         {sells.map(([c, mult]) => {
                           const tag = advantageTag(mult, 'sell');
-                          const price = priceFor(k, c, gs.day);
+                          const price = priceFor(k, c, gs.day, gs);
                           const stock = Math.floor(gs.portStocks?.[k]?.[c] ?? 0);
                           const cap = p.stockMax?.[c] ?? 0;
                           const stockLabel = stock === 0 ? 'none' : stock < cap * 0.25 ? `${stock} (low)` : `${stock}`;
@@ -8698,7 +9643,7 @@ function MapView({ gs, sailTo }) {
                         <div style={{ fontStyle: 'italic', color: '#6b4423', marginBottom: '0.2rem' }}>they buy</div>
                         {buys.map(([c, mult]) => {
                           const tag = advantageTag(mult, 'buy');
-                          const price = priceFor(k, c, gs.day);
+                          const price = priceFor(k, c, gs.day, gs);
                           return (
                             <div key={c} style={{ marginBottom: '0.15rem' }}>
                               {COMMODITIES[c].name} <span style={{ color: '#6b4423' }}>£{price}</span>{' '}
@@ -8834,7 +9779,7 @@ function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab, lodg
         <div>
           <div className="display" style={{ fontSize: '0.9em', color: '#6b4423', marginBottom: '0.5rem' }}>FOR SALE BY THE PORT</div>
           {sells.length === 0 ? <p className="italic">Nothing to be had here.</p> : sells.map(c => {
-            const price = priceFor(gs.location, c, gs.day);
+            const price = priceFor(gs.location, c, gs.day, gs);
             const onHand = Math.floor(stocks[c] ?? 0);
             const max = maxBuyable(c, price);
             const effPrice = taxRate > 0 ? Math.ceil(price * (1 + taxRate)) : price;
@@ -8861,7 +9806,7 @@ function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab, lodg
         <div>
           <div className="display" style={{ fontSize: '0.9em', color: '#6b4423', marginBottom: '0.5rem' }}>BOUGHT BY THE PORT</div>
           {buys.length === 0 ? <p className="italic">No one is buying.</p> : buys.map(c => {
-            const price = priceFor(gs.location, c, gs.day);
+            const price = priceFor(gs.location, c, gs.day, gs);
             const have = gs.goods[c] || 0;
             const netPrice = taxRate > 0 ? Math.floor(price * (1 - taxRate)) : price;
             return (
@@ -9054,7 +9999,10 @@ function SublocationPanel({ gs, sub, buyGood, taxRate }) {
         const subMult = sub.sells[c];
         const base = com.basePrice;
         const fluct = ((Math.abs((gs.day || 1) * 7919 + c.charCodeAt(0)) % 17) - 8) / 100;
-        const price = Math.max(1, Math.round(base * subMult * (1 + fluct)));
+        // Window arithmetic uses the parent port's key (sublocations share
+        // the same priceWindows bucket as their parent port).
+        const windowMult = priceWindowMult(gs, gs.location, c, 'sell');
+        const price = Math.max(1, Math.round(base * subMult * (1 + fluct) * windowMult));
         const onHand = Math.floor(stocks[c] ?? 0);
         const effPrice = taxRate > 0 ? Math.ceil(price * (1 + taxRate)) : price;
         const w = com.weight || 1;

@@ -570,12 +570,14 @@ const hashCode = (s) => {
   return Math.abs(h);
 };
 
-const priceFor = (portKey, commodity, day) => {
+const priceFor = (portKey, commodity, day, gs) => {
   const port = PORTS[portKey];
   const base = COMMODITIES[commodity].basePrice;
   const mult = port.sells?.[commodity] ?? port.buys?.[commodity] ?? 1;
   const fluct = ((hashCode(`${day}-${portKey}-${commodity}`) % 21) - 10) / 100;
-  return Math.max(1, Math.round(base * mult * (1 + fluct)));
+  const side = port.sells?.[commodity] != null ? 'sell' : 'buy';
+  const windowMult = gs ? priceWindowMult(gs, portKey, commodity, side) : 1;
+  return Math.max(1, Math.round(base * mult * (1 + fluct) * windowMult));
 };
 
 // Port duty (Dutch tax at Port St. Eustace) — proportion of transaction value.
@@ -8833,7 +8835,7 @@ function MapView({ gs, sailTo }) {
                         <div style={{ fontStyle: 'italic', color: '#6b4423', marginBottom: '0.2rem' }}>they sell</div>
                         {sells.map(([c, mult]) => {
                           const tag = advantageTag(mult, 'sell');
-                          const price = priceFor(k, c, gs.day);
+                          const price = priceFor(k, c, gs.day, gs);
                           const stock = Math.floor(gs.portStocks?.[k]?.[c] ?? 0);
                           const cap = p.stockMax?.[c] ?? 0;
                           const stockLabel = stock === 0 ? 'none' : stock < cap * 0.25 ? `${stock} (low)` : `${stock}`;
@@ -8852,7 +8854,7 @@ function MapView({ gs, sailTo }) {
                         <div style={{ fontStyle: 'italic', color: '#6b4423', marginBottom: '0.2rem' }}>they buy</div>
                         {buys.map(([c, mult]) => {
                           const tag = advantageTag(mult, 'buy');
-                          const price = priceFor(k, c, gs.day);
+                          const price = priceFor(k, c, gs.day, gs);
                           return (
                             <div key={c} style={{ marginBottom: '0.15rem' }}>
                               {COMMODITIES[c].name} <span style={{ color: '#6b4423' }}>£{price}</span>{' '}
@@ -8988,7 +8990,7 @@ function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab, lodg
         <div>
           <div className="display" style={{ fontSize: '0.9em', color: '#6b4423', marginBottom: '0.5rem' }}>FOR SALE BY THE PORT</div>
           {sells.length === 0 ? <p className="italic">Nothing to be had here.</p> : sells.map(c => {
-            const price = priceFor(gs.location, c, gs.day);
+            const price = priceFor(gs.location, c, gs.day, gs);
             const onHand = Math.floor(stocks[c] ?? 0);
             const max = maxBuyable(c, price);
             const effPrice = taxRate > 0 ? Math.ceil(price * (1 + taxRate)) : price;
@@ -9015,7 +9017,7 @@ function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab, lodg
         <div>
           <div className="display" style={{ fontSize: '0.9em', color: '#6b4423', marginBottom: '0.5rem' }}>BOUGHT BY THE PORT</div>
           {buys.length === 0 ? <p className="italic">No one is buying.</p> : buys.map(c => {
-            const price = priceFor(gs.location, c, gs.day);
+            const price = priceFor(gs.location, c, gs.day, gs);
             const have = gs.goods[c] || 0;
             const netPrice = taxRate > 0 ? Math.floor(price * (1 - taxRate)) : price;
             return (
@@ -9208,7 +9210,10 @@ function SublocationPanel({ gs, sub, buyGood, taxRate }) {
         const subMult = sub.sells[c];
         const base = com.basePrice;
         const fluct = ((Math.abs((gs.day || 1) * 7919 + c.charCodeAt(0)) % 17) - 8) / 100;
-        const price = Math.max(1, Math.round(base * subMult * (1 + fluct)));
+        // Window arithmetic uses the parent port's key (sublocations share
+        // the same priceWindows bucket as their parent port).
+        const windowMult = priceWindowMult(gs, gs.location, c, 'sell');
+        const price = Math.max(1, Math.round(base * subMult * (1 + fluct) * windowMult));
         const onHand = Math.floor(stocks[c] ?? 0);
         const effPrice = taxRate > 0 ? Math.ceil(price * (1 + taxRate)) : price;
         const w = com.weight || 1;

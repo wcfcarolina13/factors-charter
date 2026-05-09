@@ -13,6 +13,7 @@ import {
 } from './src/util/rivalry.js';
 import { priceWindowMult, pruneExpiredWindows } from './src/util/price-windows.js';
 import { pickPlate } from './src/util/plates.js';
+import { canOfferSabotage, resolveSabotage } from './src/util/sabotage.js';
 
 // React hook wrapping the viewport detection. Subscribes to media-query
 // changes and to localStorage changes (so toggling the override in one tab
@@ -817,6 +818,9 @@ const ensureShape = (gs) => {
   if (!Array.isArray(next.rivalPressureModifiers)) {
     next.rivalPressureModifiers = [];
   }
+  if (typeof next.sabotagesCommitted !== 'number') {
+    next.sabotagesCommitted = 0;
+  }
   return next;
 };
 
@@ -934,6 +938,7 @@ Mr. W. died this morning at half past four. The Reverend will not come down from
   priceWindows: [],
   rivalPressure: 50,
   rivalPressureModifiers: [],
+  sabotagesCommitted: 0,
   reputation: { company: 0, crown: 0, rajah: 0, pirates: 0, mission: 0, dutch: 0 },
   crew: [
     { name: 'Mr. Hodge', role: 'Clerk', trait: 'drunkard' },
@@ -1922,7 +1927,7 @@ The Vizier`,
         fixedOutcome: {
           prose: 'You write a careful acceptance, in the language the Vizier will recognise. A folded note returns within the week — three sentences in his own hand, written under the lamp, naming a thing about the Hollander\'s recent correspondence which the Court will not hear of for some time yet.',
           changes: {
-            flags: { terborchIntelPlant: true, vizierBoonOwed: true,
+            flags: { terborchIntelPlant: true, terborchIntelEverBought: true, vizierBoonOwed: true,
                      vizierIntelLetterCount: (s.flags?.vizierIntelLetterCount ?? 0) + 1 },
             journal: 'Accepted the Vizier\'s intelligence on ter Borch. A favour is owed, to be called.',
             hook: 'The Vizier\'s favour is on the books. He will name it when it suits him.',
@@ -2859,6 +2864,363 @@ function pickAutoSender(s) {
   return eligible[eligible.length - 1];
 }
 
+// ─────────── SABOTAGE ARCS (3 RIVALS × 2 STEPS) ───────────
+// Each arc lets the player commission a rival's downfall through the
+// channel that already feeds them rumours. Step 1 lands when conditions
+// in canOfferSabotage hold; the player commissions / negotiates / declines.
+// Step 2 fires 45 days later via tickDays, with outcome resolved by
+// resolveSabotage (success / partial / failure) keyed off rival rep on
+// the channel's faction axis.
+// Spec: docs/superpowers/specs/2026-05-09-sabotage-arcs-design.md.
+
+function makeSabotageHardacreStep1Letter(s) {
+  return {
+    id: 9500000 + s.day,
+    from: 'A small voice in the strait',
+    subject: 'On the matter of yr. peer at Bencoolen',
+    body: `Sir, — The strait writes to you again, plainly. The man at Bencoolen has been a thorn in yr. side long enough; we have lascars on his quarter who would prefer a different employment, and a Bugis pilot at the Mentawai who knows the reefs better than the Captain does.
+
+The price for the lifting of his next freight is five hundred pounds, paid as before by the boy at the wharf. We can also do the matter quieter, for three hundred — half-measures, half-results, that is the trade of it.
+
+The strait holds the offer for ten days. We do not write again on this matter.
+
+— Yrs., as the strait is.`,
+    responses: [
+      {
+        label: 'Commission the full lifting (£500)',
+        seed: 'commit; full method',
+        fixedOutcome: {
+          prose: `Five hundred pounds in coin and unmarked silver pass to the boy at the wharf in a sealed packet. He goes without speaking. The brigantine sails for Bencoolen on the following Thursday; the matter is now in motions you have set in train.`,
+          changes: {
+            money: -500,
+            flags: { sabotage_hardacre_method: 'commission', sabotage_hardacre_committed_day: s.day },
+            sabotagesCommitted: 1,
+            journal: 'Paid £500 to the strait for the lifting of Mr. Hardacre’s brigantine. The matter is in train; word in five or six weeks.',
+            hook: 'You have set a Brotherhood lifting in motion against Hardacre. Word is expected in some five or six weeks.',
+          },
+        },
+      },
+      {
+        label: 'Negotiate the cheaper, quieter matter (£300)',
+        seed: 'commit; negotiate method',
+        fixedOutcome: {
+          prose: `Three hundred pounds, by the same hand. The boy at the wharf takes the packet without expression. The strait will do what it does for the price asked; the Factor will hear of it in due course.`,
+          changes: {
+            money: -300,
+            flags: { sabotage_hardacre_method: 'negotiate', sabotage_hardacre_committed_day: s.day },
+            sabotagesCommitted: 1,
+            journal: 'Paid £300 to the strait — a quieter matter against Mr. Hardacre. Word in five or six weeks.',
+            hook: 'A bargained-for matter is in motion against Hardacre.',
+          },
+        },
+      },
+      {
+        label: 'Decline the matter',
+        seed: 'decline; arc closes',
+        fixedOutcome: {
+          prose: `You write back briefly. ‘Such matters as the strait is offering, the Factor declines.’ The boy at the wharf takes the note without comment. The matter is closed.`,
+          changes: {
+            flags: { sabotage_hardacre_method: 'declined' },
+            journal: 'Declined the strait’s offer to lift Mr. Hardacre’s brigantine.',
+          },
+        },
+      },
+    ],
+    read: false,
+  };
+}
+
+function makeSabotageHardacreStep2Letter(s) {
+  const method = s.flags?.sabotage_hardacre_method;
+  const outcome = resolveSabotage('hardacre', s, { method });
+  const branches = {
+    success: {
+      subject: 'The strait has done its work',
+      body: `Sir, — Word from a Bugis pilot at the Pelican’s Nest. The brigantine bound for Bencoolen was driven onto a reef in the Mentawai by what the Captain calls bad pilotage and the strait calls itself. Hardacre walks the wharf at Bencoolen with no command to give, and the Court will hear of it within the month.
+
+The strait considers itself paid in full. We do not write again on this matter.
+
+—`,
+      changes: {
+        rivals: { hardacre: { state: 'broken' } },
+        rivalPressureModifierPush: { fromDay: s.day, lifetimeDays: 480, delta: -25 },
+        reputation: { pirates: 3 },
+        flags: { sabotage_hardacre_resolved: 'success' },
+        journal: 'The brigantine was lifted in the strait. Mr. Hardacre walks the Bencoolen wharf with no command to give.',
+      },
+    },
+    partial: {
+      subject: 'A clean theft, and no more',
+      body: `Sir, — The matter went part-way. The brigantine was boarded in the strait at the new moon; her cargo of pepper and calico was lifted clean and is now at sea under no flag. Mr. Hardacre kept his bottom and his life; he did not keep his freight.
+
+The strait considers itself paid for the work given. — Yrs., as the strait is.`,
+      changes: {
+        rivals: { hardacre: { state: 'troubled', standing: -20 } },
+        rivalPressureModifierPush: { fromDay: s.day, lifetimeDays: 240, delta: -10 },
+        flags: { sabotage_hardacre_resolved: 'partial' },
+        journal: 'A clean theft in the strait — Mr. Hardacre lost three months’ freight but kept his bottom.',
+      },
+    },
+    failure: {
+      subject: 'The strait went badly',
+      body: `Sir, — The matter is broken. Mr. Hardacre’s lascars took a Bugis alive on the brigantine’s quarter, and the man named you to the Bencoolen bench under the cane. The Court will hear of it. We are sorry for the work, sir, and you may consider yr. account with us closed for the present.
+
+—`,
+      changes: {
+        reputation: { crown: -10, company: -5, pirates: -3 },
+        rivalPressureModifierPush: { fromDay: s.day, lifetimeDays: 360, delta: 15 },
+        flags: { sabotage_hardacre_resolved: 'failure' },
+        journal: 'The strait went badly. Mr. Hardacre’s lascars took a Bugis alive at Bencoolen and the man named the right Factor.',
+      },
+    },
+  };
+  const branch = branches[outcome];
+  return {
+    id: 9510000 + s.day,
+    from: 'A small voice in the strait',
+    subject: branch.subject,
+    body: branch.body,
+    responses: [
+      {
+        label: 'So be it.',
+        seed: `sabotage hardacre resolved: ${outcome}`,
+        fixedOutcome: {
+          prose: `The Factor reads the note twice and writes nothing in answer.`,
+          changes: branch.changes,
+        },
+      },
+    ],
+    read: false,
+  };
+}
+
+function makeSabotageTerBorchStep1Letter(s) {
+  return {
+    id: 9520000 + s.day,
+    from: 'A discreet hand at the Rajah’s court',
+    subject: 'A matter touching Mynheer ter Borch',
+    body: `Sir, — The Vizier asks me to write on a matter of which the Court need not be told. The Heeren XVII at Batavia have a long file on Mynheer ter Borch already; a small additional paper, properly executed, would close his Eustace office for the duration of an inquiry. The forgery is the difficult part; the lodging of it is not.
+
+The Vizier’s figure is seven hundred pounds for a clean matter, four hundred and fifty for a roughened one of less certain weight. The Factor will know which is the better trade.
+
+— Yrs., respectfully.`,
+    responses: [
+      {
+        label: 'Commission the clean matter (£700)',
+        seed: 'commit; full method',
+        fixedOutcome: {
+          prose: `Seven hundred pounds in a sealed strongbox, conveyed by the Vizier’s own runner. The runner is gone before midnight. The matter is now with hands more practised than yr. own.`,
+          changes: {
+            money: -700,
+            flags: { sabotage_terborch_method: 'commission', sabotage_terborch_committed_day: s.day },
+            sabotagesCommitted: 1,
+            journal: 'Paid £700 to the Vizier’s court for a customs forgery against Mynheer ter Borch. The matter is in train.',
+            hook: 'A customs forgery is being lodged at Batavia against ter Borch. Word in five or six weeks.',
+          },
+        },
+      },
+      {
+        label: 'Negotiate the roughened matter (£450)',
+        seed: 'commit; negotiate method',
+        fixedOutcome: {
+          prose: `Four hundred and fifty pounds. The runner accepts the strongbox without comment, though the Factor reads in his face that the work will be the rougher for the price.`,
+          changes: {
+            money: -450,
+            flags: { sabotage_terborch_method: 'negotiate', sabotage_terborch_committed_day: s.day },
+            sabotagesCommitted: 1,
+            journal: 'Paid £450 to the Vizier’s court for a roughened matter against ter Borch. The work will be the rougher for the price.',
+            hook: 'A bargained-for forgery is being lodged at Batavia against ter Borch.',
+          },
+        },
+      },
+      {
+        label: 'Decline the matter',
+        seed: 'decline; arc closes',
+        fixedOutcome: {
+          prose: `You write back to the Vizier in measured terms, declining the offer with civilities. The runner is sent back without his strongbox. The matter is closed.`,
+          changes: {
+            flags: { sabotage_terborch_method: 'declined' },
+            journal: 'Declined the Vizier’s offer of a customs forgery against Mynheer ter Borch.',
+          },
+        },
+      },
+    ],
+    read: false,
+  };
+}
+
+function makeSabotageTerBorchStep2Letter(s) {
+  const method = s.flags?.sabotage_terborch_method;
+  const outcome = resolveSabotage('terborch', s, { method });
+  const branches = {
+    success: {
+      subject: 'A matter at Batavia',
+      body: `Sir, — Mynheer ter Borch was carried out of Eustace under a Company guard of his own people, with sealed papers from the Heeren XVII and a nominal escort of his own pikes. The inquiry will sit at Batavia for the year and longer; we do not expect to see him return inside yr. charter. The Vizier sends his compliments.
+
+— Yrs., discreetly.`,
+      changes: {
+        rivals: { terborch: { state: 'broken' } },
+        rivalPressureModifierPush: { fromDay: s.day, lifetimeDays: 480, delta: -25 },
+        reputation: { rajah: 3 },
+        flags: { sabotage_terborch_resolved: 'success' },
+        journal: 'Mynheer ter Borch was carried out of Eustace under a Company guard of his own people. The inquiry will sit at Batavia for the year.',
+      },
+    },
+    partial: {
+      subject: 'The Batavia bench was lenient',
+      body: `Sir, — The inquiry sat. Mynheer ter Borch produced two Dutch witnesses of standing, and a small fine was set against him. He came back to Eustace at the spring monsoon, lighter in the purse and quieter in his manner; the Heeren XVII have not closed his file. — Yrs.`,
+      changes: {
+        rivals: { terborch: { state: 'troubled', standing: -15 } },
+        rivalPressureModifierPush: { fromDay: s.day, lifetimeDays: 240, delta: -10 },
+        flags: { sabotage_terborch_resolved: 'partial' },
+        journal: 'ter Borch lost the spring before the Batavia bench. He came back lighter, but he came back.',
+      },
+    },
+    failure: {
+      subject: 'The forgery has come back to yr. door',
+      body: `Sir, — The matter is undone. The forgery was traced — by what hand we cannot say — and the Heeren XVII have made representation through the Crown’s residency. Eustace is closed to yr. brigantine until the matter cools; the Vizier sends his regrets and his fee, returned in part. — Yrs.`,
+      changes: {
+        reputation: { dutch: -15, crown: -5 },
+        rivalPressureModifierPush: { fromDay: s.day, lifetimeDays: 360, delta: 15 },
+        flags: { sabotage_terborch_resolved: 'failure', banned_eustace_until: s.day + 90 },
+        journal: 'The forgery came back to yr. door. Eustace is closed to yr. brigantine until the matter cools.',
+      },
+    },
+  };
+  const branch = branches[outcome];
+  return {
+    id: 9530000 + s.day,
+    from: 'A discreet hand at the Rajah’s court',
+    subject: branch.subject,
+    body: branch.body,
+    responses: [
+      {
+        label: 'So be it.',
+        seed: `sabotage terborch resolved: ${outcome}`,
+        fixedOutcome: {
+          prose: `The Factor reads the note twice and writes nothing in answer.`,
+          changes: branch.changes,
+        },
+      },
+    ],
+    read: false,
+  };
+}
+
+function makeSabotageLowjiStep1Letter(s) {
+  return {
+    id: 9540000 + s.day,
+    from: 'Mr. Cama, of Bombay (privately)',
+    subject: 'On the standing of Mr. Lowji at the bills-of-exchange houses',
+    body: `Sir, — I write privately, as the matter is one I would not wish put on Company paper. Mr. Lowji is over-extended at four of the bills-of-exchange houses in Bombay; were a coordinated recall to be made of his outstanding obligations, he would not be able to meet them, and the matter would close itself. The houses act for those who pay their introductions.
+
+The figure for the full coordination is six hundred pounds; for a partial recall, four hundred. The Factor will weigh the matter.
+
+— Yrs., respectfully, Cama.`,
+    responses: [
+      {
+        label: 'Commission the full coordination (£600)',
+        seed: 'commit; full method',
+        fixedOutcome: {
+          prose: `Six hundred pounds drawn on the Bombay credit, paid into Mr. Cama’s account by the next packet. The matter is set in motion at the houses; the Factor will hear in five or six weeks.`,
+          changes: {
+            money: -600,
+            flags: { sabotage_lowji_method: 'commission', sabotage_lowji_committed_day: s.day },
+            sabotagesCommitted: 1,
+            journal: 'Paid £600 to Mr. Cama for a coordinated recall of Mr. Lowji’s bills at the Bombay houses. Word in five or six weeks.',
+            hook: 'A coordinated loan-recall is being arranged against Lowji at the Bombay houses.',
+          },
+        },
+      },
+      {
+        label: 'Negotiate a partial recall (£400)',
+        seed: 'commit; negotiate method',
+        fixedOutcome: {
+          prose: `Four hundred pounds. Mr. Cama writes back briefly to confirm receipt; the matter is set in motion, though at the smaller scale.`,
+          changes: {
+            money: -400,
+            flags: { sabotage_lowji_method: 'negotiate', sabotage_lowji_committed_day: s.day },
+            sabotagesCommitted: 1,
+            journal: 'Paid £400 to Mr. Cama for a partial recall against Mr. Lowji. Word in five or six weeks.',
+            hook: 'A bargained-for loan-recall is being arranged against Lowji.',
+          },
+        },
+      },
+      {
+        label: 'Decline the matter',
+        seed: 'decline; arc closes',
+        fixedOutcome: {
+          prose: `You write back to Mr. Cama in courteous terms, declining the offer. He acknowledges briefly; the matter is closed.`,
+          changes: {
+            flags: { sabotage_lowji_method: 'declined' },
+            journal: 'Declined Mr. Cama’s offer of a loan-recall against Mr. Lowji.',
+          },
+        },
+      },
+    ],
+    read: false,
+  };
+}
+
+function makeSabotageLowjiStep2Letter(s) {
+  const method = s.flags?.sabotage_lowji_method;
+  const outcome = resolveSabotage('lowji', s, { method });
+  const branches = {
+    success: {
+      subject: 'Mr. Lowji has gone home to Surat',
+      body: `Sir, — The Bombay correspondents called Mr. Lowji’s papers all in one fortnight. He could not pay; his fleet was scattered across three monsoons and his factors at Calicut and Mocha could not move their stock fast enough. The man has gone home to Surat to sit with his family. The matter is concluded.
+
+— Yrs., respectfully, Cama.`,
+      changes: {
+        rivals: { lowji: { state: 'broken' } },
+        rivalPressureModifierPush: { fromDay: s.day, lifetimeDays: 480, delta: -25 },
+        reputation: { company: 3 },
+        flags: { sabotage_lowji_resolved: 'success' },
+        journal: 'The Bombay houses called Mr. Lowji’s papers all in one fortnight. He has gone home to Surat.',
+      },
+    },
+    partial: {
+      subject: 'Mr. Lowji has sold off two bottoms',
+      body: `Sir, — The matter went part-way. Mr. Lowji liquidated two of his bottoms at Bombay to clear his bills, and kept his third in service. He is the smaller man, though not yet the broken one. — Cama.`,
+      changes: {
+        rivals: { lowji: { state: 'troubled', standing: -10 } },
+        rivalPressureModifierPush: { fromDay: s.day, lifetimeDays: 240, delta: -8 },
+        flags: { sabotage_lowji_resolved: 'partial' },
+        journal: 'Mr. Lowji sold off two bottoms at Bombay to clear his bills. He kept the third.',
+      },
+    },
+    failure: {
+      subject: 'A matter undone, with consequences',
+      body: `Sir, — My hand was seen at the bills-of-exchange houses, by parties of standing whose discretion I had over-estimated. The Bombay correspondents have collectively called two hundred pounds in outstanding obligations against yr. account, by way of demonstrating their displeasure. I am sorry for the work; the matter is concluded for both of us. — Cama.`,
+      changes: {
+        money: -200,
+        reputation: { company: -8 },
+        rivalPressureModifierPush: { fromDay: s.day, lifetimeDays: 360, delta: 15 },
+        flags: { sabotage_lowji_resolved: 'failure' },
+        journal: 'Cama’s hand was seen at the bills-of-exchange houses. The Bombay correspondents have called £200 in outstanding obligations.',
+      },
+    },
+  };
+  const branch = branches[outcome];
+  return {
+    id: 9550000 + s.day,
+    from: 'Mr. Cama, of Bombay (privately)',
+    subject: branch.subject,
+    body: branch.body,
+    responses: [
+      {
+        label: 'So be it.',
+        seed: `sabotage lowji resolved: ${outcome}`,
+        fixedOutcome: {
+          prose: `The Factor reads the note twice and writes nothing in answer.`,
+          changes: branch.changes,
+        },
+      },
+    ],
+    read: false,
+  };
+}
+
 // Rival-event template pool. Populated in Phase 6. The scheduler in
 // tickDays handles the empty-pool case gracefully (pickRivalEvent
 // returns null).
@@ -3650,6 +4012,8 @@ function makeSuccessorState(prev, newName) {
   for (const [k, v] of Object.entries(prev.flags || {})) {
     if (/LetterSent$/.test(k)) continue;            // letter triggers reset
     if (/QuestStep$/.test(k)) continue;             // multi-step quests reset
+    if (/^sabotage_/.test(k)) continue;             // sabotage arcs reset per charter
+    if (k === 'banned_eustace_until') continue;     // travel bans expire with the charter
     if (k === 'firstLetterPresented') continue;
     carryFlags[k] = v;
   }
@@ -3706,6 +4070,7 @@ function makeSuccessorState(prev, newName) {
     priceWindows: [],                   // no inherited arbitrage windows
     rivalPressure: 50,                  // baseline; recomputed first tick
     rivalPressureModifiers: [],
+    sabotagesCommitted: 0,             // sabotage record does not carry forward
     lettersGenerated: 0,
     // Preserved as-is: outpost, ship, npcs, reputation
   };
@@ -3753,6 +4118,8 @@ function makeRenewedState(prev) {
   for (const [k, v] of Object.entries(prev.flags || {})) {
     if (/LetterSent$/.test(k)) continue;
     if (/QuestStep$/.test(k)) continue;
+    if (/^sabotage_/.test(k)) continue;             // sabotage arcs reset per charter
+    if (k === 'banned_eustace_until') continue;     // travel bans expire with the charter
     if (k === 'firstLetterPresented') continue;
     carryFlags[k] = v;
   }
@@ -3789,6 +4156,7 @@ function makeRenewedState(prev) {
     priceWindows: [],
     rivalPressure: 50,
     rivalPressureModifiers: [],
+    sabotagesCommitted: 0,
     lettersGenerated: 0,
     // Preserved as-is: outpost, ship, npcs, reputation, acquaintances, crew
   };
@@ -4558,6 +4926,47 @@ function tickDays(gs, days) {
       }
     }
 
+    // ── Sabotage arcs. Step 1 offers per rival when canOfferSabotage holds
+    // (Year 2+, pressured player, channel relationship in place, rival not
+    // yet broken, no prior offer for this rival). Step 2 fires 45 days
+    // after commitment, with outcome resolved by resolveSabotage.
+    // Spec: docs/superpowers/specs/2026-05-09-sabotage-arcs-design.md.
+    {
+      const SABOTAGE_LETTERS = {
+        hardacre: { step1: makeSabotageHardacreStep1Letter, step2: makeSabotageHardacreStep2Letter, name: 'Mr. Hardacre' },
+        terborch: { step1: makeSabotageTerBorchStep1Letter, step2: makeSabotageTerBorchStep2Letter, name: 'Mynheer ter Borch' },
+        lowji:    { step1: makeSabotageLowjiStep1Letter,    step2: makeSabotageLowjiStep2Letter,    name: 'Mr. Lowji' },
+      };
+      for (const rk of ['hardacre', 'terborch', 'lowji']) {
+        const cfg = SABOTAGE_LETTERS[rk];
+
+        // Step 1
+        if (canOfferSabotage(rk, s)) {
+          const letter = cfg.step1(s);
+          s.letters = [...s.letters, letter];
+          s.lettersGenerated = (s.lettersGenerated || 0) + 1;
+          s.flags = { ...(s.flags || {}), [`sabotage_${rk}_offered`]: true };
+          s.awayLog.push({ day: s.day, type: 'letter', text: `A folded note at the gate, concerning ${cfg.name}.` });
+        }
+
+        // Step 2
+        if (s.charterClosed) continue;
+        const method = s.flags?.[`sabotage_${rk}_method`];
+        if (method !== 'commission' && method !== 'negotiate') continue;
+        if (s.flags?.[`sabotage_${rk}_step2_sent`]) continue;
+        if (s.flags?.[`sabotage_${rk}_resolved`]) continue;
+        const committedDay = s.flags?.[`sabotage_${rk}_committed_day`] ?? 0;
+        if (committedDay <= 0) continue;
+        if (s.day < committedDay + 45) continue;
+
+        const letter = cfg.step2(s);
+        s.letters = [...s.letters, letter];
+        s.lettersGenerated = (s.lettersGenerated || 0) + 1;
+        s.flags = { ...(s.flags || {}), [`sabotage_${rk}_step2_sent`]: true };
+        s.awayLog.push({ day: s.day, type: 'letter', text: `A return note concerning ${cfg.name}.` });
+      }
+    }
+
     // ── Cleanup expired priceWindows.
     if (s.priceWindows && s.priceWindows.length > 0) {
       s.priceWindows = pruneExpiredWindows(s.priceWindows, s.day);
@@ -4853,6 +5262,38 @@ const MAJOR_COMMITMENTS = [
       v === 'closed-refused'       ? 'You refused the unnamed caller; the watch is heavier.' :
       v === 'closed-forged'        ? 'A forged copy was given; the original sleeps in yr. strongbox.' :
       null },
+
+  // Sabotage arcs (committed-but-unresolved surface as a Standing
+  // Arrangement; resolved outcomes surface for the rest of the charter).
+  // The 'declined' value is intentionally not surfaced — declining closes
+  // the arc cleanly and there is nothing to remember in the ledger.
+  { key: 'sabotage_hardacre_method', label: (v) =>
+      v === 'commission' ? 'A Brotherhood lifting at Bencoolen — committed; awaiting word.' :
+      v === 'negotiate'  ? 'A Brotherhood matter at Bencoolen — bargained-for; awaiting word.' :
+      null },
+  { key: 'sabotage_hardacre_resolved', label: (v) =>
+      v === 'success' ? 'Mr. Hardacre walks the Bencoolen wharf with no command.' :
+      v === 'partial' ? 'Mr. Hardacre lost a freight in the strait; he kept his bottom.' :
+      v === 'failure' ? 'A Brotherhood matter at Bencoolen — done badly; yr. name was named.' :
+      null },
+  { key: 'sabotage_terborch_method', label: (v) =>
+      v === 'commission' ? 'A customs matter against Mynheer ter Borch — committed; awaiting word.' :
+      v === 'negotiate'  ? 'A customs matter against Mynheer ter Borch — bargained-for; awaiting word.' :
+      null },
+  { key: 'sabotage_terborch_resolved', label: (v) =>
+      v === 'success' ? 'Mynheer ter Borch is at Batavia under inquiry.' :
+      v === 'partial' ? 'Mynheer ter Borch was lightly fined; he kept Eustace.' :
+      v === 'failure' ? 'A customs matter against ter Borch — done badly; Eustace was closed to you.' :
+      null },
+  { key: 'sabotage_lowji_method', label: (v) =>
+      v === 'commission' ? 'A loan-recall against Mr. Lowji — Cama is moving on it.' :
+      v === 'negotiate'  ? 'A loan-recall against Mr. Lowji — bargained-for; Cama is moving on it.' :
+      null },
+  { key: 'sabotage_lowji_resolved', label: (v) =>
+      v === 'success' ? 'Mr. Lowji is gone home to Surat; Bombay is the smaller place for it.' :
+      v === 'partial' ? 'Mr. Lowji is the smaller man for two bottoms.' :
+      v === 'failure' ? 'A loan-recall against Lowji — Cama\'s hand was seen; £200 was called against you.' :
+      null },
 ];
 
 function commitmentsFor(gs) {
@@ -4861,6 +5302,10 @@ function commitmentsFor(gs) {
   for (const c of MAJOR_COMMITMENTS) {
     const v = gs.flags[c.key];
     if (v === undefined || v === null || v === false) continue;
+    // Sabotage: once resolved, suppress the "awaiting word" method line —
+    // the resolved-line carries the ledger entry from then on.
+    const sabotageMethodMatch = /^sabotage_(\w+)_method$/.exec(c.key);
+    if (sabotageMethodMatch && gs.flags[`sabotage_${sabotageMethodMatch[1]}_resolved`]) continue;
     const line = c.label(v);
     if (line) out.push({ key: c.key, line });
   }
@@ -5339,7 +5784,7 @@ The price for yr. private knowledge of it is forty pounds, paid as before — th
             prose: 'You send the boy at the wharf with the agreed sum. A note returns the same evening, in a hand the Factor does not know — three sentences only, but enough to anticipate what the next packet from Bencoolen will say.',
             changes: {
               money: -40,
-              flags: { hardacreIntelPlant: true },
+              flags: { hardacreIntelPlant: true, hardacreIntelEverBought: true },
               journal: 'Bought intelligence on Mr. Hardacre at Bencoolen — £40 to a Brotherhood hand, by the boy at the wharf.',
             },
           },
@@ -5378,7 +5823,7 @@ The price for yr. private knowledge of it is forty pounds, paid as before — th
             prose: 'Sixty pounds to the boy at the wharf, in a sealed packet of the household colour. The intelligence returns: a misadventure at Bencoolen, of the kind that does not appear in the Court\'s correspondence for some weeks yet. The Factor lays his plans accordingly.',
             changes: {
               money: -60,
-              flags: { hardacreIntelPlant: true },
+              flags: { hardacreIntelPlant: true, hardacreIntelEverBought: true },
               journal: 'Paid £60 for further news of Mr. Hardacre. The strait knew it before the Court did.',
             },
           },
@@ -5472,7 +5917,7 @@ Pestonji Cama`,
             prose: 'You despatch a draft for twenty pounds by the Madras packet. A second letter returns within the month — a careful list of three matters concerning Mr. Lowji\'s recent shipments, written in a hand which has been schooled by a Parsi master in English commerce.',
             changes: {
               money: -20,
-              flags: { lowjiIntelPlant: true },
+              flags: { lowjiIntelPlant: true, lowjiIntelEverBought: true },
               journal: 'Bought intelligence on Mr. Lowji of Bombay — £20 to Mr. Cama by the Madras packet.',
             },
           },
@@ -5501,7 +5946,7 @@ Pestonji Cama`,
             prose: 'Sixty pounds across the bay. The return packet brings a clean account of the Bombay establishment\'s misadventure — two ships, three commodities, four weeks before the news travels by ordinary channels. The Factor lays his plans on the strength of it.',
             changes: {
               money: -60,
-              flags: { lowjiIntelPlant: true },
+              flags: { lowjiIntelPlant: true, lowjiIntelEverBought: true },
               journal: 'Paid £60 to Mr. Cama for the Bombay matter. The Factor\'s holds are positioned.',
             },
           },
@@ -7006,6 +7451,37 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
     // Narrative flags — merge in.
     if (changes.flags && typeof changes.flags === 'object') {
       next.flags = { ...(next.flags || {}), ...changes.flags };
+    }
+    // Rivalry deltas — sabotage arcs (and any future caller) can patch
+    // per-rival fields and append pressure modifiers via the change payload.
+    // changes.rivals: { hardacre: { state: 'broken', standing: -10 } }
+    //   - 'state' is a string assignment (e.g. 'broken' | 'troubled').
+    //   - 'standing' / 'pepper' / 'cinnamon' are deltas.
+    if (changes.rivals && typeof changes.rivals === 'object') {
+      const nextRivals = { ...(next.rivals || {}) };
+      for (const [rk, patch] of Object.entries(changes.rivals)) {
+        if (!nextRivals[rk] || !patch) continue;
+        const r = { ...nextRivals[rk] };
+        if (typeof patch.state === 'string') r.state = patch.state;
+        if (typeof patch.standing === 'number') {
+          r.standing = Math.max(0, Math.min(100, (r.standing ?? 50) + patch.standing));
+        }
+        if (typeof patch.pepper === 'number')   r.pepper   = Math.max(0, (r.pepper   ?? 0) + patch.pepper);
+        if (typeof patch.cinnamon === 'number') r.cinnamon = Math.max(0, (r.cinnamon ?? 0) + patch.cinnamon);
+        nextRivals[rk] = r;
+      }
+      next.rivals = nextRivals;
+    }
+    // Pressure modifier append. Single object or array.
+    if (changes.rivalPressureModifierPush) {
+      const pushList = Array.isArray(changes.rivalPressureModifierPush)
+        ? changes.rivalPressureModifierPush
+        : [changes.rivalPressureModifierPush];
+      next.rivalPressureModifiers = [...(next.rivalPressureModifiers || []), ...pushList];
+    }
+    // Sabotage commit counter — numeric delta.
+    if (typeof changes.sabotagesCommitted === 'number' && changes.sabotagesCommitted) {
+      next.sabotagesCommitted = (next.sabotagesCommitted || 0) + changes.sabotagesCommitted;
     }
     return next;
   };
@@ -9628,6 +10104,8 @@ function MapView({ gs, sailTo }) {
       <div>
         {ports.map(([k, p]) => {
           const blocked = p.requiresRep && Object.entries(p.requiresRep).some(([f, n]) => gs.reputation[f] < n);
+          const eustaceBannedUntil = gs.flags?.banned_eustace_until ?? 0;
+          const eustaceBanned = (k === 'Port St. Eustace') && eustaceBannedUntil > gs.day;
           const visited = gs.visited.includes(k);
           const sells = Object.entries(p.sells || {});
           const buys = Object.entries(p.buys || {});
@@ -9645,15 +10123,20 @@ function MapView({ gs, sailTo }) {
                 </div>
                 <button
                   className="wax-button"
-                  disabled={blocked || tooDamaged}
+                  disabled={blocked || tooDamaged || eustaceBanned}
                   onClick={() => sailTo(k)}
                 >
-                  {blocked ? 'Not Welcome' : tooDamaged ? 'Ship Unfit' : 'Sail Here'}
+                  {eustaceBanned ? 'Closed to You' : blocked ? 'Not Welcome' : tooDamaged ? 'Ship Unfit' : 'Sail Here'}
                 </button>
               </div>
               {blocked && (
                 <div className="italic" style={{ fontSize: '0.85em', color: '#8b1a1a', marginTop: '0.5rem' }}>
                   &mdash; Requires standing with {Object.entries(p.requiresRep).map(([f]) => FACTIONS[f].short).join(', ')}.
+                </div>
+              )}
+              {eustaceBanned && (
+                <div className="italic" style={{ fontSize: '0.85em', color: '#8b1a1a', marginTop: '0.5rem' }}>
+                  &mdash; Eustace is closed to yr. brigantine until day {eustaceBannedUntil}.
                 </div>
               )}
 

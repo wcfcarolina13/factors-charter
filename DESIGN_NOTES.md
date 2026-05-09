@@ -299,15 +299,15 @@ verifiably in `factors_charter.jsx`. Open items follow.
 8. ~~Crown-gated port~~ (Fort Marlborough / Bencoolen in `PORTS`)
 9. ~~New commodities~~ (camphor, tobacco, pearls, diamonds, teak, indigo, ambergris, gambier — `COMMODITIES` is 16-strong)
 10. ~~Fine-goods cargo class~~ (pearls / diamonds / ambergris — high value, near-zero weight)
-11. **Rivalry mechanics** — *partial.* `rivalLine` shipped at 1128: Mr. Hardacre's tonnage at Bencoolen is referenced in `makeQuarterlyNagLetter`, and `rivalRisk: true` shows on MapView for Eustace. **Open:** a richer Port-Royale-4-style periodic-news system — independent rival arrivals/departures at other stations, named rival factors with their own trajectories, occasional windfalls or losses that pressure the player's quota standing.
+11. ~~**Rivalry mechanics**~~ — shipped 2026-05-08 (rivalry v1: 3 rivals, baselines, 18 events, 4 levers) and 2026-05-09 (sabotage arcs: 5th lever, 3 two-step letter chains routed through the rivals' intel channels, deterministic resolution). The full surface is now in code; further additions (cross-rival events, re-triggerable sabotage, charter-end flavour wired off `gs.sabotagesCommitted`) are tracked in HANDOFF.md.
 12. ~~Internal Company faction split~~ (Dryden's Speculative Bench → Lord Mountfair; `companyFaction` flag drives variant Director correspondence)
 13. ~~Building → person arrives~~ (`BUILDING_ARRIVALS` at 498 — watchman, junior clerk, catechist, plantation overseer, sepoy corporal, shipwright, godown-keeper, master gunner)
 14. ~~Bottomry loans~~ (`gs.bottomry` field at 960 — period-accurate leverage with sink-risk)
 
 ### Genuinely open
 
-- **#11 rivalry mechanics** (above) — the only design-shape gameplay item
-  left from the Session 9 backlog.
+- ~~**#11 rivalry mechanics**~~ — closed 2026-05-09 with sabotage arcs (the
+  v1 deferred 5th lever).
 - Items collected since — append below.
 
 Append additions below with a date stamp; I'll triage them in the next

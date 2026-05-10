@@ -62,6 +62,14 @@ If you ever see `503 {"error":"AI binding not configured"}` again, the binding h
 
 Chrome's manifest validation still flags `icon-192.png`. Replacing the placeholder PNGs with hand-designed icons closes this out. Highest-priority cosmetic item. Needs Bradley's aesthetic input — placeholder PNGs → 1720s-engraving-style icons.
 
+> ⚠️ **SESSION POISONING — DO NOT READ THE ICON FILES.** Hit 3+ times. Reading `public/icon-*.png` (or any other PWA icon asset in this repo) into the conversation triggers a `400 Could not process image` cascade per `~/.claude/CLAUDE.md` §13 — likely an oversized / multi-image limit issue. Once it fires, every subsequent turn re-fails and the session is unrecoverable (`/compact`, `--fork-session`, `--resume` all stay broken).
+>
+> **Before any work on this item:**
+> 1. `/rewind` checkpoint first.
+> 2. Inspect with shell only: `sips -g pixelWidth -g pixelHeight -g format public/icon-192.png` and `ls -lh public/icon-*.png`. Do NOT `Read` them.
+> 3. If >2000px on long edge or >5MB, downscale to a working copy: `sips -Z 1800 src.png --out src-small.png` before any image is added to the turn.
+> 4. Prefer generating fresh icons from a tight cropped reference, one image per turn, path-referenced via `Read` only after sizing is verified.
+
 ### 2. ~~Lazy-load mid-game views~~ — shipped 2026-05-09 (see "Bundle slimming")
 
 Phase 2 (code-splitting questline helpers / RIVAL_EVENTS / AUTO_SENDERS / SVG vignettes) is **deferred indefinitely** — Phase 1's plate extraction got the main bundle to 380 KB, well below the 500 KB warning threshold. Only revisit if the bundle creeps back over.
@@ -74,14 +82,42 @@ Closes out Lighthouse Best Practices. Not blocking. Be aware: React 18 has sharp
 
 Period ambient (wind, wharf, quill) on desktop title and letter screens. Its own future spec.
 
-### 5. Workers AI latency / cost monitoring
+### 5. Workers AI latency / cost — three-layer cache (shipped 2026-05-09)
 
-The Workers AI migration uses `@cf/black-forest-labs/flux-1-schnell` at 4 steps. flux-schnell typically renders in ~3–6s. Watch:
-- Latency: if it creeps past 30s, the 60s client timeout still covers it but UX bites.
-- Free tier: 10,000 neurons/day; flux-schnell costs ~24 neurons per generation, so ~400 free renders/day. Real player traffic is far below. Paid tier metered per-neuron.
-- Edge cache hit rate: same prompt + seed → identical URL → CF caches with `max-age=31536000, immutable`. Hits should dominate after warmup.
+The Workers AI migration uses `@cf/black-forest-labs/flux-1-schnell` at 4 steps. flux-schnell renders in ~3–6s and is deterministic for a given (prompt, seed) at fixed steps.
 
-If Workers AI regresses, fall back to a different model (e.g. `@cf/stabilityai/stable-diffusion-xl-base-1.0`) by changing the single string in `functions/api/illustrate.js`.
+`functions/api/illustrate.js` now serves through a three-layer cache (cheapest first):
+
+1. **`caches.default`** — POP-local edge cache. Sub-100ms when warm.
+2. **R2 bucket `ILLUSTRATIONS`** — persistent across all players, all regions, forever. Same prompt+seed → same SHA-256 key → one global generation in the entire history of the project. Free tier (10 GB) holds ~15K JPEGs.
+3. **Workers AI** — only on global first-ever miss for a (prompt, seed) pair.
+
+Each response now carries `x-illust-cache: edge | r2 | miss` so you can see at a glance which layer served it.
+
+#### Pending: bind the R2 bucket (one-time, ~2 min)
+
+The R2 layer auto-detects `env.ILLUSTRATIONS` and falls through cleanly when unbound, so the function is shipped and safe regardless. **But you have to do the dashboard step before R2 actually does anything** — see [`R2_SETUP.md`](R2_SETUP.md). After that, every (prompt, seed) pair generates exactly once, ever.
+
+#### Original baseline (2026-05-09, pre-fix)
+
+Empirical measurement before the cache patch shipped. Same prompt + seed `2873-1761`, 5 sequential `curl` hits against live deploy:
+
+| Hit | Total time | MD5 | Notes |
+|-----|------------|-----|-------|
+| 1 (cold) | 5.96s | (different) | bytes 666,729 |
+| 2 | 5.84s | ef5bf3… | bytes 666,759 — settles |
+| 3 | — | ef5bf3… | byte-identical |
+| 4 | 4.82s | ef5bf3… | byte-identical |
+| 5 | 1.97s | ef5bf3… | best repeat — still not "instant" |
+
+**Diagnosis:** Cloudflare Pages Functions bypass the default edge cache even with `cache-control: public, max-age=31536000, immutable`. No `cf-cache-status` header on any response. Documented "hits should dominate after warmup" assumption was false — every request re-ran the model. Three-layer fix above replaces this.
+
+#### Watch
+- Latency: if cold renders creep past 30s, the 60s client timeout still covers it but UX bites.
+- Free tier: 10,000 neurons/day; flux-schnell costs ~24 neurons per generation, so ~400 free renders/day. With R2 in front, neuron spend approaches zero as the corpus saturates.
+- R2 storage: 10 GB free. Realistic corpus << 1,000 unique images. Inspect via `wrangler r2 object list factors-charter-illustrations` or the dashboard.
+
+If Workers AI regresses, fall back to a different model (e.g. `@cf/stabilityai/stable-diffusion-xl-base-1.0`) by changing the single string in `functions/api/illustrate.js`. Bump the key prefix in `r2Key()` at the same time so the new model gets a fresh R2 namespace.
 
 ### 6. Rivalry follow-ups (low priority, all flagged in code review)
 
@@ -124,7 +160,8 @@ Workers AI illustration endpoint (after the AI binding is configured — see "Re
 
 ```bash
 curl -sI 'https://factors-charter.pages.dev/api/illustrate?prompt=a%20brigantine%20at%20anchor&seed=42'
-# expect: HTTP 200 + content-type: image/png + cache-control: public, max-age=31536000, immutable
+# expect: HTTP 200 + content-type: image/jpeg + cache-control: public, max-age=31536000, immutable
+# also: x-illust-cache: edge | r2 | miss (which layer served the request — see R2_SETUP.md)
 ```
 
 Plate static assets (post bundle-slimming):

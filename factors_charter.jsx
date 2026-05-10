@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { detectMode as detectViewportMode, setOverride as setViewportOverride, DESKTOP_QUERY as VIEWPORT_DESKTOP_QUERY } from './src/util/viewport.js';
 import { getOrFetch as getOrFetchIllustration, markLoaded as markIllustrationLoaded } from './src/util/illustration-cache.js';
 import { STYLE_PREFIX } from './src/util/style-prefix.js';
-import { generatePlaythroughId } from './src/util/playthrough-id.js';
+import { generatePlaythroughId, isValidPlaythroughId } from './src/util/playthrough-id.js';
 import { detectConflict } from './src/util/sync-conflict.js';
 import {
   makeInitialRivals,
@@ -14,6 +14,47 @@ import {
 import { priceWindowMult, pruneExpiredWindows } from './src/util/price-windows.js';
 import { pickPlate } from './src/util/plates.js';
 import { canOfferSabotage, resolveSabotage, sabotageCoda } from './src/util/sabotage.js';
+
+// ─────────── FACTOR KEY (cross-device identity) ───────────
+//
+// A device-level identifier that namespaces all of a player's charters
+// across devices. Lives in localStorage at FACTOR_KEY_STORAGE — NOT in gs.
+// All charter saves push to cloud KV under save:<factorKey>:<playthroughId>.
+// Pasting another device's factor key here will surface that device's
+// charters on this device's title screen via /api/factor-saves.
+//
+// Format reuses the playthrough-id themed-string scheme (same vocabulary,
+// same regex) — same entropy budget, same word-list discipline.
+
+const FACTOR_KEY_STORAGE = 'factor_key_v1';
+
+function readFactorKey() {
+  if (typeof window === 'undefined') return null;
+  try {
+    const v = window.localStorage.getItem(FACTOR_KEY_STORAGE);
+    return isValidPlaythroughId(v) ? v : null;
+  } catch (e) { return null; }
+}
+
+function writeFactorKey(key) {
+  if (typeof window === 'undefined') return false;
+  if (!isValidPlaythroughId(key)) return false;
+  try {
+    window.localStorage.setItem(FACTOR_KEY_STORAGE, key);
+    return true;
+  } catch (e) { return false; }
+}
+
+// Lazy generator: returns the existing key, or mints a new one and
+// persists it. Safe to call repeatedly — only the first call mints.
+function ensureFactorKey() {
+  let k = readFactorKey();
+  if (!k) {
+    k = generatePlaythroughId();
+    writeFactorKey(k);
+  }
+  return k;
+}
 
 // React hook wrapping the viewport detection. Subscribes to media-query
 // changes and to localStorage changes (so toggling the override in one tab
@@ -38,15 +79,22 @@ function useViewportMode() {
 // (lastKnownCloudVersion, lastSyncAt) in device-local storage at
 // factor_save_<slot>_sync, and the debounced push-on-save trigger.
 //
+// Cross-device identity: every push/pull is namespaced under the device's
+// factor key (read from localStorage at request time, ensured present via
+// ensureFactorKey). Pasting a different factor key on the title screen
+// re-points all subsequent push/pull traffic to that namespace, surfacing
+// the other device's charters here.
+//
 // State:
 //   { status, lastKnownCloudVersion, lastSyncAt, error }
 //   status ∈ 'idle' | 'pushing' | 'pulling' | 'offline' | 'error' | 'conflict'
 //
 // API:
-//   triggerPush(gs)     — schedule a push 5s after the last save (debounced).
-//   pushNow(gs)         — push immediately.
-//   pullNow(playthroughId) → Promise<{ status, remote }>
-//   resolveConflict via setStatus
+//   triggerPush(gs)            — schedule a push 5s after the last save (debounced).
+//   pushNow(gs)                — push immediately.
+//   pullNow(playthroughId)     → Promise<{ status, remote }>
+//   pullFactorIndex()          → Promise<{ status, charters }>  cross-device discovery
+//   pullCharterById(id)        → Promise<{ status, body, version, savedAt }>
 //
 // Storage: factor_save_<slot>_sync = { lastKnownCloudVersion, lastSyncAt, lastKnownDay }
 function useSyncState(slot) {
@@ -82,9 +130,20 @@ function useSyncState(slot) {
     }
   };
 
+  // Build the namespaced sync URL. Returns null if either the factor key
+  // can't be ensured or the playthrough id is missing — callers no-op in
+  // that case (we never push/pull without both).
+  const buildSyncUrl = (path, playthroughId) => {
+    const factorKey = ensureFactorKey();
+    if (!factorKey || !isValidPlaythroughId(playthroughId)) return null;
+    return `${path}?key=${encodeURIComponent(factorKey)}&id=${encodeURIComponent(playthroughId)}`;
+  };
+
   const pushNow = async (gs) => {
-    if (!gs?.playthroughId || !gs.syncEnabled) return;
+    if (!gs?.playthroughId) return;
     if (inFlight.current) return;
+    const url = buildSyncUrl('/api/save', gs.playthroughId);
+    if (!url) return;
     // aiLog is debug-only history of AI request/response pairs — not needed
     // for cross-device play continuity, and is the main driver of gs size
     // (a late-game charter routinely pushes past 256 KB with aiLog included).
@@ -99,7 +158,7 @@ function useSyncState(slot) {
     inFlight.current = true;
     setStatus('pushing');
     try {
-      const res = await fetch(`/api/save?id=${encodeURIComponent(gs.playthroughId)}`, {
+      const res = await fetch(url, {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body,
@@ -122,7 +181,7 @@ function useSyncState(slot) {
   };
 
   const triggerPush = (gs) => {
-    if (!gs?.playthroughId || !gs.syncEnabled) return;
+    if (!gs?.playthroughId) return;
     if (debounceTimer.current) clearTimeout(debounceTimer.current);
     debounceTimer.current = setTimeout(() => { pushNow(gs); }, 5000);
   };
@@ -155,6 +214,8 @@ function useSyncState(slot) {
 
   const pullNow = async (playthroughId) => {
     if (!playthroughId) return { status: 'none' };
+    const url = buildSyncUrl('/api/save', playthroughId);
+    if (!url) return { status: 'none' };
     // Guard against concurrent pulls (e.g. React-strict-mode double-fire of the
     // pull-on-launch effect, or an opt-in pull racing a manual menu pull). The
     // 'busy' return is a no-op for callers — none of their result.status
@@ -163,7 +224,7 @@ function useSyncState(slot) {
     pullInFlight.current = true;
     setStatus('pulling');
     try {
-      const res = await fetch(`/api/save?id=${encodeURIComponent(playthroughId)}`);
+      const res = await fetch(url);
       if (res.status === 404) {
         setStatus('idle');
         return { status: 'push', remote: null };
@@ -182,6 +243,41 @@ function useSyncState(slot) {
       return { status: 'error' };
     } finally {
       pullInFlight.current = false;
+    }
+  };
+
+  // Cross-device discovery: list every charter saved under the device's
+  // factor key. Used by the title screen to surface charters that exist
+  // only on the cloud (e.g. ones started on a different device). Returns
+  // the raw charter manifests; the title screen merges with local saves
+  // and dedupes by playthrough id.
+  const pullFactorIndex = async () => {
+    const factorKey = ensureFactorKey();
+    if (!factorKey) return { status: 'none', charters: [] };
+    try {
+      const res = await fetch(`/api/factor-saves?key=${encodeURIComponent(factorKey)}`);
+      if (!res.ok) return { status: 'error', charters: [] };
+      const data = await res.json();
+      return { status: 'ok', charters: Array.isArray(data?.charters) ? data.charters : [] };
+    } catch (e) {
+      return { status: 'offline', charters: [] };
+    }
+  };
+
+  // Fetch the full body for a remote charter by playthrough id. Used by the
+  // title screen when the player picks a remote-only charter to hydrate.
+  const pullCharterById = async (playthroughId) => {
+    if (!isValidPlaythroughId(playthroughId)) return { status: 'invalid' };
+    const url = buildSyncUrl('/api/save', playthroughId);
+    if (!url) return { status: 'none' };
+    try {
+      const res = await fetch(url);
+      if (res.status === 404) return { status: 'not-found' };
+      if (!res.ok) return { status: 'error' };
+      const remote = await res.json();
+      return { status: 'ok', body: remote.body, version: remote.version, savedAt: remote.savedAt };
+    } catch (e) {
+      return { status: 'offline' };
     }
   };
 
@@ -208,6 +304,7 @@ function useSyncState(slot) {
     pointer: readPointer,
     writePointer,
     triggerPush, pushNow, pullNow, cancelPendingPush,
+    pullFactorIndex, pullCharterById,
     exportManuscript,
     applyPull,
     setStatus,
@@ -803,9 +900,17 @@ const ensureShape = (gs) => {
   if (!next.player || typeof next.player !== 'object' || !next.player.name) {
     next.player = next.player || { name: 'The Factor', title: 'Factor' };
   }
-  if (next.syncEnabled === undefined) next.syncEnabled = false;
-  if (next.playthroughId === undefined) next.playthroughId = null;
-  if (next.syncPromptShown === undefined) next.syncPromptShown = false;
+  // Sync model: cross-device sync is now implicit via the device's factor key
+  // (localStorage `factor_key_v1`). Every charter has a playthroughId from
+  // birth — there is no opt-in step, no syncEnabled gate. Old saves get one
+  // auto-attached here on first load after the upgrade.
+  //
+  // syncEnabled / syncPromptShown are kept defaulted-true to satisfy any
+  // legacy code path still reading them; they're effectively dead fields and
+  // can be removed in a future cleanup pass.
+  if (!isValidPlaythroughId(next.playthroughId)) next.playthroughId = generatePlaythroughId();
+  if (next.syncEnabled === undefined) next.syncEnabled = true;
+  if (next.syncPromptShown === undefined) next.syncPromptShown = true;
   if (!next.rivals) {
     next.rivals = makeInitialRivals();
   }
@@ -7014,14 +7119,26 @@ const Loading = ({ msg }) => {
 
 // ─────────── TITLE SCREEN ───────────
 
-function TitleScreen({ saves, onNewGame, onContinue, onRestore, onDeleteSlot }) {
+function TitleScreen({ saves, remoteOnlyCharters = [], remoteLoading = false, factorKey, onNewGame, onContinue, onRestore, onDeleteSlot, onResumeRemote }) {
   const [name, setName] = useState('Jonathan Wexley');
   const [showRestore, setShowRestore] = useState(false);
   const [restoreText, setRestoreText] = useState('');
   const [flash, setFlash] = useState('');
   const [confirmingDelete, setConfirmingDelete] = useState(null); // slot id
+  const [hydrating, setHydrating] = useState(null); // playthroughId currently being pulled
 
   const hasSaves = Array.isArray(saves) && saves.length > 0;
+  const hasRemoteOnly = Array.isArray(remoteOnlyCharters) && remoteOnlyCharters.length > 0;
+
+  const handleResumeRemote = async (id) => {
+    if (!onResumeRemote) return;
+    setHydrating(id);
+    try {
+      await onResumeRemote(id);
+    } finally {
+      setHydrating(null);
+    }
+  };
 
   const showFlash = (msg) => {
     setFlash(msg);
@@ -7157,6 +7274,68 @@ function TitleScreen({ saves, onNewGame, onContinue, onRestore, onDeleteSlot }) 
         </div>
       )}
 
+
+      {/* CHARTERS ON OTHER DEVICES (under the same factor key) */}
+      {hasRemoteOnly && (
+        <div style={{ marginTop: '1.5rem', textAlign: 'left' }}>
+          <div className="display" style={{ fontSize: '0.85em', color: '#6b4423', letterSpacing: '0.1em', marginBottom: '0.5rem', textAlign: 'center' }}>
+            ⁂ ALSO UNDER YR. KEY (NOT YET ON THIS DEVICE)
+          </div>
+          {remoteOnlyCharters.map(c => {
+            const totalDays = (c.day || 0) + (c.daysRemaining || 0);
+            const isHydrating = hydrating === c.id;
+            const fmtSavedAt = (s) => {
+              if (!s) return '';
+              try {
+                const t = Date.parse(s);
+                if (!Number.isFinite(t)) return '';
+                const ms = Date.now() - t;
+                const m = Math.floor(ms / 60000);
+                const h = Math.floor(m / 60);
+                const d = Math.floor(h / 24);
+                if (d > 0) return `cloud-saved ${d}d ago`;
+                if (h > 0) return `cloud-saved ${h}h ago`;
+                if (m > 0) return `cloud-saved ${m}m ago`;
+                return 'cloud-saved just now';
+              } catch (e) { return ''; }
+            };
+            return (
+              <div key={c.id} className="parchment" style={{
+                padding: '0.8rem 1rem', marginBottom: '0.5rem',
+                background: 'rgba(255,253,245,0.4)',
+                borderLeft: '2px solid rgba(92,26,8,0.4)',
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <div style={{ flex: 1, minWidth: '12rem' }}>
+                    <div style={{ fontStyle: 'italic', color: '#4a3220' }}>
+                      {c.factorName || 'Unnamed Factor'}, Factor at {c.location || 'Bayan-Kor'}
+                    </div>
+                    <div style={{ fontSize: '0.82em', color: '#6b4423', letterSpacing: '0.04em' }}>
+                      {c.charterClosed
+                        ? <>Charter closed{c.charterClosed.outcome ? ` — ${c.charterClosed.outcome}` : ''} &middot; {fmtSavedAt(c.savedAt)}</>
+                        : <>Day {c.day || 0}{totalDays ? ` of ${totalDays}` : ''} &middot; {fmtSavedAt(c.savedAt)}</>}
+                    </div>
+                  </div>
+                  <button
+                    className="wax-button"
+                    disabled={isHydrating}
+                    onClick={() => handleResumeRemote(c.id)}
+                    style={{ padding: '0.35rem 0.7rem', fontSize: '0.88em' }}
+                  >
+                    {isHydrating ? 'Pulling…' : '⁂ Pull to this device'}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {remoteLoading && !hasRemoteOnly && (
+        <div style={{ marginTop: '1rem', fontSize: '0.85em', color: '#6b4423', fontStyle: 'italic' }}>
+          Checking for charters elsewhere under yr. key…
+        </div>
+      )}
 
       {/* NEW CHARTER */}
       <div style={{ marginTop: '1.5rem' }}>
@@ -8261,12 +8440,6 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
       <div style={{ maxWidth: '64rem', margin: '0 auto', padding: '1.25rem 1.0rem', width: '100%' }}>
         <Header
           gs={gs}
-          onEnableSync={() => setGs(prev => ({
-            ...prev,
-            syncEnabled: true,
-            playthroughId: prev.playthroughId || generatePlaythroughId(),
-            syncPromptShown: true,
-          }))}
           onReturnToTitle={onReturnToTitle}
           onSuccession={onSuccession}
           onRenewal={onRenewal}
@@ -8753,45 +8926,123 @@ async function robustCopy(text) {
   return false;
 }
 
-// One-time modal shown on the first save of a new charter. Player chooses
-// whether to enable cross-device sync. Choice is sticky for the charter's
-// life — the menu still has a "Sync this charter" entry to enable later if
-// they declined here.
-function FirstLaunchSyncPrompt({ onChoice }) {
+// Factor key modal — surfaced from the in-game ☰ Menu. Shows the device's
+// current factor key (cross-device identity), lets the player copy it for
+// transport to another device, and lets them paste a key from another
+// device to inherit that device's charters here. Replacement is immediate;
+// the title screen on next visit will list charters under the new key.
+function FactorKeyModal({ onClose, onChange }) {
+  const currentKey = readFactorKey() || '';
+  const [pasted, setPasted] = useState('');
+  const [flash, setFlash] = useState('');
+  const [copied, setCopied] = useState(false);
+
+  const showFlash = (msg) => {
+    setFlash(msg);
+    setTimeout(() => setFlash(''), 2200);
+  };
+
+  const handleCopy = async () => {
+    if (!currentKey) return;
+    try {
+      await navigator.clipboard.writeText(currentKey);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch (e) {
+      showFlash('Could not copy — select the key above and copy by hand.');
+    }
+  };
+
+  const handleApplyPaste = () => {
+    const trimmed = pasted.trim().toLowerCase();
+    if (!isValidPlaythroughId(trimmed)) {
+      showFlash('That does not look like a valid factor key (e.g. pelican-salt-pepper-1923).');
+      return;
+    }
+    if (trimmed === currentKey) {
+      showFlash('That is already your factor key.');
+      return;
+    }
+    if (!writeFactorKey(trimmed)) {
+      showFlash('Could not save the new key — storage may be disabled.');
+      return;
+    }
+    onChange && onChange(trimmed);
+    onClose && onClose();
+  };
+
   return (
     <div style={{
       position: 'fixed', inset: 0, zIndex: 200,
       background: 'rgba(20,12,4,0.55)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       padding: '1rem',
-    }}>
+    }} onClick={onClose}>
       <div className="parchment" style={{
-        maxWidth: '36rem', width: '100%',
-        padding: '1.5rem 1.7rem',
+        maxWidth: '38rem', width: '100%',
+        padding: '1.4rem 1.6rem',
         background: '#f0e3c4',
         boxShadow: '0 4px 16px rgba(20,12,4,0.5)',
         border: '1px solid rgba(74,44,20,0.4)',
-      }}>
-        <div className="display" style={{ fontSize: '1.1em', color: '#5c1a08', marginBottom: '0.6rem' }}>
-          ⁂ SYNC THIS CHARTER ACROSS DEVICES?
+      }} onClick={(e) => e.stopPropagation()}>
+        <div className="display" style={{ fontSize: '1.05em', color: '#5c1a08', marginBottom: '0.5rem' }}>
+          ⁂ FACTOR KEY
         </div>
-        <p style={{ fontSize: '0.95em', color: '#2a1a0a', lineHeight: 1.6, marginBottom: '0.5rem' }}>
-          Yr. saves can travel with you between yr. phone and yr. desk. Whichever device
-          you next open the charter on will pick up where the other left off.
+        <p style={{ fontSize: '0.9em', color: '#2a1a0a', lineHeight: 1.55, marginBottom: '0.8rem' }}>
+          Yr. factor key is the secret that ties yr. charters across devices. Every charter
+          on this device is saved to the cloud under it. To pick up yr. charters on another
+          device — phone or desk — paste this same key there.
         </p>
-        <p style={{ fontSize: '0.85em', color: '#4a3220', fontStyle: 'italic', marginBottom: '1rem' }}>
-          Saves live on Cloudflare's servers under a charter ID like
-          "pelican-salt-pepper-1923". Anyone with the ID can read or write the save —
-          the ID is the secret. Nothing is encrypted, but the Manuscript JSON export
-          remains the canonical permanent backup either way.
+
+        <div className="display" style={{ fontSize: '0.78em', color: '#6b4423', letterSpacing: '0.1em', marginBottom: '0.3rem' }}>
+          ON THIS DEVICE
+        </div>
+        <div style={{
+          padding: '0.55rem 0.7rem',
+          background: 'rgba(255,253,245,0.7)',
+          border: '1px solid rgba(74,44,20,0.3)',
+          fontFamily: 'monospace',
+          fontSize: '0.95em',
+          color: '#2a1a0a',
+          marginBottom: '0.5rem',
+          wordBreak: 'break-all',
+          userSelect: 'all',
+        }}>
+          {currentKey || '— no key yet —'}
+        </div>
+        <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '1.2rem' }}>
+          <button className="ghost-button" onClick={handleCopy} disabled={!currentKey}>
+            {copied ? '⎘ Copied' : '⎘ Copy to clipboard'}
+          </button>
+        </div>
+
+        <div className="display" style={{ fontSize: '0.78em', color: '#6b4423', letterSpacing: '0.1em', marginBottom: '0.3rem' }}>
+          REPLACE WITH A KEY FROM ANOTHER DEVICE
+        </div>
+        <p style={{ fontSize: '0.82em', color: '#4a3220', fontStyle: 'italic', marginBottom: '0.4rem' }}>
+          Pasting a key from another device will rebind this device to that key. Yr. existing
+          local charters here keep playing, but the title screen will start showing charters
+          from the other device. Yr. previous key on this device is forgotten — copy it first
+          if you want it back.
         </p>
-        <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-          <button className="ghost-button" onClick={() => onChoice(false)}>
-            No, keep local-only
-          </button>
-          <button className="wax-button" onClick={() => onChoice(true)}>
-            Yes, sync this charter
-          </button>
+        <input
+          className="parchment-input"
+          value={pasted}
+          onChange={(e) => setPasted(e.target.value)}
+          placeholder="e.g. pelican-salt-pepper-1923"
+          aria-label="Factor key from another device"
+          style={{ width: '100%', fontFamily: 'monospace', fontSize: '0.9em', boxSizing: 'border-box' }}
+        />
+
+        {flash && (
+          <div className="ink-fade-in" style={{ marginTop: '0.6rem', padding: '0.4rem 0.7rem', background: 'rgba(92,26,8,0.08)', borderLeft: '2px solid #5c1a08', fontSize: '0.85em', color: '#5c1a08' }}>
+            {flash}
+          </div>
+        )}
+
+        <div style={{ marginTop: '1rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <button className="ghost-button" onClick={onClose}>Close</button>
+          <button className="wax-button" onClick={handleApplyPaste} disabled={!pasted.trim()}>Apply key</button>
         </div>
       </div>
     </div>
@@ -9311,8 +9562,9 @@ function ExportModal({ title, content, filename, onClose, helperText, wrap }) {
 // charter is not synced. Tooltip on the badge shows the last sync time + ID.
 function SyncBadge({ gs, sync }) {
   // Defensive: also guard on `sync` so a future caller that forgets to pass
-  // it doesn't crash on `sync.status` access.
-  if (!gs?.syncEnabled || !sync) return null;
+  // it doesn't crash on `sync.status` access. With the factor-key model, any
+  // charter with a playthroughId is being synced — there's no opt-out.
+  if (!gs?.playthroughId || !sync) return null;
 
   const label =
     sync.status === 'pushing' ? 'syncing…' :
@@ -9345,7 +9597,7 @@ function SyncBadge({ gs, sync }) {
   );
 }
 
-function Header({ gs, onEnableSync, onReturnToTitle, onSuccession, onRenewal, viewportMode, sync }) {
+function Header({ gs, onReturnToTitle, onSuccession, onRenewal, viewportMode, sync }) {
   const [confirmingSuccession, setConfirmingSuccession] = useState(false);
   const [successorName, setSuccessorName] = useState('');
   const [confirmingRenewal, setConfirmingRenewal] = useState(false);
@@ -9354,6 +9606,7 @@ function Header({ gs, onEnableSync, onReturnToTitle, onSuccession, onRenewal, vi
   const [exportPanel, setExportPanel] = useState(null); // { title, content, filename }
   const [githubOpen, setGithubOpen] = useState(false);
   const [githubConfig, setGithubConfig] = useState(null);
+  const [factorKeyOpen, setFactorKeyOpen] = useState(false);
 
   // Load GitHub config (if any) once on mount. The modal also re-reads it,
   // so this is just for menu-label hinting. Skipped when the feature is off.
@@ -9575,18 +9828,16 @@ function Header({ gs, onEnableSync, onReturnToTitle, onSuccession, onRenewal, vi
             </div>
           )}
 
-          {!gs?.syncEnabled && (
-            <button
-              className="ghost-button"
-              style={{ width: '100%', textAlign: 'left', marginBottom: '0.3rem' }}
-              onClick={() => {
-                onEnableSync && onEnableSync();
-                setMenuOpen(false);
-              }}
-            >
-              ⁂ Sync this charter
-            </button>
-          )}
+          <button
+            className="ghost-button"
+            style={{ width: '100%', textAlign: 'left', marginBottom: '0.3rem' }}
+            onClick={() => {
+              setFactorKeyOpen(true);
+              setMenuOpen(false);
+            }}
+          >
+            ⁂ Factor key (cross-device)
+          </button>
           <button
             className="ghost-button"
             style={{ width: '100%', textAlign: 'left', marginBottom: '0.3rem' }}
@@ -9629,6 +9880,18 @@ function Header({ gs, onEnableSync, onReturnToTitle, onSuccession, onRenewal, vi
             // Reload from storage in case the modal saved a new config.
             const cfg = await loadGithubConfig();
             setGithubConfig(cfg);
+          }}
+        />
+      )}
+
+      {factorKeyOpen && (
+        <FactorKeyModal
+          onClose={() => setFactorKeyOpen(false)}
+          onChange={() => {
+            // Key swapped — surface a brief confirmation. The next visit to
+            // the title screen will pull the new key's charter list.
+            setFlash('Factor key updated. Charters under the new key will appear on the title screen.');
+            setTimeout(() => setFlash(''), 3500);
           }}
         />
       )}
@@ -11519,6 +11782,9 @@ const summariseSlot = (id, gs, savedAt) => ({
   daysRemaining: gs.daysRemaining,
   location: gs.location,
   lastSavedAt: savedAt,
+  // playthroughId is the cross-device identifier — included in the summary
+  // so the title screen can dedupe local-vs-remote rosters by it.
+  playthroughId: gs.playthroughId || null,
   charterClosed: gs.charterClosed ? { outcome: gs.charterClosed.outcome, destiny: gs.charterClosed.destiny, day: gs.charterClosed.day } : null,
 });
 
@@ -11566,6 +11832,13 @@ export default function FactorsCharter() {
   const viewportMode = useViewportMode();
   const sync = useSyncState(activeSaveId);
   const [pendingConflict, setPendingConflict] = useState(null);  // { localGs, remoteRecord }
+  // Remote charter manifests under the device's factor key. Populated on
+  // title-phase entry. Each entry is { id, day, daysRemaining, location,
+  // factorName, savedAt, version, charterClosed? }. Title screen filters
+  // out entries whose id matches a local slot's playthroughId, then surfaces
+  // the remainder as "available on this account but not on this device."
+  const [remoteCharters, setRemoteCharters] = useState([]);
+  const [remoteLoading, setRemoteLoading] = useState(false);
 
   // Live-gs ref so async callbacks (notably pull-on-launch) don't operate
   // against a stale closure if the player advanced the day before the
@@ -11610,7 +11883,7 @@ export default function FactorsCharter() {
   //   'conflict' — both diverged; show ConflictModal.
   //   'push'     — remote missing or stale; push local to seed/restore.
   useEffect(() => {
-    if (!gs || !gs.syncEnabled || !gs.playthroughId) return;
+    if (!gs || !gs.playthroughId) return;
     let cancelled = false;
     (async () => {
       const result = await sync.pullNow(gs.playthroughId);
@@ -11650,7 +11923,7 @@ export default function FactorsCharter() {
       }
     })();
     return () => { cancelled = true; };
-  }, [gs?.playthroughId, gs?.syncEnabled]);  // re-run if the synced ID changes (e.g. on first opt-in)
+  }, [gs?.playthroughId]);  // re-run if the synced ID changes (e.g. on a fresh charter or remote hydration)
 
   const handleNewGame = (name) => {
     const id = newSlotId();
@@ -11687,6 +11960,37 @@ export default function FactorsCharter() {
     if (activeSaveId === slotId) setActiveSaveId(null);
   };
 
+  // Hydrate a remote-only charter into a fresh local slot, then drop into
+  // game. The next save tick will push back to the same KV record (same
+  // playthroughId), so the cloud→local handoff is idempotent. The local aiLog
+  // starts empty for this device — synced payloads strip aiLog by design.
+  const handleResumeRemote = async (playthroughId) => {
+    const result = await sync.pullCharterById(playthroughId);
+    if (result.status !== 'ok' || !result.body) return;
+    const id = newSlotId();
+    setActiveSaveId(id);
+    setGs(ensureShape(result.body));
+    setPhase('game');
+    // Drop this entry from the remote-only list — it now exists locally.
+    setRemoteCharters(prev => prev.filter(c => c.id !== playthroughId));
+  };
+
+  // Refresh the remote charter list whenever we land on the title screen.
+  // Cheap (one KV.list under the hood); keeps cross-device adds visible
+  // without requiring a hard reload.
+  useEffect(() => {
+    if (phase !== 'title') return;
+    let cancelled = false;
+    setRemoteLoading(true);
+    (async () => {
+      const result = await sync.pullFactorIndex();
+      if (cancelled) return;
+      setRemoteCharters(Array.isArray(result.charters) ? result.charters : []);
+      setRemoteLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [phase]);
+
   const handleReturnToTitle = () => {
     setActiveSaveId(null);
     setPhase('title');
@@ -11713,21 +12017,30 @@ export default function FactorsCharter() {
     setPhase('game');
   };
 
-  const showSyncPrompt = !!gs && !gs.syncPromptShown && (gs.day > 0 || gs.seenOpening);
-
   if (phase === 'loading') {
     return <Page><Loading msg="Unrolling the chart" /></Page>;
   }
 
   if (phase === 'title') {
+    // Charters available on the cloud under this device's factor key but
+    // without a local slot. Dedupe by playthroughId — anything already
+    // local is shown in the standard roster instead.
+    const localPlaythroughIds = new Set(
+      savesIndex.map(s => s.playthroughId).filter(Boolean)
+    );
+    const remoteOnlyCharters = remoteCharters.filter(c => !localPlaythroughIds.has(c.id));
     return (
       <Page>
         <TitleScreen
           saves={savesIndex}
+          remoteOnlyCharters={remoteOnlyCharters}
+          remoteLoading={remoteLoading}
+          factorKey={readFactorKey()}
           onNewGame={handleNewGame}
           onContinue={handleContinue}
           onRestore={handleRestore}
           onDeleteSlot={handleDeleteSlot}
+          onResumeRemote={handleResumeRemote}
         />
       </Page>
     );
@@ -11754,16 +12067,6 @@ export default function FactorsCharter() {
   return (
     <>
       <GameHub gs={gs} setGs={setGs} lastSavedAt={lastSavedAt} onReturnToTitle={handleReturnToTitle} onSuccession={handleSuccession} onRenewal={handleRenewal} viewportMode={viewportMode} sync={sync} />
-      {showSyncPrompt && (
-        <FirstLaunchSyncPrompt onChoice={(syncYes) => {
-          setGs(prev => ({
-            ...prev,
-            syncPromptShown: true,
-            syncEnabled: syncYes,
-            playthroughId: syncYes ? generatePlaythroughId() : null,
-          }));
-        }} />
-      )}
       {pendingConflict && (
         <ConflictModal
           localGs={pendingConflict.localGs}

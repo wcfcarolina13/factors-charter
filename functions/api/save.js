@@ -1,14 +1,21 @@
 // Cloudflare Pages Function for cross-device save sync.
 //
-// GET  /api/save?id=<playthrough-id>  → 200 { body, version, savedAt } | 404 | 400 | 429
-// PUT  /api/save?id=<playthrough-id>  body: <save-json>
-//                                      → 200 { version, savedAt } | 4xx
+// GET  /api/save?key=<factor-key>&id=<playthrough-id>  → 200 { body, version, savedAt } | 404 | 400 | 429
+// PUT  /api/save?key=<factor-key>&id=<playthrough-id>  body: <save-json>
+//                                                       → 200 { version, savedAt } | 4xx
 //
 // Storage:
-//   save:<id>   → { body, version, savedAt }   (TTL 365 days, renews per PUT)
-//   rate:<ip>   → counter                       (TTL 60 seconds)
+//   save:<factorKey>:<id>  → { body, version, savedAt }   (TTL 365 days, renews per PUT)
+//   rate:<ip>              → counter                       (TTL 60 seconds)
 //
-// Auth: the playthrough ID is the secret. No accounts.
+//   Per-record KV metadata: { day, factorName, savedAt, version, charterClosed? }
+//   Carried by KV.list({ prefix: "save:<factorKey>:" }) so the factor-saves
+//   endpoint can enumerate a player's charters without N body fetches.
+//
+// Auth: the (factorKey, playthroughId) pair is the secret. No accounts.
+//   - The factor key namespaces a player's charters across devices.
+//   - The playthrough ID names a specific charter under that key.
+//   - Anyone with both can read or write that charter.
 // Rate limit: 60 req/min per IP.
 
 const ID_PATTERN = /^[a-z]+-[a-z]+-[a-z]+-\d{4}$/;
@@ -24,7 +31,7 @@ function jsonResponse(body, status = 200) {
   });
 }
 
-function isValidId(id) {
+function isValidThemedId(id) {
   return typeof id === 'string' && ID_PATTERN.test(id);
 }
 
@@ -38,22 +45,33 @@ async function checkRateLimit(env, ip) {
   return true;
 }
 
+// Construct the canonical KV record key from a (factorKey, playthroughId) pair.
+function recordKey(factorKey, id) {
+  return `save:${factorKey}:${id}`;
+}
+
 export async function onRequest(context) {
   const { request, env } = context;
   const url = new URL(request.url);
+  const factorKey = url.searchParams.get('key');
   const id = url.searchParams.get('id');
   const ip = request.headers.get('cf-connecting-ip') || request.headers.get('x-forwarded-for') || '';
 
-  if (!isValidId(id)) {
-    return jsonResponse({ error: 'invalid id' }, 400);
+  if (!isValidThemedId(factorKey)) {
+    return jsonResponse({ error: 'invalid factor key' }, 400);
+  }
+  if (!isValidThemedId(id)) {
+    return jsonResponse({ error: 'invalid playthrough id' }, 400);
   }
 
   if (!(await checkRateLimit(env, ip))) {
     return jsonResponse({ error: 'rate limit exceeded' }, 429);
   }
 
+  const kvKey = recordKey(factorKey, id);
+
   if (request.method === 'GET') {
-    const raw = await env.SAVES_KV.get(`save:${id}`);
+    const raw = await env.SAVES_KV.get(kvKey);
     if (!raw) return jsonResponse({ error: 'not found' }, 404);
     try {
       const parsed = JSON.parse(raw);
@@ -77,7 +95,7 @@ export async function onRequest(context) {
     }
 
     // Read existing to compute next version
-    const existingRaw = await env.SAVES_KV.get(`save:${id}`);
+    const existingRaw = await env.SAVES_KV.get(kvKey);
     let prevVersion = 0;
     if (existingRaw) {
       try {
@@ -92,8 +110,28 @@ export async function onRequest(context) {
       savedAt: new Date().toISOString(),
     };
 
-    await env.SAVES_KV.put(`save:${id}`, JSON.stringify(record), {
+    // Sidecar metadata for fast listing via KV.list. Caps stringy fields so
+    // metadata stays well under Cloudflare's 1024-byte limit per entry.
+    const factorName = typeof body?.player?.name === 'string' ? body.player.name.slice(0, 80) : '';
+    const metadata = {
+      day: typeof body?.day === 'number' ? body.day : 0,
+      daysRemaining: typeof body?.daysRemaining === 'number' ? body.daysRemaining : 0,
+      location: typeof body?.location === 'string' ? body.location.slice(0, 60) : '',
+      factorName,
+      savedAt: record.savedAt,
+      version: record.version,
+      charterClosed: body?.charterClosed
+        ? {
+            outcome: typeof body.charterClosed.outcome === 'string' ? body.charterClosed.outcome.slice(0, 40) : '',
+            destiny: typeof body.charterClosed.destiny === 'string' ? body.charterClosed.destiny.slice(0, 40) : '',
+            day: typeof body.charterClosed.day === 'number' ? body.charterClosed.day : 0,
+          }
+        : null,
+    };
+
+    await env.SAVES_KV.put(kvKey, JSON.stringify(record), {
       expirationTtl: SAVE_TTL_SECONDS,
+      metadata,
     });
 
     return jsonResponse({ version: record.version, savedAt: record.savedAt }, 200);

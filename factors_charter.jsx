@@ -1019,17 +1019,16 @@ const ensureShape = (gs) => {
   if (!next.player || typeof next.player !== 'object' || !next.player.name) {
     next.player = next.player || { name: 'The Factor', title: 'Factor' };
   }
-  // Sync model: cross-device sync is now implicit via the device's factor key
+  // Sync model: cross-device sync is implicit via the device's factor key
   // (localStorage `factor_key_v1`). Every charter has a playthroughId from
   // birth — there is no opt-in step, no syncEnabled gate. Old saves get one
   // auto-attached here on first load after the upgrade.
   //
-  // syncEnabled / syncPromptShown are kept defaulted-true to satisfy any
-  // legacy code path still reading them; they're effectively dead fields and
-  // can be removed in a future cleanup pass.
+  // The legacy syncEnabled / syncPromptShown fields have been deleted as of
+  // 2026-05-10 — nothing read them anymore. Saves that still carry stale
+  // values keep them as harmless excess JSON; the next save tick strips
+  // them via the natural setGs reducer flow.
   if (!isValidPlaythroughId(next.playthroughId)) next.playthroughId = generatePlaythroughId();
-  if (next.syncEnabled === undefined) next.syncEnabled = true;
-  if (next.syncPromptShown === undefined) next.syncPromptShown = true;
   // Per-charter image gallery: grows as the player encounters scenes that
   // load illustrations. Capped at MAX_GALLERY_ENTRIES to keep gs size sane
   // for the 256 KB sync cap (60 entries × ~400 bytes each ≈ 24 KB).
@@ -4219,11 +4218,10 @@ Yr. obedt. servants, the Court of Directors, in London, &c.`,
 }
 
 function makeSuccessorState(prev, newName) {
-  // Note on sync fields: syncPromptShown / syncEnabled / playthroughId are
-  // intentionally NOT reset here. The player's sync choice persists across
-  // charter generations — succession is the same player on a new save.
-  // Resetting syncPromptShown would re-fire the modal and orphan the prior
-  // charter's cloud copy under a new ID.
+  // Note on sync fields: playthroughId is intentionally NOT reset here.
+  // Succession is the same player on a new save — they share the same
+  // cloud-side record under the device's factor key. Re-minting the
+  // playthroughId would orphan the prior charter's cloud copy.
   const moneyKept = Math.round((prev.money || 0) * 0.6);
 
   // Predecessor becomes a permanent acquaintance — a memory the AI sees in
@@ -4347,9 +4345,8 @@ Yr. obedt. servants, the Court of Directors, in London, &c.`,
 
 function makeRenewedState(prev) {
   // Same Factor; per-charter triggers reset; the rest persists.
-  // Sync fields (syncPromptShown / syncEnabled / playthroughId) intentionally
-  // persist — same player, same sync choice. Resetting would orphan the
-  // prior charter's cloud copy and re-fire the prompt unnecessarily.
+  // playthroughId intentionally persists — same player, same cloud record
+  // under the device's factor key. Re-minting would orphan the prior copy.
   const carryFlags = {};
   for (const [k, v] of Object.entries(prev.flags || {})) {
     if (/LetterSent$/.test(k)) continue;
@@ -5771,9 +5768,12 @@ SCENE CONSTRAINT: This encounter happens on the open water during the voyage, no
 
 USE WHAT IS THERE: If the Open threads, Acquaintances, or Flags above include a name, vessel, location, or matter the Factor is plausibly carrying with him on this leg, PRIORITISE pulling one of them into this scene. A signal from a ship Faulke described, a man Ramdeen named, a packet still sealed, an arrangement with the Brotherhood about to be tested — pick something the player has accumulated and advance, complicate, or resolve it. Only invent a brand-new figure or thread if NONE of the existing state would plausibly surface here.
 
+ENGAGED THREAD: If you DID pull a specific Open thread into this scene, set "engagedThread" to that thread's exact text — copied character-for-character from the Open threads list above. Do NOT paraphrase. The downstream outcome step uses this to decide whether the player's choice may close the thread; an exact-match miss is harmless (the thread just doesn't close), but a paraphrase guarantees no closure. Omit "engagedThread" (or set "") if no specific open thread was pulled in.
+
 Return JSON:
 {
   "prose": "2-3 sentences of period prose. Concrete sensory detail. Plain observation, not metaphor. Set the scene and present a situation requiring a decision.",
+  "engagedThread": "exact thread text from the Open threads list above, or empty string if none",
   "choices": [
     { "label": "5-9 word verb phrase", "seed": "what tonally happens if chosen" },
     { "label": "5-9 word verb phrase", "seed": "what tonally happens if chosen" },
@@ -5833,15 +5833,25 @@ const FALLBACK_OUTCOME_LETTER = [
 async function genOutcome(gs, encounterProse, choice, opts = {}) {
   const isLetter = !!opts.isLetter;
   const isPursue = !!opts.isPursue;
+  const engagedThread = typeof opts.engagedThread === 'string' && opts.engagedThread.trim() ? opts.engagedThread.trim() : '';
   const constraintLine = isLetter
     ? `SCENE CONSTRAINT: This is the Factor writing a reply at his desk. The outcome is what proceeds from the words he writes — no travel, no scenes elsewhere, no time of consequence passing. Set "days" to 0. Do NOT damage the ship.`
     : `SCENE CONSTRAINT: The outcome must follow plainly from the encounter as set up above. Do not introduce new characters or settings unrelated to that scene. The Factor cannot meet home-station characters (Hodge, Dass, the Vizier, Reverend Pyke) outside Bayan-Kor. If the prose involves a storm, gunfire, grounding, etc., you may set shipDamage.`;
   const consequenceRule = isLetter
     ? `CONSEQUENCE: Letter replies often have no immediate mechanical consequence — silence is fine. Leave "money", "reputation", "goods" empty unless the reply explicitly commits the Factor to spending, sending, or speaking against a faction.`
     : `CONSEQUENCE (REQUIRED for voyage / pursue outcomes): The world MUST turn under the Factor's hand. At least ONE of "money", "reputation", "goods", "shipDamage", or "flags" must be non-empty and reflect the choice. Even small bite is real — £8-30 changing hands, ±1-3 reputation, a single commodity gained or lost, a sail torn, a small lasting fact set as a flag. "Days passed and nothing happened" is NOT an acceptable shape; the player chose a path and the path must move the world.`;
-  const closureRule = isPursue
-    ? `CLOSURE: This outcome resolves a "pursue the matter" action on a specific open thread. If the Factor's choice plausibly settles, exhausts, or definitively shifts the thread (so it would be strange to invite him to pursue it again next week), set "closeHook": true — the thread will be removed from the open list. Set "closeHook": false (or omit) when the choice merely nudges the thread along.`
-    : `CLOSURE: This is not a pursue action — leave "closeHook" out of the response.`;
+  // Closure rule: pursue actions ALWAYS bind closeHook to the pursued
+  // thread. Voyage encounters get closure only when the encounter step
+  // signalled engagedThread — meaning the AI explicitly identified an
+  // open thread it was advancing in the scene. Letters can't close hooks.
+  let closureRule;
+  if (isPursue) {
+    closureRule = `CLOSURE: This outcome resolves a "pursue the matter" action on a specific open thread. If the Factor's choice plausibly settles, exhausts, or definitively shifts the thread (so it would be strange to invite him to pursue it again next week), set "closeHook": true — the thread will be removed from the open list. Set "closeHook": false (or omit) when the choice merely nudges the thread along.`;
+  } else if (engagedThread) {
+    closureRule = `CLOSURE: The voyage encounter pulled this specific open thread into play:\n  "${engagedThread}"\nIf the Factor's choice plausibly settles, exhausts, or definitively shifts that thread (so it would be strange to encounter it as an open matter on the next leg), set "closeHook": true. Set false or omit when the choice merely advances or complicates it.`;
+  } else {
+    closureRule = `CLOSURE: This outcome is not bound to a specific open thread — leave "closeHook" out of the response.`;
+  }
   const prompt = `In the encounter: "${encounterProse}"
 The Factor chose: "${choice.label}" (${choice.seed})
 ${stateContext(gs)}
@@ -5863,7 +5873,7 @@ Generate the outcome. Return JSON:
     "reputation": { "company": int, "crown": int, "rajah": int, "pirates": int, "mission": int, "dutch": int },
     "goods": { "commodity_name": int delta },
     "journal": "one-sentence note for the journal in past tense",
-    "hook": "optional: a NEW thread that may return later, or empty string",${isPursue ? `\n    "closeHook": boolean (set true when this choice resolves the pursued thread; see CLOSURE above),` : ''}
+    "hook": "optional: a NEW thread that may return later, or empty string",${(isPursue || engagedThread) ? `\n    "closeHook": boolean (set true when this choice resolves the bound open thread; see CLOSURE above),` : ''}
     "shipDamage": ${isLetter ? 'null  (letters never damage the ship)' : '{ "hull": 0-40, "sails": 0-40 }  // optional; only when prose justifies'},
     "newAcquaintances": [ { "name": "...", "role": "...", "location": "...", "notes": "..." } ],
     "flags": { "key": value }
@@ -7967,9 +7977,16 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
   const handleEncounterChoice = async (choice) => {
     setPending(true);
     setPendingMsg('The hour passes');
-    // Flag pursue outcomes so the model knows it's allowed (and asked) to
-    // signal closeHook when the choice resolves the pursued thread.
-    const opts = encounter?.type === 'pursue' ? { isPursue: true } : {};
+    // Build the closure-mode opts. Pursue outcomes always close the
+    // pursued thread on closeHook=true. Voyage outcomes only allow
+    // closure when genVoyageEncounter signalled an engagedThread (and
+    // it exact-matches an existing open hook — verified at apply time).
+    let opts = {};
+    if (encounter?.type === 'pursue') {
+      opts = { isPursue: true };
+    } else if (encounter?.type === 'voyage' && encounter.engagedThread) {
+      opts = { engagedThread: encounter.engagedThread };
+    }
     const { result, log } = await genOutcome(gs, encounter.prose, choice, opts);
     setPending(false);
     if (log) setGs(prev => ({ ...prev, aiLog: pushAiLog(prev.aiLog, log) }));
@@ -8001,6 +8018,23 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
       let newGs = applyOutcomeChangesPure(gs, outcome.changes);
       // Tick the voyage days (advances day, runs home sim)
       newGs = tickDays(newGs, totalDays);
+      // Voyage hook closure: if the encounter step identified an engagedThread
+      // and the outcome step set closeHook, remove that thread from the open
+      // list. Exact-match against gs.hooks — a paraphrase or stale value just
+      // no-ops harmlessly. Symmetric with the pursue branch below; without
+      // this, only "Pursue this matter" actions could ever close a hook,
+      // even when a voyage scene definitively resolved one.
+      const engagedThread = encounter?.engagedThread;
+      const closingVoyageHook = !!(engagedThread && outcome.changes?.closeHook && newGs.hooks?.includes(engagedThread));
+      if (closingVoyageHook) {
+        const trimmed = engagedThread.slice(0, 80);
+        const ell = engagedThread.length > 80 ? '…' : '';
+        newGs = {
+          ...newGs,
+          hooks: newGs.hooks.filter(h => h !== engagedThread),
+          journal: [...newGs.journal, { day: newGs.day, entry: `Settled the matter of ${trimmed}${ell} at sea.` }],
+        };
+      }
       // Land — apply voyage wear on top of any encounter shipDamage.
       newGs = {
         ...newGs,

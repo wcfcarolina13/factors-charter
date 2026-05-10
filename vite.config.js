@@ -32,6 +32,17 @@ export default defineConfig({
         // install slim; the runtimeCaching rule below makes second
         // encounter instant.
         globIgnores: ['plates/**'],
+        // Without these two flags, a new SW landing in the user's browser
+        // sits in 'waiting' state until every old tab unloads — meaning
+        // a deploy can take a full close-and-reopen of the PWA before
+        // the new bundle is served. Bradley hit this multiple times during
+        // the 2026-05-09/10 playtests (saw old fallback prose after each
+        // ship). skipWaiting promotes the new SW immediately on install;
+        // clientsClaim lets it take control of already-open pages on the
+        // next reload instead of waiting for full unload. Net effect:
+        // future deploys land on one refresh, not three.
+        skipWaiting: true,
+        clientsClaim: true,
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/fonts\.(googleapis|gstatic)\.com\/.*/,

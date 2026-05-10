@@ -4,7 +4,7 @@
 **For:** Bradley (or a fresh Claude session) resuming this project
 **Branch:** `main`
 **Live build:** https://factors-charter.pages.dev (auto-deploys from `main`)
-**Status:** Five branches landed on `main` today. Tests **129/129**; build clean (main 399 KB / 118 KB gz). Workers AI binding action below is still pending.
+**Status:** Five branches landed on `main` today. Tests **129/129**; build clean (main 399 KB / 118 KB gz). Workers AI binding is live — `/api/illustrate` returns 200 + `image/jpeg`, verified 2026-05-09 evening.
 
 > Previous handoff archived in `git log` at commit `145ad16`.
 
@@ -38,20 +38,21 @@ Continuous workflow across two calendar days:
 
 ---
 
-## Required deploy step (image-gen)
+## Image-gen deploy step (CLOSED)
 
-The Workers AI image-gen path is merged and serving in code, but the function fails closed with `503 {"error":"AI binding not configured"}` until you wire the binding:
+The Workers AI `AI` binding is wired in the Cloudflare Pages dashboard. Verified 2026-05-09 evening:
 
-1. Cloudflare dashboard → **Workers & Pages** → **factors-charter** → **Settings** → **Functions** → **Bindings**.
-2. Add an **AI binding**: variable name `AI` (matches `env.AI` in `functions/api/illustrate.js`).
-3. Save. (Binding changes apply to subsequent function invocations — no redeploy required.)
-4. Verify:
-   ```bash
-   curl -sI 'https://factors-charter.pages.dev/api/illustrate?prompt=a%20brigantine%20at%20anchor&seed=42'
-   # expect: HTTP 200 + content-type: image/png
-   ```
+```
+$ curl -s -D - 'https://factors-charter.pages.dev/api/illustrate?prompt=a%20brigantine%20at%20anchor&seed=42' -o /tmp/x.bin
+HTTP/2 200
+content-type: image/jpeg
+content-length: 672994
+cache-control: public, max-age=31536000, immutable
+$ file /tmp/x.bin
+JPEG image data, JFIF standard 1.01, … baseline, precision 8, 1024x1024, components 3
+```
 
-If you skip this step, the in-game illustration shows the existing "could not be reached" message — same UX as the current broken state, no further regression.
+If you ever see `503 {"error":"AI binding not configured"}` again, the binding has been removed; re-add at **Workers & Pages → factors-charter → Settings → Functions → Bindings**, name `AI`. Binding changes apply to subsequent function invocations — no redeploy needed.
 
 ---
 

@@ -5573,15 +5573,20 @@ Return JSON:
 // {prose, journal} pair — prose for the encounter screen, journal for the
 // permanent record. Picked at random on every fallback. Two pools because the
 // letter-reply branch reads at the desk; the encounter branch reads in the world.
+//
+// Most entries carry a small mechanical bite (money / reputation / shipDamage)
+// so the fallback path doesn't read as "nothing ever happens" when the AI
+// fails or returns unparseable JSON. Bite is small (£8-30, ±1-3 rep, light
+// hull/sails) — enough to feel real, not enough to swing a charter.
 const FALLBACK_OUTCOME_ENCOUNTER = [
-  { prose: 'It plays out as you might expect, neither as well nor as ill as feared.', journal: 'A day passed without consequence.' },
-  { prose: 'The matter resolves itself in the way of small troubles.', journal: 'A small matter, of no weight to the books.' },
-  { prose: 'Nothing is lost, nothing is gained. The day’s books match the morning’s.', journal: 'The work moved a measure forward.' },
-  { prose: 'The work goes on. The hands take their pay; the matter is closed.', journal: 'Closed the day’s affair without entry to the ledger.' },
-  { prose: 'A small affair, soon over.', journal: 'Quiet day at the godown.' },
-  { prose: 'The sun moves; the wind holds; the matter passes.', journal: 'The matter is in hand. It will keep.' },
-  { prose: 'Set down, taken up, set down again. So the day went.', journal: 'No event of note.' },
-  { prose: 'The thing is settled before the second bell.', journal: 'Day saw little to remember. The work continues.' },
+  { prose: 'It plays out as you might expect, neither as well nor as ill as feared. A small purse changes hands at the close.', journal: 'A small disbursement settled the matter.', money: -10 },
+  { prose: 'The matter resolves itself in the way of small troubles — a clerk’s fee here, a private word there.', journal: 'Closed the day’s affair at the cost of a few crowns.', money: -8 },
+  { prose: 'A merchant of the bazaar settles a long account in yr. favour, slipping the silver across with no ceremony.', journal: 'A small windfall from a closed account.', money: 18 },
+  { prose: 'The work goes on. The hands take their pay; the matter is closed before the second bell, and a private gratuity finds its way to the strongbox.', journal: 'Closed the day’s affair to small advantage.', money: 12 },
+  { prose: 'A small affair, soon over. Word goes back to Madras, and not unfavourably.', journal: 'A small word reaches the Honourable Company.', reputation: { company: 2 } },
+  { prose: 'The sun moves; the wind holds; the matter passes. A native trader takes some quiet offence at the price set; he will remember the figure.', journal: 'A small ill word goes back to the bazaar.', reputation: { rajah: -1 } },
+  { prose: 'Set down, taken up, set down again. The yardarm groans through the swell and a reefed sail tears at the foot — work for the carpenter when the watch ends.', journal: 'A reefed sail tore in the swell. Work for the carpenter.', shipDamage: { sails: 6 } },
+  { prose: 'The thing is settled before the second bell, but a man at the wharves whispers thanks to the Brotherhood for the quiet of it.', journal: 'Day closed quietly. The Brotherhood is paid in courtesy.', reputation: { pirates: 1 } },
 ];
 
 const FALLBACK_OUTCOME_LETTER = [
@@ -5597,14 +5602,25 @@ const FALLBACK_OUTCOME_LETTER = [
 
 async function genOutcome(gs, encounterProse, choice, opts = {}) {
   const isLetter = !!opts.isLetter;
+  const isPursue = !!opts.isPursue;
   const constraintLine = isLetter
     ? `SCENE CONSTRAINT: This is the Factor writing a reply at his desk. The outcome is what proceeds from the words he writes — no travel, no scenes elsewhere, no time of consequence passing. Set "days" to 0. Do NOT damage the ship.`
     : `SCENE CONSTRAINT: The outcome must follow plainly from the encounter as set up above. Do not introduce new characters or settings unrelated to that scene. The Factor cannot meet home-station characters (Hodge, Dass, the Vizier, Reverend Pyke) outside Bayan-Kor. If the prose involves a storm, gunfire, grounding, etc., you may set shipDamage.`;
+  const consequenceRule = isLetter
+    ? `CONSEQUENCE: Letter replies often have no immediate mechanical consequence — silence is fine. Leave "money", "reputation", "goods" empty unless the reply explicitly commits the Factor to spending, sending, or speaking against a faction.`
+    : `CONSEQUENCE (REQUIRED for voyage / pursue outcomes): The world MUST turn under the Factor's hand. At least ONE of "money", "reputation", "goods", "shipDamage", or "flags" must be non-empty and reflect the choice. Even small bite is real — £8-30 changing hands, ±1-3 reputation, a single commodity gained or lost, a sail torn, a small lasting fact set as a flag. "Days passed and nothing happened" is NOT an acceptable shape; the player chose a path and the path must move the world.`;
+  const closureRule = isPursue
+    ? `CLOSURE: This outcome resolves a "pursue the matter" action on a specific open thread. If the Factor's choice plausibly settles, exhausts, or definitively shifts the thread (so it would be strange to invite him to pursue it again next week), set "closeHook": true — the thread will be removed from the open list. Set "closeHook": false (or omit) when the choice merely nudges the thread along.`
+    : `CLOSURE: This is not a pursue action — leave "closeHook" out of the response.`;
   const prompt = `In the encounter: "${encounterProse}"
 The Factor chose: "${choice.label}" (${choice.seed})
 ${stateContext(gs)}
 
 ${constraintLine}
+
+${consequenceRule}
+
+${closureRule}
 
 USE WHAT IS THERE: Where the outcome would naturally touch the Open threads, Acquaintances, or Flags listed above, do — refine an existing thread rather than parallel-track a new one. If the choice resolves a hook, you may leave the "hook" field empty (the open thread is the one that closes). Add a NEW hook only when the action genuinely opens a new thread the world would not otherwise hold.
 
@@ -5612,23 +5628,34 @@ Generate the outcome. Return JSON:
 {
   "prose": "2-3 sentences of period prose describing what happens. Concrete observation. Avoid metaphor.",
   "changes": {
-    "money": integer delta (often 0; range -200 to +200),
+    "money": integer delta (range -200 to +200; often non-zero for voyage/pursue, often zero for letter),
     "days": integer days passed (${isLetter ? '0 only' : '0-3'}),
     "reputation": { "company": int, "crown": int, "rajah": int, "pirates": int, "mission": int, "dutch": int },
     "goods": { "commodity_name": int delta },
     "journal": "one-sentence note for the journal in past tense",
-    "hook": "optional: a thread that may return later, or empty string",
+    "hook": "optional: a NEW thread that may return later, or empty string",${isPursue ? `\n    "closeHook": boolean (set true when this choice resolves the pursued thread; see CLOSURE above),` : ''}
     "shipDamage": ${isLetter ? 'null  (letters never damage the ship)' : '{ "hull": 0-40, "sails": 0-40 }  // optional; only when prose justifies'},
     "newAcquaintances": [ { "name": "...", "role": "...", "location": "...", "notes": "..." } ],
     "flags": { "key": value }
   }
 }
-Reputation deltas should be small (-15 to +15). Only include factions that actually shift. Goods can include any of: pepper, cinnamon, calico, silver, sandalwood, opium, rice, rum, saltpetre. Use newAcquaintances when the scene introduces a memorable named figure who could plausibly recur. Flags are sparse and should describe lasting narrative state. Omit any of the optional fields you do not need.`;
+Reputation deltas should be small (±1 to ±15). Only include factions that actually shift. Goods can include any of: pepper, cinnamon, calico, silver, sandalwood, opium, rice, rum, saltpetre. Use newAcquaintances when the scene introduces a memorable named figure who could plausibly recur. Flags are sparse and should describe lasting narrative state. Omit any of the optional fields you do not need — but obey CONSEQUENCE above for voyage and pursue outcomes.`;
   const pool = isLetter ? FALLBACK_OUTCOME_LETTER : FALLBACK_OUTCOME_ENCOUNTER;
   const pick = pool[Math.floor(Math.random() * pool.length)];
+  // Per-entry overrides (money, reputation, shipDamage, etc.) merge over the
+  // baseline so encounter fallbacks can carry small mechanical bite. Letter
+  // fallbacks remain bite-free — replies at the desk legitimately do nothing.
   const fallback = {
     prose: pick.prose,
-    changes: { money: 0, days: isLetter ? 0 : 1, reputation: {}, goods: {}, journal: pick.journal, hook: '' },
+    changes: {
+      money: isLetter ? 0 : (pick.money || 0),
+      days: isLetter ? 0 : 1,
+      reputation: isLetter ? {} : (pick.reputation || {}),
+      goods: isLetter ? {} : (pick.goods || {}),
+      shipDamage: isLetter ? undefined : (pick.shipDamage || undefined),
+      journal: pick.journal,
+      hook: '',
+    },
   };
   const call = await callClaude(prompt);
   const result = call.parsed || fallback;
@@ -6130,21 +6157,26 @@ Generate a scene that brings the thread above into play. Use the named figures, 
 
 This is an active investigation by the Factor, not a passive happening. The choices below should reflect what HE can decide to do about the thread now that it is before him.
 
+CHOICE DISCIPLINE: Each choice MUST move the thread somewhere — close it, deepen it, or branch it. Avoid "set the matter aside" / "do nothing" / "leave well enough alone" choices, which produce empty outcomes and invite the player to re-pursue the same thread futilely. At least one of the three choices should plausibly RESOLVE the thread (so the resulting outcome can set closeHook: true). The other two should advance or complicate it in distinct directions. Three meaningful paths, never three flavours of the same retreat.
+
 Return JSON:
 {
   "prose": "2-3 sentences of period prose, concrete observation. Set the scene. The thread above must be central, not garnish.",
   "choices": [
-    { "label": "5-9 word verb phrase", "seed": "what tonally happens if chosen" },
-    { "label": "5-9 word verb phrase", "seed": "what tonally happens if chosen" },
-    { "label": "5-9 word verb phrase", "seed": "what tonally happens if chosen" }
+    { "label": "5-9 word verb phrase — an action that changes the thread", "seed": "what tonally happens; hint resolution vs. complication" },
+    { "label": "5-9 word verb phrase — an action that changes the thread", "seed": "what tonally happens; hint resolution vs. complication" },
+    { "label": "5-9 word verb phrase — an action that changes the thread", "seed": "what tonally happens; hint resolution vs. complication" }
   ]
 }`;
+  // Fallback: at least one choice plausibly closes the thread, so the
+  // closeHook path can fire even when the AI is unreachable. No
+  // "do nothing" choice — the player is here because they chose to act.
   const fallback = {
-    prose: `You apply yourself to the matter — ${thread.slice(0, 120)}${thread.length > 120 ? '…' : ''} — but the day yields little beyond a confirmation of what was already supposed.`,
+    prose: `You apply yourself to the matter — ${thread.slice(0, 120)}${thread.length > 120 ? '…' : ''} — and find a foothold. There are paths now where there was only the question.`,
     choices: [
-      { label: 'Press the matter further at present', seed: 'second attempt; small effect' },
-      { label: 'Set the matter aside for another day', seed: 'no change; thread remains open' },
-      { label: 'Carry the matter to a confidant', seed: 'word to Hodge or Dass; small ripple' },
+      { label: 'Press hard, settle the matter today', seed: 'closes the thread; possible cost' },
+      { label: 'Sound out a confederate before acting', seed: 'opens a smaller thread; small rep ripple' },
+      { label: 'Pursue it through the bazaar quietly', seed: 'small money cost; thread complicates' },
     ],
   };
   const call = await callClaude(prompt);
@@ -7623,7 +7655,10 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
   const handleEncounterChoice = async (choice) => {
     setPending(true);
     setPendingMsg('The hour passes');
-    const { result, log } = await genOutcome(gs, encounter.prose, choice);
+    // Flag pursue outcomes so the model knows it's allowed (and asked) to
+    // signal closeHook when the choice resolves the pursued thread.
+    const opts = encounter?.type === 'pursue' ? { isPursue: true } : {};
+    const { result, log } = await genOutcome(gs, encounter.prose, choice, opts);
     setPending(false);
     if (log) setGs(prev => ({ ...prev, aiLog: pushAiLog(prev.aiLog, log) }));
     setOutcome({ ...result, encounter });
@@ -7681,9 +7716,18 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
       const days = Math.max(0, Math.min(3, outcome.changes.days || 1));
       let newGs = applyOutcomeChangesPure(gs, outcome.changes);
       newGs = tickDays(newGs, days);
+      // Hook closure: when the AI signals the thread is resolved, drop it
+      // from the open list. Without this, players are invited back to
+      // pursue the same thread forever even after settling it.
+      const closing = !!outcome.changes.closeHook;
+      const trimmedThread = (encounter.thread || '').slice(0, 80);
+      const ellipsis = (encounter.thread || '').length > 80 ? '…' : '';
       newGs = {
         ...newGs,
-        journal: [...newGs.journal, { day: newGs.day, entry: `Pursued the matter of ${encounter.thread.slice(0, 80)}${encounter.thread.length > 80 ? '…' : ''}` }],
+        hooks: closing ? newGs.hooks.filter(h => h !== encounter.thread) : newGs.hooks,
+        journal: [...newGs.journal, { day: newGs.day, entry: closing
+          ? `Settled the matter of ${trimmedThread}${ellipsis}`
+          : `Pursued the matter of ${trimmedThread}${ellipsis}` }],
       };
       setGs(newGs);
       setEncounter(null);

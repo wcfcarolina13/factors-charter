@@ -83,4 +83,16 @@ export function markLoaded(storage, hash, url) {
   }
 }
 
+// Force-overwrite the cache entry for a given hash. Used by the gallery's
+// regenerate flow: the player bumps the seed to get a different image, and
+// the in-game InlineIllustration must pick up the new URL on its next
+// render — markLoaded is first-writer-wins by design and won't replace,
+// so we need a separate "I really mean it" path.
+export function setCacheEntry(storage, hash, url) {
+  if (!hash || !url) return;
+  const cache = readCache(storage);
+  cache[hash] = { url, fetchedAt: Date.now(), viewedAt: Date.now() };
+  writeCache(storage, cache);
+}
+
 export { CACHE_KEY, MAX_ENTRIES, buildIllustrationUrl, readCache, writeCache };

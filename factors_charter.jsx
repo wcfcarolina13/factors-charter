@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { detectMode as detectViewportMode, setOverride as setViewportOverride, DESKTOP_QUERY as VIEWPORT_DESKTOP_QUERY } from './src/util/viewport.js';
-import { getOrFetch as getOrFetchIllustration, markLoaded as markIllustrationLoaded } from './src/util/illustration-cache.js';
+import { getOrFetch as getOrFetchIllustration, markLoaded as markIllustrationLoaded, setCacheEntry as setIllustrationCacheEntry } from './src/util/illustration-cache.js';
+import { stableHash, cleanProse } from './src/util/text.js';
 import { STYLE_PREFIX } from './src/util/style-prefix.js';
 import { generatePlaythroughId, isValidPlaythroughId } from './src/util/playthrough-id.js';
 import { detectConflict } from './src/util/sync-conflict.js';
@@ -55,6 +56,124 @@ function ensureFactorKey() {
   }
   return k;
 }
+
+// ─────────── ILLUSTRATION GALLERY (per-charter image log) ───────────
+//
+// Every successful illustration load gets recorded in gs.illustrations[]
+// (capped LRU). The gallery modal reads this list. Regenerate bumps the
+// seed and overrides the local illustration cache so the in-game scene
+// also picks up the new image. Discard is sticky — the entry is marked
+// deletedByPlayer rather than removed, so re-encountering the scene
+// doesn't silently re-add it.
+
+const MAX_GALLERY_ENTRIES = 60;
+
+// Build the deterministic /api/illustrate URL for a (fullPrompt, seed)
+// pair. Same shape the InlineIllustration / IllustrationModal paths use,
+// so an URL recorded here will hit the same R2-cached image.
+function buildIllustrateUrl(fullPrompt, seed) {
+  return `/api/illustrate?prompt=${encodeURIComponent(fullPrompt)}&seed=${seed}`;
+}
+
+// Stable id + canonical seed for a piece of prose. Mirrors the keying
+// inside src/util/illustration-cache.js so the gallery and the in-game
+// cache agree on which scene maps to which image.
+function illustrationIdForProse(prose) {
+  const clean = cleanProse(prose);
+  if (!clean) return null;
+  const id = stableHash(clean);
+  const seed = parseInt(id, 36) || 1;
+  const fullPrompt = STYLE_PREFIX + clean;
+  return { id, seed, fullPrompt, clean };
+}
+
+// Add (or update viewedAt on) an illustration entry for this scene.
+// No-op if the entry already exists OR if the player previously discarded
+// it — discard is sticky and we don't silently re-add. The capped LRU
+// preserves most-recent entries; the cap is generous enough that even a
+// long campaign won't lose much.
+function recordIllustrationInGs(gs, prose) {
+  const meta = illustrationIdForProse(prose);
+  if (!meta) return gs;
+  const list = Array.isArray(gs.illustrations) ? gs.illustrations : [];
+  const existing = list.find(i => i.id === meta.id);
+  if (existing) {
+    // Bump viewedAt to keep it fresh in the LRU. Don't reset deletedByPlayer.
+    return {
+      ...gs,
+      illustrations: list.map(i => i.id === meta.id ? { ...i, viewedAt: Date.now() } : i),
+    };
+  }
+  const entry = {
+    id: meta.id,
+    prose: meta.clean.slice(0, 220),  // capped for save-size sanity
+    fullPrompt: meta.fullPrompt.slice(0, 1024),
+    seed: meta.seed,
+    url: buildIllustrateUrl(meta.fullPrompt, meta.seed),
+    day: gs.day || 0,
+    capturedAt: Date.now(),
+    viewedAt: Date.now(),
+  };
+  // Newest first; cap to MAX_GALLERY_ENTRIES (drop oldest by capturedAt).
+  const next = [entry, ...list];
+  if (next.length > MAX_GALLERY_ENTRIES) {
+    next.sort((a, b) => (b.capturedAt || 0) - (a.capturedAt || 0));
+    next.length = MAX_GALLERY_ENTRIES;
+  }
+  return { ...gs, illustrations: next };
+}
+
+// Bump the seed deterministically (Knuth multiplicative-style mix into
+// 31-bit positive range) so a regenerate yields a different image but
+// the same prose still maps to the same gallery slot id. Updates both
+// the gs entry and the device-local illustration cache so subsequent
+// in-game encounters of the scene render the regenerated image.
+function nextRegenerationSeed(seed) {
+  const next = (Math.abs(Number(seed) || 1) * 2654435761) % 2147483647;
+  return next || 1;
+}
+
+function regenerateIllustrationInGs(gs, illustrationId) {
+  const list = Array.isArray(gs.illustrations) ? gs.illustrations : [];
+  const ill = list.find(i => i.id === illustrationId);
+  if (!ill) return gs;
+  const newSeed = nextRegenerationSeed(ill.seed);
+  const newUrl = buildIllustrateUrl(ill.fullPrompt, newSeed);
+  // Keep the in-game illustration cache in lock-step with the gallery —
+  // without this, the next encounter of the scene would render the OLD
+  // image because the cache is keyed by prose-hash and stores the seed
+  // inside the URL. setCacheEntry is the "I really mean it" overwrite.
+  if (typeof window !== 'undefined') {
+    try { setIllustrationCacheEntry(window.localStorage, illustrationId, newUrl); }
+    catch (e) { /* private mode etc. — gallery still updates */ }
+  }
+  return {
+    ...gs,
+    illustrations: list.map(i => i.id === illustrationId
+      ? { ...i, seed: newSeed, url: newUrl, regeneratedAt: Date.now(), deletedByPlayer: false, deletedAt: null }
+      : i),
+  };
+}
+
+// Soft-discard: keeps the entry in the list with a flag, so re-encountering
+// the scene doesn't silently re-add it. The gallery filters discarded
+// entries from the visible grid. Cap survival is unaffected — discarded
+// entries still count against MAX_GALLERY_ENTRIES (intentional; over time
+// the LRU cycles them out without the player having to think about it).
+function discardIllustrationInGs(gs, illustrationId) {
+  const list = Array.isArray(gs.illustrations) ? gs.illustrations : [];
+  return {
+    ...gs,
+    illustrations: list.map(i => i.id === illustrationId
+      ? { ...i, deletedByPlayer: true, deletedAt: Date.now() }
+      : i),
+  };
+}
+
+// Context for plumbing the recorder down to the illustration components
+// without prop-drilling through every encounter / arrival / letter view.
+// GameHub provides; InlineIllustration and IllustrationModal consume.
+const IllustrationRecorderContext = React.createContext(null);
 
 // React hook wrapping the viewport detection. Subscribes to media-query
 // changes and to localStorage changes (so toggling the override in one tab
@@ -911,6 +1030,12 @@ const ensureShape = (gs) => {
   if (!isValidPlaythroughId(next.playthroughId)) next.playthroughId = generatePlaythroughId();
   if (next.syncEnabled === undefined) next.syncEnabled = true;
   if (next.syncPromptShown === undefined) next.syncPromptShown = true;
+  // Per-charter image gallery: grows as the player encounters scenes that
+  // load illustrations. Capped at MAX_GALLERY_ENTRIES to keep gs size sane
+  // for the 256 KB sync cap (60 entries × ~400 bytes each ≈ 24 KB).
+  // Each entry: { id, prose, fullPrompt, seed, url, day, capturedAt,
+  //               regeneratedAt?, deletedByPlayer?, deletedAt? }
+  if (!Array.isArray(next.illustrations)) next.illustrations = [];
   if (!next.rivals) {
     next.rivals = makeInitialRivals();
   }
@@ -7496,6 +7621,14 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
   const [awayDigest, setAwayDigest] = useState(null);
   const [openLetterId, setOpenLetterId] = useState(null);
   const [scriptedArrival, setScriptedArrival] = useState(null); // { encounter, port }
+  const [galleryOpen, setGalleryOpen] = useState(false);
+
+  // Recorder for the per-charter image gallery. Stable identity so it
+  // doesn't churn the IllustrationRecorderContext consumers' effects.
+  // Reads `setGs` lazily via the closure so the latest reducer always wins.
+  const recordIllustration = React.useCallback((prose) => {
+    setGs(prev => recordIllustrationInGs(prev, prose));
+  }, [setGs]);
 
   // The very first time the game proper begins (after the opening sequence),
   // route the player straight into the unread Director letter so they cannot miss it.
@@ -8436,6 +8569,7 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
   const atHome = gs.location === 'Bayan-Kor';
 
   return (
+    <IllustrationRecorderContext.Provider value={recordIllustration}>
     <Page>
       <div style={{ maxWidth: '64rem', margin: '0 auto', padding: '1.25rem 1.0rem', width: '100%' }}>
         <Header
@@ -8445,6 +8579,7 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
           onRenewal={onRenewal}
           viewportMode={viewportMode}
           sync={sync}
+          onOpenGallery={() => setGalleryOpen(true)}
         />
         <Tabs tab={tab} setTab={setTab} unread={gs.letters.filter(l => !l.read).length} atHome={atHome} viewportMode={viewportMode} />
         <div className="parchment" style={{ padding: '1.25rem', minHeight: '24rem', background: 'rgba(255,253,245,0.4)' }}>
@@ -8475,7 +8610,16 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
         </div>
         <ProvisionsDrawer gs={gs} setGs={setGs} lastSavedAt={lastSavedAt} />
       </div>
+      {galleryOpen && (
+        <GalleryModal
+          gs={gs}
+          onClose={() => setGalleryOpen(false)}
+          onRegenerate={(id) => setGs(prev => regenerateIllustrationInGs(prev, id))}
+          onDiscard={(id) => setGs(prev => discardIllustrationInGs(prev, id))}
+        />
+      )}
     </Page>
+    </IllustrationRecorderContext.Provider>
   );
 }
 
@@ -9049,6 +9193,216 @@ function FactorKeyModal({ onClose, onChange }) {
   );
 }
 
+// ─────────── GALLERY MODAL ───────────
+//
+// Per-charter image gallery. Reads gs.illustrations[] (populated whenever
+// an InlineIllustration or IllustrationModal successfully loads) and
+// renders a thumbnail grid. Tap-to-enlarge → opens an inline lightbox.
+// Each entry has Regenerate (bumps seed → fresh image; updates the in-game
+// cache too so subsequent encounters render the new one) and Discard
+// (sticky soft-delete; entry stays in gs to prevent silent re-add but
+// hides from the grid).
+//
+// Thumbnails use loading="lazy" so a 60-image gallery doesn't fetch all
+// 60 × 650 KB JPEGs the moment the modal opens — the browser fetches as
+// the player scrolls. Cloudflare R2 + the SW caches keep repeat opens
+// instant.
+
+function GalleryModal({ gs, onClose, onRegenerate, onDiscard }) {
+  const all = Array.isArray(gs?.illustrations) ? gs.illustrations : [];
+  const visible = all.filter(i => !i.deletedByPlayer);
+  const sorted = [...visible].sort((a, b) => (b.capturedAt || 0) - (a.capturedAt || 0));
+  const [enlarged, setEnlarged] = React.useState(null); // illustration entry
+  const [confirmingDiscard, setConfirmingDiscard] = React.useState(null); // id
+
+  const totalCount = all.length;
+  const visibleCount = visible.length;
+
+  const handleRegenerate = (id) => {
+    onRegenerate && onRegenerate(id);
+    // Close the lightbox so the new image gets pulled fresh on next open.
+    if (enlarged?.id === id) setEnlarged(null);
+  };
+
+  const handleDiscard = (id) => {
+    onDiscard && onDiscard(id);
+    setConfirmingDiscard(null);
+    if (enlarged?.id === id) setEnlarged(null);
+  };
+
+  return (
+    <div
+      style={{
+        position: 'fixed', inset: 0, zIndex: 200,
+        background: 'rgba(20,12,4,0.65)',
+        display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
+        padding: '1rem', overflowY: 'auto',
+      }}
+      onClick={onClose}
+    >
+      <div
+        className="parchment"
+        style={{
+          maxWidth: '64rem', width: '100%',
+          padding: '1.4rem 1.6rem',
+          background: '#f0e3c4',
+          boxShadow: '0 4px 16px rgba(20,12,4,0.5)',
+          border: '1px solid rgba(74,44,20,0.4)',
+          marginTop: '1rem', marginBottom: '1rem',
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.4rem' }}>
+          <div className="display" style={{ fontSize: '1.05em', color: '#5c1a08' }}>
+            ✦ ILLUSTRATION GALLERY
+          </div>
+          <button className="ghost-button-sm" onClick={onClose} aria-label="Close gallery">✕</button>
+        </div>
+        <p style={{ fontSize: '0.85em', color: '#4a3220', fontStyle: 'italic', marginBottom: '1rem' }}>
+          Every scene the Factor has illustrated, kept against the day. Tap an image to enlarge.
+          Regenerate fr. a different seed if the rendering does not please you.
+          {visibleCount === 0 && totalCount > 0 && ` (${totalCount - visibleCount} discarded.)`}
+        </p>
+
+        {visibleCount === 0 && (
+          <div style={{ padding: '2rem 1rem', textAlign: 'center', color: '#6b4423', fontStyle: 'italic' }}>
+            No illustrations yet. Open an encounter or letter that draws a scene, and it will be recorded here.
+          </div>
+        )}
+
+        {visibleCount > 0 && (
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(11rem, 1fr))',
+            gap: '0.7rem',
+          }}>
+            {sorted.map((ill) => (
+              <div
+                key={ill.id}
+                style={{
+                  background: 'rgba(255,253,245,0.55)',
+                  border: '1px solid rgba(74,44,20,0.3)',
+                  display: 'flex', flexDirection: 'column',
+                  cursor: 'pointer',
+                }}
+                onClick={() => setEnlarged(ill)}
+              >
+                <div style={{
+                  width: '100%',
+                  aspectRatio: '3 / 2',
+                  background: '#d9c596',
+                  overflow: 'hidden',
+                  position: 'relative',
+                }}>
+                  <img
+                    src={ill.url}
+                    alt="Scene illustration"
+                    loading="lazy"
+                    style={{
+                      width: '100%', height: '100%',
+                      objectFit: 'cover',
+                      display: 'block',
+                    }}
+                  />
+                  {ill.regeneratedAt && (
+                    <div style={{
+                      position: 'absolute', top: '0.3rem', right: '0.3rem',
+                      background: 'rgba(92,26,8,0.8)', color: '#f0e3c4',
+                      fontSize: '0.7em', padding: '0.1rem 0.4rem',
+                      fontStyle: 'italic',
+                    }}>
+                      regenerated
+                    </div>
+                  )}
+                </div>
+                <div style={{ padding: '0.5rem 0.6rem' }}>
+                  <div style={{ fontSize: '0.78em', color: '#6b4423', letterSpacing: '0.04em', marginBottom: '0.2rem' }}>
+                    DAY {ill.day || 0}
+                  </div>
+                  <div style={{ fontSize: '0.82em', color: '#2a1a0a', fontStyle: 'italic', lineHeight: 1.35,
+                    display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+                  }}>
+                    {ill.prose}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Lightbox + per-image actions */}
+      {enlarged && (
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 210,
+            background: 'rgba(10,6,2,0.88)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: '1rem', flexDirection: 'column',
+          }}
+          onClick={() => { setEnlarged(null); setConfirmingDiscard(null); }}
+        >
+          <div
+            style={{
+              maxWidth: '52rem', width: '100%',
+              display: 'flex', flexDirection: 'column', gap: '0.6rem',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <img
+              src={enlarged.url}
+              alt="Enlarged scene"
+              style={{
+                width: '100%',
+                maxHeight: '70vh',
+                objectFit: 'contain',
+                background: '#1a0f04',
+                border: '1px solid rgba(240,227,196,0.3)',
+              }}
+            />
+            <div className="parchment" style={{
+              padding: '0.8rem 1rem',
+              background: 'rgba(255,253,245,0.95)',
+              border: '1px solid rgba(74,44,20,0.4)',
+            }}>
+              <div style={{ fontSize: '0.78em', color: '#6b4423', letterSpacing: '0.04em', marginBottom: '0.3rem' }}>
+                DAY {enlarged.day || 0} &middot; SEED {enlarged.seed}
+                {enlarged.regeneratedAt && ' · regenerated'}
+              </div>
+              <div style={{ fontSize: '0.92em', color: '#2a1a0a', fontStyle: 'italic', lineHeight: 1.5, marginBottom: '0.7rem' }}>
+                {enlarged.prose}
+              </div>
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                {confirmingDiscard === enlarged.id ? (
+                  <>
+                    <span style={{ fontSize: '0.85em', color: '#5c1a08', fontStyle: 'italic', alignSelf: 'center', marginRight: 'auto' }}>
+                      Discard from gallery? The scene can be re-illustrated next time it appears.
+                    </span>
+                    <button className="ghost-button-sm" onClick={() => setConfirmingDiscard(null)}>Keep</button>
+                    <button className="ghost-button-sm" style={{ color: '#8b1a1a', borderColor: '#8b1a1a' }} onClick={() => handleDiscard(enlarged.id)}>
+                      Yes, discard
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button className="ghost-button-sm" onClick={() => setConfirmingDiscard(enlarged.id)}>
+                      Discard
+                    </button>
+                    <button className="ghost-button" onClick={() => handleRegenerate(enlarged.id)}>
+                      ✦ Regenerate (new seed)
+                    </button>
+                    <button className="wax-button" onClick={() => setEnlarged(null)}>Close</button>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Conflict modal — shown when both this device and the cloud have progressed
 // since the last sync. Player picks a side; the discarded version is
 // auto-downloaded as a Manuscript JSON before the choice commits, so a wrong
@@ -9135,6 +9489,15 @@ function IllustrationModal({ prose, onClose }) {
   const [blobUrl, setBlobUrl] = useState(null);
   const [copyFlash, setCopyFlash] = useState('');
   const taRef = useRef(null);
+  const recordIllustration = React.useContext(IllustrationRecorderContext);
+
+  // Same gallery-recording effect as InlineIllustration. Fires once per
+  // open if the image actually rendered.
+  useEffect(() => {
+    if (imgState === 'loaded' && recordIllustration && prose) {
+      recordIllustration(prose);
+    }
+  }, [imgState, prose, recordIllustration]);
 
   const cleanProse = (prose || '').replace(/\s+/g, ' ').trim().slice(0, 320);
   const fullPrompt = STYLE_PREFIX + cleanProse;
@@ -9342,6 +9705,16 @@ function InlineIllustration({ prose }) {
   const { url, status, hash } = getOrFetchIllustration(storage, prose);
   const [imgState, setImgState] = useState('loading');
   const [blobUrl, setBlobUrl] = useState(null);
+  const recordIllustration = React.useContext(IllustrationRecorderContext);
+
+  // Record to the gallery once the image is confirmed loaded. Done here
+  // (after the render succeeds) rather than on mount so failed renders
+  // don't litter the gallery with broken thumbnails.
+  useEffect(() => {
+    if (imgState === 'loaded' && recordIllustration && prose) {
+      recordIllustration(prose);
+    }
+  }, [imgState, prose, recordIllustration]);
 
   // Fetch the image bytes with explicit 60s timeout. The browser-internal
   // abort heuristic on slow networks was tripping <img onError> before the
@@ -9597,7 +9970,7 @@ function SyncBadge({ gs, sync }) {
   );
 }
 
-function Header({ gs, onReturnToTitle, onSuccession, onRenewal, viewportMode, sync }) {
+function Header({ gs, onReturnToTitle, onSuccession, onRenewal, viewportMode, sync, onOpenGallery }) {
   const [confirmingSuccession, setConfirmingSuccession] = useState(false);
   const [successorName, setSuccessorName] = useState('');
   const [confirmingRenewal, setConfirmingRenewal] = useState(false);
@@ -9837,6 +10210,16 @@ function Header({ gs, onReturnToTitle, onSuccession, onRenewal, viewportMode, sy
             }}
           >
             ⁂ Factor key (cross-device)
+          </button>
+          <button
+            className="ghost-button"
+            style={{ width: '100%', textAlign: 'left', marginBottom: '0.3rem' }}
+            onClick={() => {
+              onOpenGallery && onOpenGallery();
+              setMenuOpen(false);
+            }}
+          >
+            ✦ Image gallery{Array.isArray(gs?.illustrations) && gs.illustrations.filter(i => !i.deletedByPlayer).length > 0 ? ` (${gs.illustrations.filter(i => !i.deletedByPlayer).length})` : ''}
           </button>
           <button
             className="ghost-button"

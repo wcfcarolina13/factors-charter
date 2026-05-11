@@ -175,6 +175,12 @@ function discardIllustrationInGs(gs, illustrationId) {
 // GameHub provides; InlineIllustration and IllustrationModal consume.
 const IllustrationRecorderContext = React.createContext(null);
 
+// The current charter's gs.illustrations list, exposed so IllustrationModal
+// can detect "this scene has been illustrated before" and skip the manual
+// "Try in-game illustration" click. Default [] keeps the consumer safe when
+// no provider is mounted (tests, isolated previews).
+const IllustrationsListContext = React.createContext([]);
+
 // React hook wrapping the viewport detection. Subscribes to media-query
 // changes and to localStorage changes (so toggling the override in one tab
 // updates other tabs of the same site). Returns 'mobile' | 'desktop'.
@@ -8604,6 +8610,7 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
 
   return (
     <IllustrationRecorderContext.Provider value={recordIllustration}>
+    <IllustrationsListContext.Provider value={gs.illustrations || []}>
     <Page>
       <div style={{ maxWidth: '64rem', margin: '0 auto', padding: '1.25rem 1.0rem', width: '100%' }}>
         <Header
@@ -8653,6 +8660,7 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
         />
       )}
     </Page>
+    </IllustrationsListContext.Provider>
     </IllustrationRecorderContext.Provider>
   );
 }
@@ -9518,12 +9526,27 @@ function ConflictModal({ localGs, remoteRecord, onResolve }) {
 }
 
 function IllustrationModal({ prose, onClose }) {
-  const [tryImage, setTryImage] = useState(false);
-  const [imgState, setImgState] = useState('idle'); // 'idle' | 'loading' | 'loaded' | 'failed'
+  const recordIllustration = React.useContext(IllustrationRecorderContext);
+  const illustrationsList = React.useContext(IllustrationsListContext);
+
+  // If this scene already has a non-discarded entry in the gallery, the
+  // image has been generated and viewed before — skip the manual "Try
+  // in-game illustration" click and start fetching on open. The fetch
+  // still hits the same /api/illustrate URL; Cloudflare R2 caches the
+  // result so the second view is fast.
+  const hasExistingIllustration = (() => {
+    const meta = illustrationIdForProse(prose);
+    if (!meta) return false;
+    return (illustrationsList || []).some(
+      i => i.id === meta.id && !i.deletedByPlayer
+    );
+  })();
+
+  const [tryImage, setTryImage] = useState(hasExistingIllustration);
+  const [imgState, setImgState] = useState(hasExistingIllustration ? 'loading' : 'idle');
   const [blobUrl, setBlobUrl] = useState(null);
   const [copyFlash, setCopyFlash] = useState('');
   const taRef = useRef(null);
-  const recordIllustration = React.useContext(IllustrationRecorderContext);
 
   // Same gallery-recording effect as InlineIllustration. Fires once per
   // open if the image actually rendered.

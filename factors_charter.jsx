@@ -5667,101 +5667,110 @@ const stateContext = (gs) => {
 // (reefs), other vessels (sails, junks, sloops), wildlife (whales),
 // maintenance (pump leak), atmospheric (lights ashore, castaway timber).
 // No home-station NPCs (Hodge, Dass, Vizier, Pyke) — those are Bayan-Kor only.
+// Each choice carries an outcomeKey that routes the fallback outcome into
+// one of the FALLBACK_OUTCOME_BUCKETS — so the player's chosen lever
+// actually steers what kind of thing happens (cost / damage / day lost
+// / windfall / rep_shift / hook_opens) rather than rolling uniformly across
+// every possible result. Choice-level overrides (hook text on hook_opens,
+// repFaction/repDelta on rep_shift) flavour the bucket pick.
+//
+// Seed strings double as the player-facing hint rendered under each
+// choice — written in plain period English, not prompt-engineering jargon.
 const FALLBACK_VOYAGE_ENCOUNTERS = [
   {
     prose: 'A line of squalls runs along the horizon. The wind drops, then turns. The bosun looks to you for orders.',
     choices: [
-      { label: 'Run before the weather, lose a day', seed: 'lose time but no harm' },
-      { label: 'Stand on the course, trust the rigging', seed: 'risk damage for time' },
-      { label: 'Reef and ride it out', seed: 'safe but slow' },
+      { label: 'Run before the weather, lose a day', outcomeKey: 'time_lost', seed: 'Lose a day. No harm.' },
+      { label: 'Stand on the course, trust the rigging', outcomeKey: 'damage', seed: 'Risk damage for the time.' },
+      { label: 'Reef and ride it out', outcomeKey: 'time_lost', seed: 'Safe but slow.' },
     ],
   },
   {
     prose: 'The wind has fallen. The sails go slack against the yards; the heat lies on the deck like a cloth. The bosun gauges the sun and waits on yr. word.',
     choices: [
-      { label: 'Send the boats out to tow', seed: 'slow gain, hard on the crew' },
-      { label: 'Hold and wait the wind', seed: 'lose two days, no harm' },
-      { label: 'Try a sounding for current', seed: 'small risk, possible faster progress' },
+      { label: 'Send the boats out to tow', outcomeKey: 'cost', seed: 'Hard on the crew. A bill at next port.' },
+      { label: 'Hold and wait the wind', outcomeKey: 'time_lost', seed: 'Days lost. No harm.' },
+      { label: 'Try a sounding for current', outcomeKey: 'hook_opens', hook: 'An east-running current beyond what the chart shows. Worth a fresh sounding next leg.', seed: 'Plant a thread. May serve later.' },
     ],
   },
   {
     prose: 'A grey wall of fog comes off the lee shore at the change of watch. The lookout calls "Cant see the bowsprit," and the bosun asks if we should anchor.',
     choices: [
-      { label: 'Drop anchor, ride till it lifts', seed: 'safe, lose half a day' },
-      { label: 'Press on with leadsman in the chains', seed: 'risk grounding, no time lost' },
-      { label: 'Stand off, work to windward', seed: 'no harm, but slow' },
+      { label: 'Drop anchor, ride till it lifts', outcomeKey: 'time_lost', seed: 'Safe. A day’s drift.' },
+      { label: 'Press on with leadsman in the chains', outcomeKey: 'damage', seed: 'Risk of grounding.' },
+      { label: 'Stand off, work to windward', outcomeKey: 'time_lost', seed: 'Safe but slow.' },
     ],
   },
   {
     prose: 'A sail shows two leagues to leeward, hull-down on the haze. No flag flies, and she keeps her distance. The bosun reaches for the glass.',
     choices: [
-      { label: 'Crowd on canvas and run', seed: 'save time, no harm if friendly' },
-      { label: 'Stand on under reduced sail', seed: 'neutral' },
-      { label: 'Make the recognition signal and wait', seed: 'chance of help, chance of trouble' },
+      { label: 'Crowd on canvas and run', outcomeKey: 'windfall', seed: 'Save the time. Possibly a small purse.' },
+      { label: 'Stand on under reduced sail', outcomeKey: 'time_lost', seed: 'Cautious. A day lost.' },
+      { label: 'Make the recognition signal and wait', outcomeKey: 'rep_shift', repFaction: 'company', repDelta: 2, seed: 'A friendly captain notes yr. flag.' },
     ],
   },
   {
     prose: 'The leadsman calls a sudden shoaling — six fathoms, then four, then less. The chart says deep water; the chart is older than yr. grandfather. The bosun waits.',
     choices: [
-      { label: 'Heave to and sound carefully', seed: 'lose half a day, safe' },
-      { label: 'Put her on the other tack and stand off', seed: 'no harm' },
-      { label: 'Trust the chart, press on', seed: 'risk grounding' },
+      { label: 'Heave to and sound carefully', outcomeKey: 'time_lost', seed: 'Lose half a day. Safe.' },
+      { label: 'Put her on the other tack and stand off', outcomeKey: 'time_lost', seed: 'No harm. Some delay.' },
+      { label: 'Trust the chart, press on', outcomeKey: 'damage', seed: 'Risk grounding.' },
     ],
   },
   {
     prose: 'No air stirs. The sails hang slack; the deck timbers crack in the heat. A boy aft is taken with the gripes, and the bosun calls for the grog.',
     choices: [
-      { label: 'Issue the grog, see the boy fed', seed: 'no harm' },
-      { label: 'Put the men to scrubbing the deck', seed: 'discipline holds' },
-      { label: 'Wait it out without ceremony', seed: 'a flat day passes' },
+      { label: 'Issue the grog, see the boy fed', outcomeKey: 'cost', seed: 'Crew settled. A small bill.' },
+      { label: 'Put the men to scrubbing the deck', outcomeKey: 'time_lost', seed: 'Discipline. A day passes.' },
+      { label: 'Wait it out without ceremony', outcomeKey: 'time_lost', seed: 'A flat day. Crew dispirited.' },
     ],
   },
   {
     prose: 'A high-pooped junk passes close to leeward, her crew dressed in indigo, her bowsprit cocked at an angle. She hails in no language you know but dips her foresail by way of greeting.',
     choices: [
-      { label: 'Salute in return and stand on', seed: 'neutral' },
-      { label: 'Heave to and trade signs', seed: 'chance of useful word' },
-      { label: 'Keep clear and hold the course', seed: 'neutral' },
+      { label: 'Salute in return and stand on', outcomeKey: 'windfall', seed: 'A courtesy returned, in time.' },
+      { label: 'Heave to and trade signs', outcomeKey: 'hook_opens', hook: 'A junk captain in indigo who dipped his foresail and might know yr. face again.', seed: 'Plant a thread. Lose time.' },
+      { label: 'Keep clear and hold the course', outcomeKey: 'time_lost', seed: 'No exchange. Day passes.' },
     ],
   },
   {
     prose: 'The carpenter reports the pump on the larboard side is making more water than it shifts. He will have her tight again in half a day if you heave to. Otherwise she will bear up, but the bilges will not be sweet.',
     choices: [
-      { label: 'Heave to and let him work', seed: 'lose half a day, ship clean' },
-      { label: 'Bear up; repair at the next port', seed: 'minor wear, no time lost' },
-      { label: 'Set the watch to bailing in turn', seed: 'slow but steady, tired crew' },
+      { label: 'Heave to and let him work', outcomeKey: 'time_lost', seed: 'Half a day lost. Ship sound.' },
+      { label: 'Bear up; repair at the next port', outcomeKey: 'damage', seed: 'Minor wear. No time lost.' },
+      { label: 'Set the watch to bailing in turn', outcomeKey: 'cost', seed: 'Tired crew. A small bill in grog.' },
     ],
   },
   {
     prose: 'Two lights show on the dark coast as the sun sets, and a third farther out — blinking, deliberate. The bosun thinks it is signalling. You are too far off to make sense of it.',
     choices: [
-      { label: 'Stand off, keep wide of the shore', seed: 'neutral' },
-      { label: 'Beat in for a closer look', seed: 'risk of trouble, hook plants' },
-      { label: 'Mark the coordinates and stand on', seed: 'hook plants' },
+      { label: 'Stand off, keep wide of the shore', outcomeKey: 'time_lost', seed: 'Safe. Day passes.' },
+      { label: 'Beat in for a closer look', outcomeKey: 'hook_opens', hook: 'A signal-light pattern off the Pelican’s Nest line; wreckers’ code, the bosun thinks. They will have seen our shape against the dusk.', seed: 'Risk being seen. Plant a thread.' },
+      { label: 'Mark the coordinates and stand on', outcomeKey: 'hook_opens', hook: 'Coordinates of an unexplained signal-light, set down for later inquiry.', seed: 'Plant a thread quietly.' },
     ],
   },
   {
     prose: 'A low sloop appears two points off the bow — dark hull, dark sail, no colours flying. She does not approach but does not fall away either. The bosun has the helm and asks the question.',
     choices: [
-      { label: 'Crowd on canvas and run', seed: 'risk wear if she gives chase' },
-      { label: 'Stand on and trust to luck', seed: 'neutral, hook plants' },
-      { label: 'Beat to leeward to put her in our wake', seed: 'lose time, safe' },
+      { label: 'Crowd on canvas and run', outcomeKey: 'damage', seed: 'Risk wear from the chase.' },
+      { label: 'Stand on and trust to luck', outcomeKey: 'hook_opens', hook: 'A dark sloop that ran parallel for an afternoon and never showed her flag.', seed: 'Plant a thread quietly.' },
+      { label: 'Beat to leeward to put her in our wake', outcomeKey: 'time_lost', seed: 'Lose time. Safe.' },
     ],
   },
   {
     prose: 'A whale comes up not a cable from the larboard quarter and rolls a long flank above the swell, blowing once before going under. The bosun crosses himself; the sailors are silent for a quarter-hour.',
     choices: [
-      { label: 'Make the customary signs and stand on', seed: 'neutral' },
-      { label: 'Mark the bearing — they say the deeps follow', seed: 'neutral, lore hook' },
-      { label: 'Pay it no mind, drive the work on', seed: 'minor crew morale' },
+      { label: 'Make the customary signs and stand on', outcomeKey: 'time_lost', seed: 'A quiet day.' },
+      { label: 'Mark the bearing — they say the deeps follow', outcomeKey: 'hook_opens', hook: 'A whale-mark in the log; the bosun says deep water follows the path. Worth a sounding next charter.', seed: 'Plant a thread for the future.' },
+      { label: 'Pay it no mind, drive the work on', outcomeKey: 'cost', seed: 'Crew uneasy. A small bill in grog.' },
     ],
   },
   {
     prose: 'The lookout calls out a piece of broken timber riding the swell, painted white above the line. Likely a fishing-boat that did not come home. There may be a man on it; there may not.',
     choices: [
-      { label: 'Heave to and search the water', seed: 'lose half a day, possible meeting' },
-      { label: 'Mark the position and report at the next port', seed: 'neutral' },
-      { label: 'Pass it by — we have timber enough', seed: 'minor crew unease' },
+      { label: 'Heave to and search the water', outcomeKey: 'windfall', seed: 'Lose half a day. Possible gain.' },
+      { label: 'Mark the position and report at the next port', outcomeKey: 'rep_shift', repFaction: 'crown', repDelta: 1, seed: 'A small word reaches the Crown.' },
+      { label: 'Pass it by — we have timber enough', outcomeKey: 'cost', seed: 'Crew uneasy. A small bill.' },
     ],
   },
 ];
@@ -5805,26 +5814,60 @@ Return JSON:
   return { result, log };
 }
 
-// Deterministic pool for genOutcome fallback. Each entry yields a self-consistent
-// {prose, journal} pair — prose for the encounter screen, journal for the
-// permanent record. Picked at random on every fallback. Two pools because the
-// letter-reply branch reads at the desk; the encounter branch reads in the world.
+// Deterministic outcome pool for genOutcome fallback, organised as buckets
+// keyed by the player's `choice.outcomeKey`. On the PWA path (no live AI)
+// the choice the player made now STEERS which kind of outcome lands —
+// "Stand on the course" reliably costs hull/sails; "Reef and ride it out"
+// reliably costs a day; "Beat in for a closer look" reliably plants a hook.
+// The bucket provides the prose/journal frame and a default mechanical
+// bite; the choice itself can carry overrides (e.g. its own `hook` text
+// for hook_opens, or a `repFaction` for rep_shift) which merge on top.
 //
-// Most entries carry a small mechanical bite (money / reputation / shipDamage)
-// so the fallback path doesn't read as "nothing ever happens" when the AI
-// fails or returns unparseable JSON. Bite is small (£8-30, ±1-3 rep, light
-// hull/sails) — enough to feel real, not enough to swing a charter.
-const FALLBACK_OUTCOME_ENCOUNTER = [
-  { prose: 'It plays out as you might expect, neither as well nor as ill as feared. A small purse changes hands at the close.', journal: 'A small disbursement settled the matter.', money: -10 },
-  { prose: 'The matter resolves itself in the way of small troubles — a clerk’s fee here, a private word there.', journal: 'Closed the day’s affair at the cost of a few crowns.', money: -8 },
-  { prose: 'A merchant of the bazaar settles a long account in yr. favour, slipping the silver across with no ceremony.', journal: 'A small windfall from a closed account.', money: 18 },
-  { prose: 'The work goes on. The hands take their pay; the matter is closed before the second bell, and a private gratuity finds its way to the strongbox.', journal: 'Closed the day’s affair to small advantage.', money: 12 },
-  { prose: 'A small affair, soon over. Word goes back to Madras, and not unfavourably.', journal: 'A small word reaches the Honourable Company.', reputation: { company: 2 } },
-  { prose: 'The sun moves; the wind holds; the matter passes. A native trader takes some quiet offence at the price set; he will remember the figure.', journal: 'A small ill word goes back to the bazaar.', reputation: { rajah: -1 } },
-  { prose: 'Set down, taken up, set down again. The yardarm groans through the swell and a reefed sail tears at the foot — work for the carpenter when the watch ends.', journal: 'A reefed sail tore in the swell. Work for the carpenter.', shipDamage: { sails: 6 } },
-  { prose: 'The thing is settled before the second bell, but a man at the wharves whispers thanks to the Brotherhood for the quiet of it.', journal: 'Day closed quietly. The Brotherhood is paid in courtesy.', reputation: { pirates: 1 } },
-];
+// Letter replies stay in their own flat pool — replies at the desk
+// legitimately do nothing mechanical and the choice-steering pattern
+// doesn't apply.
+//
+// Bucket vocabulary:
+//   time_lost  — a day or two pass, no $/damage
+//   damage     — shipDamage to hull and/or sails
+//   windfall   — small money gain (+£10–25)
+//   cost       — small money loss (-£8–18)
+//   rep_shift  — a single faction ticks; choice may carry repFaction/repDelta
+//   hook_opens — a new thread is planted; choice carries the hook text
+const FALLBACK_OUTCOME_BUCKETS = {
+  time_lost: [
+    { prose: 'The bosun makes the call short and plain; the watch shifts, the sails are reset. By the time the deck quiets, the day is gone and the chart has not moved.', journal: 'A day lost to the matter. No harm beyond the calendar.', days: 1 },
+    { prose: 'Hour follows hour without complaint. The work is done in its proper season, and the proper season is slow.', journal: 'The matter passed slowly; a day went with it.', days: 1 },
+    { prose: 'Two suns rise and set on the same patch of water. The bosun keeps the men at small work to keep them out of trouble.', journal: 'Two days laid down to caution.', days: 2 },
+  ],
+  damage: [
+    { prose: 'Set down, taken up, set down again. The yardarm groans through the swell and a reefed sail tears at the foot — work for the carpenter when the watch ends.', journal: 'A reefed sail tore in the swell. Work for the carpenter.', shipDamage: { sails: 6 } },
+    { prose: 'A green sea takes her on the larboard quarter and works the planking. She rides out the day, but the bilges run wet under foot until the carpenter has had at her.', journal: 'Took a sea on the larboard quarter. Hull working.', shipDamage: { hull: 5 } },
+    { prose: 'The wind backs sudden and the foretopsail splits up the leech. A backstay parts at the same moment; a block goes whirring past the helmsman\'s head and into the sea.', journal: 'Foretopsail split, a backstay parted. No men hurt.', shipDamage: { sails: 5, hull: 3 } },
+  ],
+  windfall: [
+    { prose: 'A merchant of the bazaar settles a long account in yr. favour, slipping the silver across with no ceremony.', journal: 'A small windfall from a closed account.', money: 18 },
+    { prose: 'The work goes on. The hands take their pay; the matter is closed before the second bell, and a private gratuity finds its way to the strongbox.', journal: 'Closed the day’s affair to small advantage.', money: 12 },
+    { prose: 'A figure not previously friendly presses a small purse into yr. hand, the kind of payment that does not appear in any company book.', journal: 'A private gratuity, not for the ledger.', money: 22 },
+  ],
+  cost: [
+    { prose: 'It plays out as you might expect, neither as well nor as ill as feared. A small purse changes hands at the close.', journal: 'A small disbursement settled the matter.', money: -10 },
+    { prose: 'The matter resolves itself in the way of small troubles — a clerk’s fee here, a private word there.', journal: 'Closed the day’s affair at the cost of a few crowns.', money: -8 },
+    { prose: 'A figure appears at the wharf with a private bill not previously declared. The sum is small. The principle of the thing is not.', journal: 'A private bill paid at the wharf, against principle.', money: -15 },
+  ],
+  rep_shift: [
+    { prose: 'A small affair, soon over. Word goes back to Madras, and not unfavourably.', journal: 'A small word reaches the Honourable Company.', reputation: { company: 2 } },
+    { prose: 'The thing is settled before the second bell, but a man at the wharves whispers thanks to the Brotherhood for the quiet of it.', journal: 'Day closed quietly. The Brotherhood is paid in courtesy.', reputation: { pirates: 1 } },
+    { prose: 'The sun moves; the wind holds; the matter passes. A native trader takes some quiet offence at the price set; he will remember the figure.', journal: 'A small ill word goes back to the bazaar.', reputation: { rajah: -1 } },
+  ],
+  hook_opens: [
+    { prose: 'The matter does not so much resolve as set down a card on the table. There is a name now, or a place, or a figure — to be picked up again when the time is right.', journal: 'A new thread, planted and not yet pulled.' },
+    { prose: 'You make a small note in the back of the day-book. The thing has not closed; it has only paused. Whatever was set in motion goes on without yr. hand for now.', journal: 'A matter left in motion, to be returned to.' },
+    { prose: 'Word will keep, the bosun says, and so will an unfinished account. You let the day end with the matter unfinished by intent.', journal: 'An unfinished matter, set down on purpose.' },
+  ],
+};
 
+// Letter replies — bite-free; the desk genuinely does little.
 const FALLBACK_OUTCOME_LETTER = [
   { prose: 'The reply is written and laid by for the next post.', journal: 'Wrote the reply. Sealed and laid by for the post.' },
   { prose: 'The pen does its work. The paper is folded and sealed.', journal: 'Composed an answer at the desk.' },
@@ -5886,21 +5929,47 @@ Generate the outcome. Return JSON:
   }
 }
 Reputation deltas should be small (±1 to ±15). Only include factions that actually shift. Goods can include any of: pepper, cinnamon, calico, silver, sandalwood, opium, rice, rum, saltpetre. Use newAcquaintances when the scene introduces a memorable named figure who could plausibly recur. Flags are sparse and should describe lasting narrative state. Omit any of the optional fields you do not need — but obey CONSEQUENCE above for voyage and pursue outcomes.`;
-  const pool = isLetter ? FALLBACK_OUTCOME_LETTER : FALLBACK_OUTCOME_ENCOUNTER;
-  const pick = pool[Math.floor(Math.random() * pool.length)];
-  // Per-entry overrides (money, reputation, shipDamage, etc.) merge over the
-  // baseline so encounter fallbacks can carry small mechanical bite. Letter
-  // fallbacks remain bite-free — replies at the desk legitimately do nothing.
+  // Letter branch: flat random pool, no mechanical bite (the desk does little).
+  // Encounter / pursue branch: route by choice.outcomeKey into FALLBACK_OUTCOME_BUCKETS
+  // so the player's chosen lever actually steers the kind of outcome that lands.
+  // Choice-level overrides (e.g. an explicit `hook` text on hook_opens choices,
+  // or an explicit repFaction on rep_shift choices) take precedence over the
+  // bucket's defaults so the deterministic outcome can echo the choice that was made.
+  let pick;
+  if (isLetter) {
+    pick = FALLBACK_OUTCOME_LETTER[Math.floor(Math.random() * FALLBACK_OUTCOME_LETTER.length)];
+  } else {
+    const key = (choice && choice.outcomeKey) || 'cost';
+    const bucket = FALLBACK_OUTCOME_BUCKETS[key] || FALLBACK_OUTCOME_BUCKETS.cost;
+    pick = bucket[Math.floor(Math.random() * bucket.length)];
+  }
+  // rep_shift bucket: when the choice carries an explicit repFaction (e.g.
+  // a Brotherhood-coded action), honour it; otherwise the bucket pick's
+  // baked-in faction stands.
+  let repOverride;
+  if (!isLetter && choice && choice.outcomeKey === 'rep_shift' && choice.repFaction) {
+    const delta = Number.isFinite(choice.repDelta) ? choice.repDelta : 2;
+    repOverride = { [choice.repFaction]: delta };
+  }
+  // hook_opens bucket: prefer the choice's own hook text so the planted
+  // thread reads as if it grew from the scene that just played.
+  const hookText = (!isLetter && choice && choice.outcomeKey === 'hook_opens' && typeof choice.hook === 'string' && choice.hook.trim())
+    ? choice.hook.trim()
+    : '';
   const fallback = {
     prose: pick.prose,
     changes: {
       money: isLetter ? 0 : (pick.money || 0),
-      days: isLetter ? 0 : 1,
-      reputation: isLetter ? {} : (pick.reputation || {}),
+      days: isLetter ? 0 : (Number.isFinite(pick.days) ? pick.days : 1),
+      reputation: isLetter ? {} : (repOverride || pick.reputation || {}),
       goods: isLetter ? {} : (pick.goods || {}),
       shipDamage: isLetter ? undefined : (pick.shipDamage || undefined),
       journal: pick.journal,
-      hook: '',
+      hook: hookText,
+      // Choice-level intent to close the bound thread. The pursue path
+      // always honours this. The voyage path honours it only when an
+      // engagedThread was bound — same gate the AI prompt uses.
+      closeHook: !isLetter && !!(choice && choice.closesHook),
     },
   };
   const call = await callClaude(prompt);
@@ -6414,15 +6483,16 @@ Return JSON:
     { "label": "5-9 word verb phrase — an action that changes the thread", "seed": "what tonally happens; hint resolution vs. complication" }
   ]
 }`;
-  // Fallback: at least one choice plausibly closes the thread, so the
-  // closeHook path can fire even when the AI is unreachable. No
-  // "do nothing" choice — the player is here because they chose to act.
+  // Fallback: one choice closes the thread (closesHook routes through the
+  // pursue branch in handlePursueThread), one plants a related side-thread
+  // via hook_opens, one complicates with a small money cost. The thread
+  // text is echoed in the prose so the scene reads as bound to it.
   const fallback = {
     prose: `You apply yourself to the matter — ${thread.slice(0, 120)}${thread.length > 120 ? '…' : ''} — and find a foothold. There are paths now where there was only the question.`,
     choices: [
-      { label: 'Press hard, settle the matter today', seed: 'closes the thread; possible cost' },
-      { label: 'Sound out a confederate before acting', seed: 'opens a smaller thread; small rep ripple' },
-      { label: 'Pursue it through the bazaar quietly', seed: 'small money cost; thread complicates' },
+      { label: 'Press hard, settle the matter today', outcomeKey: 'cost', closesHook: true, seed: 'Closes the thread. A small cost.' },
+      { label: 'Sound out a confederate before acting', outcomeKey: 'hook_opens', hook: 'A confederate who knows the same names; not always paid in coin.', seed: 'Opens a side-thread. Some rep ripple.' },
+      { label: 'Pursue it through the bazaar quietly', outcomeKey: 'cost', seed: 'A small cost. The thread complicates.' },
     ],
   };
   const call = await callClaude(prompt);
@@ -8592,6 +8662,11 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
                     >
                       &mdash; {c.label}
                     </button>
+                    {c.seed && (
+                      <div style={{ marginLeft: '1rem', marginTop: '0.2rem', fontStyle: 'italic', color: '#6b4423', fontSize: '0.82em' }}>
+                        {c.seed}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

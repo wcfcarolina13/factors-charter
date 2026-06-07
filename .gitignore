@@ -8,3 +8,6 @@ dev-dist/
 
 # Worktrees for parallel feature work
 .worktrees/
+
+# agent scaffolding (not game code)
+.superpowers/

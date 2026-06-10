@@ -9,6 +9,128 @@ Newest research / decisions on top.
 
 ---
 
+## Audit triage — 2026-06-09
+
+Three-lane code audit (game logic/gamefeel, mobile UI/UX, offline robustness)
+run on re-orientation. Phase 1 (trade toast, days-remaining urgency, legacy
+API timeout, cache quota trim) shipped same day — see CHANGELOG. Findings
+below are **open**, ordered by judged value-for-effort within each lane.
+Several audit claims were checked against code and found stale/wrong; they
+are listed at the bottom so they don't get re-reported.
+
+### Gamefeel / game logic (open)
+
+1. **Voyage profit/loss feedback** (M) — no per-voyage trade summary; the
+   journal logs individual buys/sells but the player can't see which routes
+   pay. Candidate: `gs.tradeHistory` + a "reckoning of the voyage" card on
+   return, compact on mobile. Highest-value single gamefeel item left.
+2. **Price opacity** (M) — `priceFor` stacks day-flux × window × standing
+   multipliers but the player sees only the final figure. Candidate: a small
+   "price drivers" line in PortView (standing discount, active event), and/or
+   a cheap/fair/dear tag everywhere prices render.
+3. **Raid agency** (M) — raids roll in `tickDays` with no foreshadowing and
+   no response choice; stockade/barracks mitigation exists but the
+   cost-benefit is never surfaced in OutpostView. Candidate: intelligence
+   letter before, response choices in the away digest after, mitigation
+   numbers on the buildings.
+4. **Fine-goods balance check** (needs playtest data, not code yet) —
+   diamonds/ambergris (near-zero weight, £150–200 base) are quota-exempt and
+   may dominate late-game income. Gated to the Nest behind pirates rep, so
+   maybe fine. Verify in Bradley's next charter before rebalancing.
+5. **Charter-end pacing** (M) — no "final stretch" narrative beat. The HUD
+   urgency cue (shipped) is cosmetic; a Director "Final Dispatch" letter at
+   ~180 days with a quota reckoning would make the deadline diegetic.
+6. **`flags.vizierBoonOwed` never pays off** (S) — set by the Vizier
+   marriage counter-propose branch, read by nothing. One late-game letter
+   helper + one `tickDays` gate closes it.
+7. **Hooks staleness** (M) — `gs.hooks` entries persist indefinitely unless
+   pursued to closure; no aging or nagging. Candidate: Director mentions
+   long-open threads in quarterly letters.
+8. **Acquaintances are decorative** (L) — roster surfaces in Ledger but only
+   Faulke/Idris gate anything. Cheapest move: feed 1–2 relevant acquaintances
+   into `stateContext` so AI prose references them (artifact path), and key
+   1–2 scripted arrivals on roster membership.
+
+### Mobile UI/UX (open)
+
+9. **Modal scroll-lock on iOS** (S–M) — no `document.body` overflow lock
+   while modals are open; background scrolls behind GalleryModal /
+   ConflictModal / ExportModal. One shared `useModalLock` effect.
+10. **Escape-to-dismiss + backdrop affordance consistency** (S) — modals
+    vary: IllustrationModal has ✕, ConflictModal has none. One pass for ✕ +
+    Escape across the five modals.
+11. **Safe-area insets** (S) — `viewport-fit=cover` is set but the Page
+    wrapper never reads `env(safe-area-inset-*)`; on notched iPhones the
+    header can sit under the dynamic island. (The trade toast shipped today
+    already accounts for the bottom inset.)
+12. **Tab-bar overflow cue** (S) — 6 tabs scroll horizontally with the
+    scrollbar hidden; nothing signals more tabs off-screen. Right-edge fade
+    gradient is the light fix.
+13. **Trade button spacing** (S) — `.trade-row .actions` gap 0.3rem puts
+    three 36px buttons nearly flush on a 375px phone; bump to 0.5rem.
+14. **Unread-letter prominence** (S) — the journal's correspondence card
+    distinguishes unread by wording/color only; a wax-red dot or bolder
+    treatment would carry further. Tabs already badge a count.
+15. **PWA icons** (carried over, needs Bradley's aesthetic input) — see
+    HANDOFF deferred #1 and its session-poisoning warning.
+
+### Offline / sync robustness (open)
+
+16. **Self-host the three fonts** (M) — Google Fonts CSS+woff2 are runtime
+    CacheFirst, so a *first-ever* offline launch renders fallback serif.
+    Vendoring IM Fell English (SC + italic) + EB Garamond woff2 into the
+    precache (`globPatterns` already includes woff2) makes cold offline
+    launch fully styled and drops the third-party dependency. Aligned with
+    the offline-first goal; do before any "play it on a plane" demo.
+17. **Sync-pointer seeding on remote pull** (S–M, data-loss class) — pulling
+    a charter via "⁂ Pull to this device" doesn't seed
+    `factor_save_<slot>_sync`, so the next conflict detection on that device
+    compares against a stale/absent pointer. Verify the exact path, then seed
+    the pointer in `onResumeRemote`.
+18. **Sync-size pre-warning** (S) — pushes >256 KB fail with an error only
+    visible in the menu; warn (and suggest manuscript export) as the payload
+    approaches the cap.
+19. **iOS ITP eviction nudge** (S–M) — localStorage saves can be evicted
+    after 7 days of disuse in Safari-installed contexts. The factor-key cloud
+    copy is the real mitigation; a title-screen nudge ("your key is your
+    save — copy it somewhere") is the cheap insurance.
+20. **SW update toast** (M) — `skipWaiting`+`clientsClaim` mean a deploy can
+    swap code under a live session; `useRegisterSW`'s needRefresh hook could
+    surface a quiet "a new printing is available — refresh" line.
+21. **Offline indicator** (S) — no `navigator.onLine` surface anywhere;
+    SyncBadge shows 'offline' only after a failed push. A small "ashore,
+    no packet-boat" header hint when offline would set expectations for
+    illustrations/sync.
+
+### Online-enhancement seam (for the local-LLM plan, backlog)
+
+`callClaude` is already the single chokepoint: every generator routes
+through it and falls back deterministically on `{ parsed: null }`. The PWA
+path returns the fallback unconditionally. When the desktop offload lands,
+the seam is: a `factor_llm_endpoint` (+ model name) in localStorage, a
+settings row in the ☰ Menu, and a branch in `callClaude` that POSTs the
+prompt to an OpenAI-compatible endpoint with the same 20 s abort + fallback
+discipline. No other code needs to know. Do NOT resurrect the removed
+`src/llm/` provider framework for this — one branch is enough.
+
+### Audit claims checked and rejected (don't re-report)
+
+- "Quota progress not visible in HUD" — false; the header's third line shows
+  GODOWN + LONDON pepper/cinnamon progress.
+- "Sync failures are invisible" — overstated; `SyncBadge` in the header
+  shows offline/error states (it is subtle, see #21).
+- "Dead `gs.syncEnabled`/`syncPromptShown` fields need cleanup" (HANDOFF
+  deferred #7) — already done in a prior session.
+- "Gallery should store image bytes in localStorage" — rejected; 60 × ~650 KB
+  JPEGs cannot fit localStorage quota. URL-keyed re-fetch through the
+  three-layer server cache is the right design; offline gallery gaps are
+  acceptable degradation.
+- "Buy/sell silently no-op on failure" — mostly pre-gated; buttons disable
+  when the trade can't happen. The real gap was missing success feedback
+  (fixed today).
+
+---
+
 ## Deterministic Pool Audit — 2026-05-07
 
 Captured at the moment live-AI was stripped from the PWA player path. Every entry is the static fallback that PWA players will see; live-AI in the artifact runtime is unaffected. Update by playthrough — if a generator's fallback feels repetitive after several charters, lower its felt-quality grade and bump expansion priority. When you expand a pool, update the size and date.

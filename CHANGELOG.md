@@ -4,6 +4,31 @@ The Factor's Charter — a chronological log of what's shipped. Newest first.
 
 ---
 
+## 2026-06-09 — Gamefeel feedback pass + offline robustness (Phase 1 of June audit)
+
+Re-orientation session after a month away. Ran a three-lane audit (game logic/gamefeel, mobile UI/UX, offline robustness) over the monolith; full triaged backlog appended to `DESIGN_NOTES.md` under "Audit triage — 2026-06-09". Four small verified fixes shipped as Phase 1:
+
+- **Trade confirmation toast.** Buy/sell at the wharf mutated state silently — the strongbox/hold figures live in the header, usually scrolled off-screen mid-trade, so a tap looked like nothing happened. `buyGood`/`sellGood` now return whether the trade applied; `PortView` confirms each trade with a transient parchment toast fixed above the bottom edge ("Sold 1 barrel of Rum — £9 to the strongbox.", duty called out when levied). Auto-dismisses in 2.6 s, `pointer-events: none`, safe-area-inset aware. Sublocation purchases route through the same wrapper.
+- **Days-remaining urgency cue.** The HUD's "N DAYS REMAIN" now turns blood-red (`#8b1a1a`) at ≤ 180 days and bold at ≤ 90. Previously a player at day 1035 saw the same faded brown as day 1.
+- **Legacy artifact API call gets a 20 s abort.** `legacyAnthropicCall` had no timeout — a hung Anthropic call pinned the loading screen forever. Every caller already has a deterministic fallback; now it gets used.
+- **Illustration-cache quota fallback.** `writeCache` swallowed `QuotaExceededError` silently, losing persistence entirely. It now retries once with a 20-entry trim (newest by `viewedAt`) before giving up. 2 new vitest cases; tests **129 → 131**.
+
+Verified live in dev preview at mobile viewport (375×812): toast renders/dismisses, HUD reflects trades, urgency styling confirmed via doctored 60-day save, zero console errors. Build clean.
+
+Also corrected a stale HANDOFF item: the dead `gs.syncEnabled` / `gs.syncPromptShown` fields were already removed in a prior session (the `ensureShape` comment at ~line 1033 records the deletion).
+
+---
+
+## 2026-05-10/11 — backfill (shipped without changelog entries)
+
+Three commits landed after the 2026-05-10 handoff without entries; recorded here for the chronology. See `git log` for full messages.
+
+- `7065d01` — voyage outcomes can now close engaged threads (was pursue-only) + cleanup.
+- `30375d3` — illustration modal auto-loads when the scene is already in the gallery (no re-tap of "Try in-game illustration").
+- `22a10ac` — choice-keyed deterministic outcomes (`FALLBACK_OUTCOME_BUCKETS`, 6 buckets) + plain-English hint lines under encounter/pursue choices. Closes the "key by choice.seed" target from the 2026-05-07 pool audit.
+
+---
+
 ## 2026-05-09 — Charter-end sabotage flavour
 
 Closes the loop on the sabotage arcs that landed earlier today. `gs.sabotagesCommitted` was being incremented by Step 1 of every committed arc but no surface read it — the final Director letter said the same thing whether the player commissioned three rivals' downfalls or none. Now `makeCharterEndLetter` appends a destiny-shaped coda when `sabotagesCommitted >= 1`:

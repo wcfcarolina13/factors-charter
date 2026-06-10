@@ -153,9 +153,9 @@ Today's outcome-bite fix (commit `e4cda5b`) was scoped tight to the prompt + fal
 - **Voyage encounters closing source threads** — currently only pursue can close hooks; voyage encounters can pull a thread but can't close it (the encounter doesn't track which thread the AI happened to pull in). Needs richer encounter schema.
 - **Re-grade the deterministic pools** after several charters of play (per the 2026-05-07 audit in `DESIGN_NOTES.md` lines 12–98). All 7 generators got 2026-05-07 expansion; Bradley's playtests are the next data point.
 
-### 7. Cleanup: dead `gs.syncEnabled` / `gs.syncPromptShown` fields
+### 7. ~~Cleanup: dead `gs.syncEnabled` / `gs.syncPromptShown` fields~~ — DONE
 
-Kept defaulted-true in `ensureShape` purely for forward-compat after the factor-key migration. Both fields are now unused; `~10` LOC delete in a single commit when convenient.
+Verified removed (2026-06-09): the `ensureShape` comment at ~line 1033 records the deletion; no references remain in the file.
 
 ---
 

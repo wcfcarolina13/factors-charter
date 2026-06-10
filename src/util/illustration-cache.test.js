@@ -78,6 +78,37 @@ describe('LRU eviction', () => {
   });
 });
 
+describe('quota-exceeded fallback', () => {
+  it('retries with a 20-entry trim when setItem throws once', () => {
+    const storage = makeStorage();
+    let threw = false;
+    const realSet = storage.setItem;
+    storage.setItem = (k, v) => {
+      if (!threw) { threw = true; throw new Error('QuotaExceededError'); }
+      realSet(k, v);
+    };
+    let cache = {};
+    for (let i = 0; i < 40; i++) {
+      cache[`hash${i}`] = { url: `u${i}`, fetchedAt: i, viewedAt: i };
+    }
+    cache = writeCache(storage, cache);
+    expect(Object.keys(cache)).toHaveLength(20);
+    expect(cache['hash39']).toBeDefined();
+    expect(cache['hash0']).toBeUndefined();
+    const persisted = JSON.parse(storage.getItem(CACHE_KEY));
+    expect(Object.keys(persisted)).toHaveLength(20);
+  });
+
+  it('keeps the in-memory copy when storage keeps failing', () => {
+    const storage = makeStorage();
+    storage.setItem = () => { throw new Error('QuotaExceededError'); };
+    const cache = { a: { url: 'u', fetchedAt: 1, viewedAt: 1 } };
+    const result = writeCache(storage, cache);
+    expect(result.a).toBeDefined();
+    expect(storage.getItem(CACHE_KEY)).toBeNull();
+  });
+});
+
 describe('buildIllustrationUrl', () => {
   it('encodes prose into the URL', () => {
     const url = buildIllustrationUrl('a junk passes close to leeward');

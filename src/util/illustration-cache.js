@@ -32,7 +32,19 @@ function writeCache(storage, cache) {
   }
   try {
     storage.setItem(CACHE_KEY, JSON.stringify(cache));
-  } catch (e) { /* quota exceeded — silently keep in-memory copy */ }
+  } catch (e) {
+    // Quota exceeded — retry once with an aggressively trimmed cache (20
+    // newest by viewedAt) rather than silently losing persistence entirely.
+    const trimmed = Object.fromEntries(
+      Object.entries(cache)
+        .sort((a, b) => (b[1].viewedAt || 0) - (a[1].viewedAt || 0))
+        .slice(0, 20)
+    );
+    try {
+      storage.setItem(CACHE_KEY, JSON.stringify(trimmed));
+      return trimmed;
+    } catch (e2) { /* still failing — keep in-memory copy */ }
+  }
   return cache;
 }
 

@@ -43,15 +43,9 @@ export default defineConfig({
         // future deploys land on one refresh, not three.
         skipWaiting: true,
         clientsClaim: true,
+        // Fonts are self-hosted woff2 at public/fonts/ (since 2026-06-09) and
+        // covered by the woff2 glob above — no Google Fonts runtime rule needed.
         runtimeCaching: [
-          {
-            urlPattern: /^https:\/\/fonts\.(googleapis|gstatic)\.com\/.*/,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'google-fonts',
-              expiration: { maxEntries: 20, maxAgeSeconds: 60 * 60 * 24 * 365 },
-            },
-          },
           {
             urlPattern: ({ url }) => url.pathname.startsWith('/plates/'),
             handler: 'CacheFirst',

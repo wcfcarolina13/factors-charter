@@ -20,10 +20,13 @@ are listed at the bottom so they don't get re-reported.
 
 ### Gamefeel / game logic (open)
 
-1. **Voyage profit/loss feedback** (M) — no per-voyage trade summary; the
-   journal logs individual buys/sells but the player can't see which routes
-   pay. Candidate: `gs.tradeHistory` + a "reckoning of the voyage" card on
-   return, compact on mobile. Highest-value single gamefeel item left.
+1. ~~**Voyage profit/loss feedback**~~ — shipped 2026-06-09 as "The Trade
+   Reckoning": per-commodity aggregates (`gs.tradeStats`, pure logic in
+   `src/util/trade-stats.js`) surfaced in the Ledger with avg buy/sell,
+   realized margin (duty counted against it), and a net-of-all-dealings
+   total. Aggregate-level, not per-voyage/route — if route-level P&L is
+   still wanted after play, that's a follow-up needing voyage-boundary
+   tracking.
 2. **Price opacity** (M) — `priceFor` stacks day-flux × window × standing
    multipliers but the player sees only the final figure. Candidate: a small
    "price drivers" line in PortView (standing discount, active event), and/or
@@ -76,12 +79,12 @@ are listed at the bottom so they don't get re-reported.
 
 ### Offline / sync robustness (open)
 
-16. **Self-host the three fonts** (M) — Google Fonts CSS+woff2 are runtime
-    CacheFirst, so a *first-ever* offline launch renders fallback serif.
-    Vendoring IM Fell English (SC + italic) + EB Garamond woff2 into the
-    precache (`globPatterns` already includes woff2) makes cold offline
-    launch fully styled and drops the third-party dependency. Aligned with
-    the offline-first goal; do before any "play it on a plane" demo.
+16. ~~**Self-host the three fonts**~~ — shipped 2026-06-09. Latin woff2
+    subsets vendored at `public/fonts/` (5 files, ~238 KB; EB Garamond is
+    one variable file covering 400–600), precached by the SW, CSP tightened
+    to drop Google Fonts entirely. The legacy artifact runtime keeps the
+    Google @import via `window.storage` detection (same idiom as plates.js).
+    Unused IM Fell DW Pica dropped from the import.
 17. **Sync-pointer seeding on remote pull** (S–M, data-loss class) — pulling
     a charter via "⁂ Pull to this device" doesn't seed
     `factor_save_<slot>_sync`, so the next conflict detection on that device

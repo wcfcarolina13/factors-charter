@@ -4,6 +4,17 @@ The Factor's Charter — a chronological log of what's shipped. Newest first.
 
 ---
 
+## 2026-06-09 — The Trade Reckoning + self-hosted fonts (Phase 2 of June audit)
+
+Top two items from the morning's audit triage.
+
+- **The Trade Reckoning.** The journal logged individual buys/sells but nothing answered "which goods actually pay." New `gs.tradeStats` (via `ensureShape`, default `{}`) accumulates per-commodity `{boughtQty, boughtCost, soldQty, soldProceeds}` in `buyGood`/`sellGood` — cost includes duty, proceeds are net of it, so the Dutch take counts against the margin. Pure logic in `src/util/trade-stats.js` (`recordTrade` / `reckonRows` / `reckonTotal`, 9 vitest cases; tests **131 → 140**). Surfaced in the Ledger under "THE TRADE RECKONING": per-commodity realized return (sold at avg-buy cost basis), avg buy/sell detail line, net-of-all-dealings total. Goods got without purchase (starting cargo, prizes, letter outcomes) reckon at full proceeds, flagged in a footnote. Books reset on succession ("the predecessor's books close with him") and renewal (the renewal letter already said "Reckonings of the previous charter are closed" — now it's true).
+- **Self-hosted fonts — offline-first cold start closed.** Google Fonts CSS+woff2 were only runtime-cached, so a *first-ever* offline launch rendered fallback serif. The five latin woff2 subsets (IM Fell English roman+italic, IM Fell English SC, EB Garamond roman 400–600 variable + italic — Google serves byte-identical files for EB Garamond 400/500/600, so one file covers all three weights) now live at `public/fonts/` (~238 KB) and land in the Workbox precache. `FONT_IMPORT` branches on the `window.storage` artifact detection (plates.js idiom): PWA gets `@font-face` declarations, the legacy artifact keeps the Google @import. Unused **IM Fell DW Pica** dropped. CSP tightened — `fonts.googleapis.com` / `fonts.gstatic.com` removed from style-src/font-src/connect-src; dead google-fonts runtimeCaching rule deleted from `vite.config.js`. Precache 559 → **796 KiB**.
+
+Verified live: fonts load exclusively from `/fonts/` (zero Google requests in the resource log), reckoning math confirmed in-game (no-cost-basis rum +£36, unsold rice £0, correct net), 140/140 tests, parser clean, zero console errors.
+
+---
+
 ## 2026-06-09 — Gamefeel feedback pass + offline robustness (Phase 1 of June audit)
 
 Re-orientation session after a month away. Ran a three-lane audit (game logic/gamefeel, mobile UI/UX, offline robustness) over the monolith; full triaged backlog appended to `DESIGN_NOTES.md` under "Audit triage — 2026-06-09". Four small verified fixes shipped as Phase 1:

@@ -5297,10 +5297,15 @@ async function callClaude(prompt) {
 
 async function legacyAnthropicCall(prompt) {
   const startedAt = Date.now();
+  // A hung API call would otherwise pin the loading screen forever — every
+  // caller has a deterministic fallback, so abort and let it take over.
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 20000);
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
         max_tokens: 1000,
@@ -5321,6 +5326,8 @@ async function legacyAnthropicCall(prompt) {
   } catch (e) {
     console.error('API error:', e);
     return { parsed: null, raw: '', prompt, startedAt, endedAt: Date.now(), error: e.message || String(e) };
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -8264,20 +8271,22 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
     return result;
   };
 
+  // Both trade handlers report whether the trade applied, so PortView can
+  // confirm the transaction to the player instead of mutating silently.
   const buyGood = (commodity, qty, price) => {
     const grossCost = qty * price;
     const taxRate = portTaxRate(gs, gs.location);
     const tax = Math.round(grossCost * taxRate);
     const cost = grossCost + tax;
-    if (gs.money < cost) return;
+    if (gs.money < cost) return false;
     // Hold cap: total stowage of current goods plus this purchase must fit.
     const w = COMMODITIES[commodity].weight;
     const projected = cargoWeight(gs.goods) + qty * w;
-    if (projected > cargoCap(gs)) return;
+    if (projected > cargoCap(gs)) return false;
     // Port stock: cannot buy more than the wharf has on hand.
     const stockHere = gs.portStocks?.[gs.location] || {};
     const available = Math.floor(stockHere[commodity] ?? Infinity);
-    if (qty > available) return;
+    if (qty > available) return false;
     const taxLine = tax > 0 ? `, with £${tax} duty to the Dutch` : '';
     setGs(prev => ({
       ...prev,
@@ -8292,10 +8301,11 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
       },
       journal: [...prev.journal, { day: prev.day, entry: `Bought ${qty} ${COMMODITIES[commodity].unit} of ${COMMODITIES[commodity].name} at ${gs.location} for £${grossCost}${taxLine}.` }],
     }));
+    return true;
   };
 
   const sellGood = (commodity, qty, price) => {
-    if ((gs.goods[commodity] || 0) < qty) return;
+    if ((gs.goods[commodity] || 0) < qty) return false;
     const grossProceeds = qty * price;
     const taxRate = portTaxRate(gs, gs.location);
     const tax = Math.round(grossProceeds * taxRate);
@@ -8307,6 +8317,7 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
       goods: { ...prev.goods, [commodity]: prev.goods[commodity] - qty },
       journal: [...prev.journal, { day: prev.day, entry: `Sold ${qty} ${COMMODITIES[commodity].unit} of ${COMMODITIES[commodity].name} at ${gs.location} for £${grossProceeds}${taxLine}.` }],
     }));
+    return true;
   };
 
   // Move goods from the ship's hold into the godown at Bayan-Kor.
@@ -10159,7 +10170,16 @@ function Header({ gs, onReturnToTitle, onSuccession, onRenewal, viewportMode, sy
             {gs.player.name}, Factor at {gs.location}
           </h1>
           <div className="display" style={{ fontSize: '0.85em', color: '#6b4423', letterSpacing: '0.1em', marginTop: '0.3rem' }}>
-            DAY {gs.day} · £{gs.money} · HOLD {fmtCwt(cargoWeight(gs.goods))}/{cargoCap(gs)} · {gs.charterClosed ? 'CHARTER CLOSED' : `${gs.daysRemaining} DAYS REMAIN`}
+            DAY {gs.day} · £{gs.money} · HOLD {fmtCwt(cargoWeight(gs.goods))}/{cargoCap(gs)} ·{' '}
+            {gs.charterClosed
+              ? 'CHARTER CLOSED'
+              : (
+                <span style={gs.daysRemaining <= 90
+                  ? { color: '#8b1a1a', fontWeight: 700 }
+                  : (gs.daysRemaining <= 180 ? { color: '#8b1a1a' } : undefined)}>
+                  {gs.daysRemaining} DAYS REMAIN
+                </span>
+              )}
           </div>
           <div className="display" style={{ fontSize: '0.78em', color: '#8a6a3f', letterSpacing: '0.08em', marginTop: '0.2rem' }}>
             GODOWN {fmtCwt(warehouseUsed(gs))}/{warehouseCap(gs)} · LONDON: PEPPER {Math.floor(gs.quotas?.pepper?.have || 0)}/{gs.quotas?.pepper?.needed ?? 400} · CINNAMON {Math.floor(gs.quotas?.cinnamon?.have || 0)}/{gs.quotas?.cinnamon?.needed ?? 200}
@@ -11054,6 +11074,30 @@ function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab, lodg
   const remaining = Math.max(0, cap - used);
   const ship = gs.ship || { name: 'The Pinnace', hull: 100, sails: 100 };
 
+  // Transient trade confirmation. The strongbox/hold figures live in the
+  // header, usually scrolled off-screen on a phone mid-trade — without this
+  // a tap on Buy/Sell looks like nothing happened.
+  const [tradeNote, setTradeNote] = useState(null);
+  const tradeNoteTimer = useRef(null);
+  useEffect(() => () => { if (tradeNoteTimer.current) clearTimeout(tradeNoteTimer.current); }, []);
+  const showTradeNote = (text) => {
+    if (tradeNoteTimer.current) clearTimeout(tradeNoteTimer.current);
+    setTradeNote({ key: Date.now(), text });
+    tradeNoteTimer.current = setTimeout(() => setTradeNote(null), 2600);
+  };
+  const buyWithNote = (c, qty, price) => {
+    if (!buyGood(c, qty, price)) return;
+    const gross = qty * price;
+    const duty = Math.round(gross * taxRate);
+    showTradeNote(`Bought ${qty} ${COMMODITIES[c].unit} of ${COMMODITIES[c].name} for £${gross + duty}${duty > 0 ? `, £${duty} of it duty` : ''}.`);
+  };
+  const sellWithNote = (c, qty, price) => {
+    if (!sellGood(c, qty, price)) return;
+    const gross = qty * price;
+    const duty = Math.round(gross * taxRate);
+    showTradeNote(`Sold ${qty} ${COMMODITIES[c].unit} of ${COMMODITIES[c].name} — £${gross - duty} to the strongbox${duty > 0 ? `, less £${duty} duty` : ''}.`);
+  };
+
   // Compute the largest qty the player can buy of a commodity, given money,
   // hold capacity, and port stock. Tax inflates per-unit cost when buying at
   // a port that levies duty (Dutch).
@@ -11150,9 +11194,9 @@ function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab, lodg
                   </div>
                 </div>
                 <div className="actions">
-                  <button className="ghost-button-sm" disabled={max < 1}  onClick={() => buyGood(c, 1, price)}>Buy 1</button>
-                  <button className="ghost-button-sm" disabled={max < 5}  onClick={() => buyGood(c, 5, price)}>Buy 5</button>
-                  <button className="ghost-button-sm" disabled={max < 1}  onClick={() => buyGood(c, max, price)}>Buy max ({max})</button>
+                  <button className="ghost-button-sm" disabled={max < 1}  onClick={() => buyWithNote(c, 1, price)}>Buy 1</button>
+                  <button className="ghost-button-sm" disabled={max < 5}  onClick={() => buyWithNote(c, 5, price)}>Buy 5</button>
+                  <button className="ghost-button-sm" disabled={max < 1}  onClick={() => buyWithNote(c, max, price)}>Buy max ({max})</button>
                 </div>
               </div>
             );
@@ -11171,15 +11215,29 @@ function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab, lodg
                   <div style={{ fontSize: '0.85em', color: '#6b4423' }}>£{price} per {COMMODITIES[c].unit}{taxRate > 0 ? ` (£${netPrice} after duty)` : ''}</div>
                 </div>
                 <div className="actions">
-                  <button className="ghost-button-sm" disabled={have < 1} onClick={() => sellGood(c, 1, price)}>Sell 1</button>
-                  <button className="ghost-button-sm" disabled={have < 5} onClick={() => sellGood(c, 5, price)}>Sell 5</button>
-                  <button className="ghost-button-sm" disabled={have < 1} onClick={() => sellGood(c, have, price)}>Sell all</button>
+                  <button className="ghost-button-sm" disabled={have < 1} onClick={() => sellWithNote(c, 1, price)}>Sell 1</button>
+                  <button className="ghost-button-sm" disabled={have < 5} onClick={() => sellWithNote(c, 5, price)}>Sell 5</button>
+                  <button className="ghost-button-sm" disabled={have < 1} onClick={() => sellWithNote(c, have, price)}>Sell all</button>
                 </div>
               </div>
             );
           })}
         </div>
       </div>
+
+      {tradeNote && (
+        <div key={tradeNote.key} className="ink-fade-in" style={{
+          position: 'fixed', left: '50%', transform: 'translateX(-50%)',
+          bottom: 'calc(1rem + env(safe-area-inset-bottom, 0px))',
+          maxWidth: 'min(92vw, 28rem)', zIndex: 60, pointerEvents: 'none',
+          background: '#f0e3c4', border: '1px solid #6b4423', borderLeft: '3px solid #5c1a08',
+          boxShadow: '0 2px 10px rgba(42,26,10,0.25)', padding: '0.5rem 0.9rem',
+          fontFamily: '"EB Garamond", serif', fontStyle: 'italic',
+          color: '#4a3220', fontSize: '0.92em',
+        }}>
+          {tradeNote.text}
+        </div>
+      )}
 
       {atHome && lodgeGoods && withdrawGoods && (
         <GodownPanel gs={gs} lodgeGoods={lodgeGoods} withdrawGoods={withdrawGoods} />
@@ -11218,7 +11276,7 @@ function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab, lodg
       {(() => {
         const sub = activeSublocation(gs.location, gs);
         if (!sub) return null;
-        return <SublocationPanel gs={gs} sub={sub} buyGood={buyGood} taxRate={taxRate} />;
+        return <SublocationPanel gs={gs} sub={sub} buyGood={buyWithNote} taxRate={taxRate} />;
       })()}
 
       <ContractRunPanel gs={gs} liftContractOpium={liftContractOpium} runDutchCustoms={runDutchCustoms} />

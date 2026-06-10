@@ -15,6 +15,7 @@ import {
 import { priceWindowMult, pruneExpiredWindows } from './src/util/price-windows.js';
 import { pickPlate } from './src/util/plates.js';
 import { canOfferSabotage, resolveSabotage, sabotageCoda } from './src/util/sabotage.js';
+import { recordTrade, reckonRows, reckonTotal } from './src/util/trade-stats.js';
 
 // ─────────── FACTOR KEY (cross-device identity) ───────────
 //
@@ -960,6 +961,7 @@ const ensureShape = (gs) => {
     }
   }
   if (!Array.isArray(next.acquaintances)) next.acquaintances = [];
+  if (!next.tradeStats || typeof next.tradeStats !== 'object') next.tradeStats = {};
   if (!next.flags || typeof next.flags !== 'object') next.flags = {};
   if (!Array.isArray(next.aiLog)) next.aiLog = [];
   if (!next.outpost || typeof next.outpost !== 'object') {
@@ -4295,6 +4297,7 @@ function makeSuccessorState(prev, newName) {
     privateConsignmentOffered: false,
     bottomry: null,                      // any outstanding bond is the predecessor's; the new Factor inherits no debt at the bazaar
     privateTradeProceeds: 0,             // cumulative private trade income, fresh per Factor
+    tradeStats: {},                      // the predecessor's books close with him
     letters: [makeSuccessorDirectorLetter(prev, newName, moneyKept)],
     hooks: [],
     journal: [{ day: 1, entry: `Took up the Charter at Bayan-Kor in succession to ${prev.player?.name || 'the late Factor'}.` }],
@@ -4381,6 +4384,7 @@ function makeRenewedState(prev) {
     privateConsignmentOffered: false,
     bottomry: null,                  // outstanding bond from the previous charter is settled with the bazaar; the renewed Factor begins clear
     privateTradeProceeds: 0,         // cumulative private trade income resets per charter
+    tradeStats: {},                  // "Reckonings of the previous charter are closed"
     letters: [makeRenewalDirectorLetter(prev)],
     hooks: [],
     journal: [{ day: 1, entry: `Charter renewed at Bayan-Kor for a second three years.` }],
@@ -6644,8 +6648,21 @@ Return JSON: { "prose": "..." }`;
 
 // ─────────── COMPONENTS ───────────
 
-const FONT_IMPORT = `
-@import url('https://fonts.googleapis.com/css2?family=IM+Fell+English:ital@0;1&family=IM+Fell+English+SC&family=IM+Fell+DW+Pica:ital@0;1&family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400&display=swap');
+// PWA: the woff2 latin subsets are vendored at public/fonts/ and land in the
+// Workbox precache, so a first-ever offline launch renders fully styled.
+// Legacy artifact runtime (`window.storage` present, same detection as
+// plates.js): relative /fonts/ paths would 404 in the iframe, so it keeps
+// the Google Fonts import. EB Garamond is one variable file covering 400–600.
+const FONT_IMPORT = (typeof window !== 'undefined' && window.storage)
+  ? `
+@import url('https://fonts.googleapis.com/css2?family=IM+Fell+English:ital@0;1&family=IM+Fell+English+SC&family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400&display=swap');
+`
+  : `
+@font-face { font-family: 'EB Garamond'; font-style: normal; font-weight: 400 600; font-display: swap; src: url('/fonts/eb-garamond-400-600.woff2') format('woff2'); }
+@font-face { font-family: 'EB Garamond'; font-style: italic; font-weight: 400; font-display: swap; src: url('/fonts/eb-garamond-400-italic.woff2') format('woff2'); }
+@font-face { font-family: 'IM Fell English'; font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/im-fell-english-400.woff2') format('woff2'); }
+@font-face { font-family: 'IM Fell English'; font-style: italic; font-weight: 400; font-display: swap; src: url('/fonts/im-fell-english-400-italic.woff2') format('woff2'); }
+@font-face { font-family: 'IM Fell English SC'; font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/im-fell-english-sc-400.woff2') format('woff2'); }
 `;
 
 const Page = ({ children }) => (
@@ -8292,6 +8309,7 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
       ...prev,
       money: prev.money - cost,
       goods: { ...prev.goods, [commodity]: (prev.goods[commodity] || 0) + qty },
+      tradeStats: recordTrade(prev.tradeStats, { kind: 'buy', commodity, qty, amount: cost }),
       portStocks: {
         ...prev.portStocks,
         [prev.location]: {
@@ -8315,6 +8333,7 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
       ...prev,
       money: prev.money + proceeds,
       goods: { ...prev.goods, [commodity]: prev.goods[commodity] - qty },
+      tradeStats: recordTrade(prev.tradeStats, { kind: 'sell', commodity, qty, amount: proceeds }),
       journal: [...prev.journal, { day: prev.day, entry: `Sold ${qty} ${COMMODITIES[commodity].unit} of ${COMMODITIES[commodity].name} at ${gs.location} for £${grossProceeds}${taxLine}.` }],
     }));
     return true;
@@ -10802,6 +10821,37 @@ function LedgerView({ gs }) {
               ))}
             </tbody>
           </table>
+          {(() => {
+            const rows = reckonRows(gs.tradeStats);
+            if (rows.length === 0) return null;
+            const total = reckonTotal(gs.tradeStats);
+            const fmtAvg = (v) => (v === null ? '—' : `£${Math.round(v * 10) / 10}`);
+            const tone = (n) => (n > 0 ? '#3a5c2a' : n < 0 ? '#8b1a1a' : '#6b4423');
+            return (
+              <div style={{ marginTop: '1.5rem' }}>
+                <div className="display" style={{ fontSize: '0.9em', color: '#6b4423', marginBottom: '0.5rem' }}>THE TRADE RECKONING</div>
+                {rows.map(r => (
+                  <div key={r.commodity} style={{ marginBottom: '0.45rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.95em' }}>
+                      <span>{COMMODITIES[r.commodity]?.name || r.commodity}</span>
+                      <span style={{ color: tone(r.realized) }}>{r.realized > 0 ? '+' : ''}£{r.realized}</span>
+                    </div>
+                    <div style={{ fontSize: '0.78em', color: '#6b4423', fontStyle: 'italic' }}>
+                      {r.boughtQty > 0 ? `bought ${r.boughtQty} at ${fmtAvg(r.avgBuy)} ea.` : 'got without purchase'}
+                      {r.soldQty > 0 ? ` · sold ${r.soldQty} at ${fmtAvg(r.avgSell)} ea.` : ' · none yet sold'}
+                    </div>
+                  </div>
+                ))}
+                <div style={{ borderTop: '1px solid rgba(74,44,20,0.3)', paddingTop: '0.35rem', marginTop: '0.5rem', display: 'flex', justifyContent: 'space-between', fontSize: '0.95em' }}>
+                  <span className="display" style={{ fontSize: '0.82em', color: '#6b4423' }}>NET OF ALL DEALINGS</span>
+                  <span style={{ color: tone(total), fontWeight: 600 }}>{total > 0 ? '+' : ''}£{total}</span>
+                </div>
+                <div style={{ fontSize: '0.72em', color: '#8b7050', fontStyle: 'italic', marginTop: '0.3rem' }}>
+                  Duty reckoned against the margin. Goods got without purchase count at their full proceeds.
+                </div>
+              </div>
+            );
+          })()}
         </div>
       </div>
 

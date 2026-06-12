@@ -12,7 +12,7 @@ import {
   computeRivalPressure,
   pickRivalEvent,
 } from './src/util/rivalry.js';
-import { priceWindowMult, pruneExpiredWindows } from './src/util/price-windows.js';
+import { priceWindowMult, pruneExpiredWindows, activeWindowsFor, priceDrift } from './src/util/price-windows.js';
 import { pickPlate } from './src/util/plates.js';
 import { canOfferSabotage, resolveSabotage, sabotageCoda } from './src/util/sabotage.js';
 import { recordTrade, reckonRows, reckonTotal } from './src/util/trade-stats.js';
@@ -677,7 +677,7 @@ const BUILDINGS = {
     name: 'Stockade',
     days: 30, cost: 80,
     blurb: 'A timber palisade and a watchtower of palmyra logs. Discourages opportunists, and reassures the night-watch.',
-    effect: 'Reduces the chance of incident in your absence.',
+    effect: 'Halves the chance of a raid on the godown; fewer incidents at home.',
   },
   counting_house: {
     name: 'Counting House',
@@ -703,7 +703,7 @@ const BUILDINGS = {
     days: 75, cost: 180,
     blurb: 'Quarters for a proper guard. Three sepoys quartered, paid by the Company.',
     requires: { rep: { crown: 5 } },
-    effect: 'Reduces piracy risk on voyages and incidents at home.',
+    effect: 'Halves the chance of a godown raid again; a garrison steadies the compound.',
   },
   shipwright: {
     name: 'Shipwright\u2019s Yard',
@@ -802,8 +802,38 @@ const priceFor = (portKey, commodity, day, gs) => {
   const fluct = ((hashCode(`${day}-${portKey}-${commodity}`) % 21) - 10) / 100;
   const side = port.sells?.[commodity] != null ? 'sell' : 'buy';
   const windowMult = gs ? priceWindowMult(gs, portKey, commodity, side) : 1;
-  return Math.max(1, Math.round(base * mult * (1 + fluct) * windowMult));
+  // Counting House: the registry has promised "modestly improves your prices
+  // in port" since v1 but nothing read the flag. Now it's true — 3% in the
+  // Factor's favour on either side of the bargain, at every port (Hodge's
+  // letters of advice travel with the ship).
+  const booksMult = gs?.outpost?.buildings?.counting_house?.built
+    ? (side === 'sell' ? 0.97 : 1.03)
+    : 1;
+  return Math.max(1, Math.round(base * mult * (1 + fluct) * windowMult * booksMult));
 };
+
+// The port's own fair rate for a commodity — base × port multiplier ×
+// counting-house edge, before daily flux and event windows. The reference
+// the UI drifts against; keep in step with priceFor above.
+const fairPriceFor = (portKey, commodity, side, gs) => {
+  const port = PORTS[portKey];
+  const mult = (side === 'sell' ? port.sells?.[commodity] : port.buys?.[commodity]) ?? 1;
+  const booksMult = gs?.outpost?.buildings?.counting_house?.built
+    ? (side === 'sell' ? 0.97 : 1.03)
+    : 1;
+  return COMMODITIES[commodity].basePrice * mult * booksMult;
+};
+
+// Goods that draw thieves to the godown, and the standing defenses. Single
+// source for the tickDays raid roll, the Outpost night-watch note, and the
+// chart's departure warning.
+const RAID_TEMPTATIONS = ['pepper', 'cinnamon', 'silver', 'opium', 'sandalwood'];
+const raidPosture = (gs) => ({
+  tempting: RAID_TEMPTATIONS.filter(k => Math.floor(gs.outpost?.warehouse?.[k] ?? 0) >= 1),
+  stockade: !!gs.outpost?.buildings?.stockade?.built,
+  barracks: !!gs.outpost?.buildings?.barracks?.built,
+  magazine: !!gs.outpost?.buildings?.magazine?.built,
+});
 
 // Port duty (Dutch tax at Port St. Eustace) — proportion of transaction value.
 // Standing fine-tunes (cordial -25%, warm -10%, cool +25%, hostile +60%);
@@ -3472,7 +3502,7 @@ const RIVAL_EVENTS = [
     standingAfter: 'troubled',
     pressureDelta: -10,
     pressureLifetime: 60,
-    priceWindow: { port: 'Kota Pinang', commodity: 'pepper', sellMult: 1.25, days: 60 },
+    priceWindow: { port: 'Kota Pinang', commodity: 'pepper', sellMult: 1.25, days: 60, label: 'the fire at Hardacre\u2019s godown' },
     build: (s, opts) => ({
       id: 9405000 + s.day,
       from: 'A correspondent, by the next packet',
@@ -3576,7 +3606,7 @@ const RIVAL_EVENTS = [
     preconditions: (s) => true,
     standingDelta: -10,
     pressureDelta: -8, pressureLifetime: 45,
-    priceWindow: { port: 'Kota Pinang', commodity: 'cinnamon', sellMult: 1.15, days: 45 },
+    priceWindow: { port: 'Kota Pinang', commodity: 'cinnamon', sellMult: 1.15, days: 45, label: 'Hardacre\u2019s grounded shipping' },
     build: (s, opts) => ({
       id: 9400300 + s.day,
       from: 'Capt. Thomas Faulke, of the Albatross',
@@ -3658,7 +3688,7 @@ const RIVAL_EVENTS = [
     preconditions: (s) => true,
     standingDelta: -8,
     pressureDelta: -5, pressureLifetime: 45,
-    priceWindow: { port: 'Port St. Eustace', commodity: 'sandalwood', buyMult: 1.15, days: 45 },
+    priceWindow: { port: 'Port St. Eustace', commodity: 'sandalwood', buyMult: 1.15, days: 45, label: 'the Dutch customs quarrel' },
     build: (s, opts) => ({
       id: 9410000 + s.day,
       from: 'Mynheer Hendrik Boom',
@@ -3809,7 +3839,7 @@ const RIVAL_EVENTS = [
     preconditions: (s) => true,
     standingDelta: -5,
     pressureDelta: -4, pressureLifetime: 30,
-    priceWindow: { port: 'Port St. Eustace', commodity: 'silver', buyMult: 1.10, days: 30 },
+    priceWindow: { port: 'Port St. Eustace', commodity: 'silver', buyMult: 1.10, days: 30, label: 'ter Borch\u2019s interrupted silver trade' },
     build: (s, opts) => ({
       id: 9410500 + s.day,
       from: 'Mynheer Hendrik Boom',
@@ -3838,7 +3868,7 @@ const RIVAL_EVENTS = [
     standingDelta: -15,
     standingAfter: 'troubled',
     pressureDelta: -7, pressureLifetime: 60,
-    priceWindow: { port: 'Bayan-Kor', commodity: 'calico', buyMult: 0.85, days: 60 },
+    priceWindow: { port: 'Bayan-Kor', commodity: 'calico', buyMult: 0.85, days: 60, label: 'Lowji\u2019s lost cargo' },
     build: (s, opts) => ({
       id: 9420000 + s.day,
       from: 'Mr. Pestonji Cama',
@@ -3966,7 +3996,7 @@ const RIVAL_EVENTS = [
     preconditions: (s) => true,
     standingDelta: -5,
     pressureDelta: -3, pressureLifetime: 30,
-    priceWindow: { port: 'Bayan-Kor', commodity: 'calico', buyMult: 0.85, days: 30 },
+    priceWindow: { port: 'Bayan-Kor', commodity: 'calico', buyMult: 0.85, days: 30, label: 'Lowji\u2019s calico glut' },
     build: (s, opts) => ({
       id: 9420400 + s.day,
       from: 'Mr. Pestonji Cama',
@@ -5227,7 +5257,7 @@ function tickDays(gs, days) {
 
     // ── Raid: opportunists at the godown. Stockade halves the chance, the
     // Barracks halves it again. The Magazine caps any single loss at 10%.
-    const raidPool = ['pepper', 'cinnamon', 'silver', 'opium', 'sandalwood']
+    const raidPool = RAID_TEMPTATIONS
       .filter(k => Math.floor(s.outpost.warehouse?.[k] ?? 0) >= 1);
     if (raidPool.length > 0) {
       let raidChance = 0.012;
@@ -10992,6 +11022,16 @@ function MapView({ gs, sailTo }) {
       <p className="italic" style={{ color: '#4a3220', marginBottom: '1.5rem' }}>
         You are at <strong>{gs.location}</strong>. Where shall the pinnace lie next?
       </p>
+      {gs.location === 'Bayan-Kor' && (() => {
+        const p = raidPosture(gs);
+        if (p.tempting.length === 0 || p.stockade || p.barracks) return null;
+        return (
+          <p className="italic" style={{ color: '#6b4423', fontSize: '0.88em', marginTop: '-0.8rem', marginBottom: '1.2rem' }}>
+            The godown will lie under light watch while you are at sea; what it holds may draw thieves.
+            A stockade would ease the matter.
+          </p>
+        );
+      })()}
       {tooDamaged && (
         <div style={{ padding: '0.7rem 0.9rem', background: 'rgba(139,26,26,0.08)', borderLeft: '3px solid #8b1a1a', marginBottom: '1.2rem' }}>
           <p className="italic" style={{ margin: 0, color: '#8b1a1a', fontSize: '0.92em' }}>
@@ -11152,6 +11192,30 @@ function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab, lodg
   // hold capacity, and port stock. Tax inflates per-unit cost when buying at
   // a port that levies duty (Dutch).
   const taxRate = portTaxRate(gs, gs.location);
+
+  // Today's price against this port's own fair rate, and the cause when an
+  // event window is moving the market — so a shifted price reads as news,
+  // not noise.
+  const driftBit = (c, price, side) => {
+    const d = priceDrift(price, fairPriceFor(gs.location, c, side, gs));
+    if (d === 'par') return null;
+    const good = side === 'sell' ? d === 'low' : d === 'high';
+    const word = side === 'sell'
+      ? (d === 'low' ? 'cheap today' : 'dear today')
+      : (d === 'high' ? 'fetches dear' : 'fetches poorly');
+    return <span style={{ color: good ? '#3a5c2a' : '#8b1a1a', fontStyle: 'italic' }}> · {word}</span>;
+  };
+  const windowBit = (c, side) => {
+    const ws = activeWindowsFor(gs, gs.location, c, side);
+    if (ws.length === 0) return null;
+    const w = ws[ws.length - 1];
+    const left = w.expiresDay - gs.day;
+    return (
+      <div style={{ fontSize: '0.78em', color: '#6b4423', fontStyle: 'italic', marginTop: '0.1rem' }}>
+        ⁕ {w.label || 'a disturbance in the market'} moves this price — {left} day{left !== 1 ? 's' : ''} more.
+      </div>
+    );
+  };
   const maxBuyable = (c, price) => {
     const w = COMMODITIES[c].weight;
     const perUnit = Math.max(1, Math.ceil(price * (1 + taxRate)));
@@ -11237,11 +11301,12 @@ function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab, lodg
                 <div>
                   <div>{COMMODITIES[c].name}</div>
                   <div style={{ fontSize: '0.85em', color: '#6b4423' }}>
-                    £{price} per {COMMODITIES[c].unit}{taxRate > 0 ? ` (£${effPrice} w/ duty)` : ''} · {COMMODITIES[c].weight} cwt ea ·{' '}
+                    £{price} per {COMMODITIES[c].unit}{taxRate > 0 ? ` (£${effPrice} w/ duty)` : ''}{driftBit(c, price, 'sell')} · {COMMODITIES[c].weight} cwt ea ·{' '}
                     <span style={{ color: onHand === 0 ? '#8b1a1a' : '#6b4423' }}>
                       {onHand === 0 ? 'none on hand' : `${onHand} on hand`}
                     </span>
                   </div>
+                  {windowBit(c, 'sell')}
                 </div>
                 <div className="actions">
                   <button className="ghost-button-sm" disabled={max < 1}  onClick={() => buyWithNote(c, 1, price)}>Buy 1</button>
@@ -11262,7 +11327,8 @@ function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab, lodg
               <div key={c} className="trade-row">
                 <div>
                   <div>{COMMODITIES[c].name} <span style={{ fontSize: '0.85em', color: '#6b4423' }}>(have {have})</span></div>
-                  <div style={{ fontSize: '0.85em', color: '#6b4423' }}>£{price} per {COMMODITIES[c].unit}{taxRate > 0 ? ` (£${netPrice} after duty)` : ''}</div>
+                  <div style={{ fontSize: '0.85em', color: '#6b4423' }}>£{price} per {COMMODITIES[c].unit}{taxRate > 0 ? ` (£${netPrice} after duty)` : ''}{driftBit(c, price, 'buy')}</div>
+                  {windowBit(c, 'buy')}
                 </div>
                 <div className="actions">
                   <button className="ghost-button-sm" disabled={have < 1} onClick={() => sellWithNote(c, 1, price)}>Sell 1</button>
@@ -11735,6 +11801,30 @@ function OutpostView({ gs, startBuild, expediteBuild, viewportMode }) {
       <p className="italic" style={{ color: '#4a3220', marginBottom: '1rem' }}>
         The compound at Bayan-Kor is yours to build. Construction continues whether you are present or at sea.
       </p>
+
+      {(() => {
+        const p = raidPosture(gs);
+        if (p.tempting.length === 0) return null;
+        const names = p.tempting.map(k => COMMODITIES[k].name.toLowerCase()).join(', ');
+        const watch = p.stockade && p.barracks
+          ? 'Stockade and sepoys both keep the compound; few will chance it.'
+          : p.stockade
+            ? 'The stockade tower is kept by night; a Barracks would halve the remaining risk.'
+            : p.barracks
+              ? 'The sepoys stand guard; a Stockade would halve the remaining risk.'
+              : 'The yard lies open. A Stockade would halve the chance of a raid; a Barracks would halve it again.';
+        const mag = p.magazine
+          ? ' The Magazine caps any single loss at a tenth.'
+          : ' A Powder Magazine would cap any single loss at a tenth.';
+        return (
+          <div style={{ padding: '0.7rem 0.9rem', background: 'rgba(255,255,255,0.3)', borderLeft: '3px solid #5c1a08', marginBottom: '1.2rem' }}>
+            <div className="display" style={{ fontSize: '0.85em', color: '#5c1a08', marginBottom: '0.2rem' }}>THE NIGHT WATCH</div>
+            <p className="italic" style={{ margin: 0, color: '#4a3220', fontSize: '0.9em' }}>
+              The godown holds {names} — temptation for the inland brigands. {watch}{mag}
+            </p>
+          </div>
+        );
+      })()}
 
       <div style={containerStyle}>
         {/* STANDING STRUCTURES — always shown on desktop so the grid has three

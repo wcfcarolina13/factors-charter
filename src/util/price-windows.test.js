@@ -1,5 +1,46 @@
 import { describe, it, expect } from 'vitest';
-import { priceWindowMult, pruneExpiredWindows } from './price-windows.js';
+import { priceWindowMult, pruneExpiredWindows, activeWindowsFor, priceDrift } from './price-windows.js';
+
+describe('activeWindowsFor', () => {
+  const gs = {
+    day: 100,
+    priceWindows: [
+      { port: 'Kota Pinang', commodity: 'pepper', sellMult: 1.25, expiresDay: 160, label: 'the fire' },
+      { port: 'Kota Pinang', commodity: 'pepper', buyMult: 0.9, expiresDay: 160 },
+      { port: 'Kota Pinang', commodity: 'pepper', sellMult: 1.1, expiresDay: 100 }, // expired today
+      { port: 'Bayan-Kor', commodity: 'pepper', sellMult: 1.1, expiresDay: 160 },   // other port
+    ],
+  };
+
+  it('matches port, commodity, side, and unexpired only', () => {
+    const got = activeWindowsFor(gs, 'Kota Pinang', 'pepper', 'sell');
+    expect(got).toHaveLength(1);
+    expect(got[0].label).toBe('the fire');
+  });
+
+  it('matches the buy side independently', () => {
+    expect(activeWindowsFor(gs, 'Kota Pinang', 'pepper', 'buy')).toHaveLength(1);
+  });
+
+  it('returns [] on missing state', () => {
+    expect(activeWindowsFor({}, 'Kota Pinang', 'pepper', 'sell')).toEqual([]);
+    expect(activeWindowsFor(undefined, 'Kota Pinang', 'pepper', 'sell')).toEqual([]);
+  });
+});
+
+describe('priceDrift', () => {
+  it('tags low at 6% under fair and high at 6% over', () => {
+    expect(priceDrift(94, 100)).toBe('low');
+    expect(priceDrift(106, 100)).toBe('high');
+  });
+
+  it('tags par inside the band and on degenerate input', () => {
+    expect(priceDrift(100, 100)).toBe('par');
+    expect(priceDrift(105, 100)).toBe('par');
+    expect(priceDrift(95, 100)).toBe('par');
+    expect(priceDrift(10, 0)).toBe('par');
+  });
+});
 
 describe('priceWindowMult', () => {
   it('returns 1 when no windows exist', () => {

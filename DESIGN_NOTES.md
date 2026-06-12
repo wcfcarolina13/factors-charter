@@ -27,15 +27,26 @@ are listed at the bottom so they don't get re-reported.
    total. Aggregate-level, not per-voyage/route — if route-level P&L is
    still wanted after play, that's a follow-up needing voyage-boundary
    tracking.
-2. **Price opacity** (M) — `priceFor` stacks day-flux × window × standing
-   multipliers but the player sees only the final figure. Candidate: a small
-   "price drivers" line in PortView (standing discount, active event), and/or
-   a cheap/fair/dear tag everywhere prices render.
-3. **Raid agency** (M) — raids roll in `tickDays` with no foreshadowing and
-   no response choice; stockade/barracks mitigation exists but the
-   cost-benefit is never surfaced in OutpostView. Candidate: intelligence
-   letter before, response choices in the away digest after, mitigation
-   numbers on the buildings.
+2. ~~**Price opacity**~~ — shipped 2026-06-12. PortView trade rows now carry
+   a drift tag against the port's own fair rate ("cheap today" / "dear
+   today" on sales; "fetches dear" / "fetches poorly" on purchases; silent
+   inside ±6%), and event windows are attributed by name ("⁕ Lowji's calico
+   glut moves this price — 30 days more") via new `label` fields on all six
+   rivalry priceWindows. Helpers `activeWindowsFor` / `priceDrift` in
+   `src/util/price-windows.js`. Bonus: the Counting House's promised
+   "modestly improves your prices" is now real — 3% in the Factor's favour
+   on both sides, folded into `priceFor` and the fair-rate reference.
+3. ~~**Raid agency**~~ — shipped 2026-06-12 (note: the audit overstated
+   this — an away-digest raid response choice already existed via
+   `handleResolveRaid`). What was missing and now ships: a "THE NIGHT
+   WATCH" posture card in OutpostView (which godown goods draw thieves,
+   what the standing defenses do, what the next building would add), a
+   departure warning on the chart when sailing from Bayan-Kor with a
+   stocked, undefended godown, and corrected effect strings — stockade/
+   barracks now state the real halving math (the barracks string falsely
+   claimed a voyage-piracy effect). `RAID_TEMPTATIONS` + `raidPosture` are
+   the single source shared with the tickDays roll. Pre-raid intelligence
+   letters remain open as a content item if wanted later.
 4. **Fine-goods balance check** (needs playtest data, not code yet) —
    diamonds/ambergris (near-zero weight, £150–200 base) are quota-exempt and
    may dominate late-game income. Gated to the Nest behind pirates rep, so

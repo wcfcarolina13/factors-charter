@@ -4,6 +4,21 @@ The Factor's Charter — a chronological log of what's shipped. Newest first.
 
 ---
 
+## 2026-06-12 — Price drivers + raid posture (Phase 3 of June audit)
+
+Items 2 and 3 from the audit triage: the game stops hiding its math.
+
+- **Price drift tags.** Every PortView trade row now reads today's price against the port's own fair rate (base × port multiplier × counting-house edge): sales tag "cheap today" / "dear today", purchases tag "fetches dear" / "fetches poorly", colored by advantage to the Factor, silent inside ±6% so most rows stay quiet. Complements MapView's existing structural cheap/fair/dear tags (those compare ports; this compares days).
+- **Event windows attributed by name.** All six rivalry `priceWindow` definitions gained `label` fields ("the fire at Hardacre's godown", "Lowji's calico glut", …). When a window is moving a price, the row shows "⁕ {label} moves this price — N days more." Unlabeled windows from old saves fall back to "a disturbance in the market". New pure helpers `activeWindowsFor` / `priceDrift` in `src/util/price-windows.js` (5 vitest cases; tests **140 → 145**).
+- **Counting House finally does what it says.** Its effect string has promised "modestly improves your prices in port" since v1 but nothing read the flag. Now real: 3% in the Factor's favour on both sides of every bargain, in `priceFor` and the fair-rate reference alike.
+- **Raid posture made visible.** New "THE NIGHT WATCH" card in OutpostView when the godown holds raid-pool goods: names the tempting goods, states what the standing defenses do, and quotes the concrete math for whatever's unbuilt (stockade halves raid chance, barracks halves again, magazine caps single loss at a tenth — matching the `tickDays` roll exactly, via shared `RAID_TEMPTATIONS`/`raidPosture`). The chart shows a departure warning when sailing from Bayan-Kor with a stocked, undefended godown. Stockade/barracks `effect` strings corrected to the real math — the barracks string falsely claimed a voyage-piracy effect that never existed.
+
+Audit note: the triage item's "no raid response choice" claim was wrong — `handleResolveRaid` already offers one in the away digest. Pre-raid intelligence letters remain open as a future content item.
+
+Verified live at mobile viewport: drift tags render selectively (par days stay untagged), window attribution shows under calico, night-watch card flips correctly between open/stockaded states, chart warning clears once defended, zero console errors. Tests 145/145; build clean.
+
+---
+
 ## 2026-06-09 — The Trade Reckoning + self-hosted fonts (Phase 2 of June audit)
 
 Top two items from the morning's audit triage.

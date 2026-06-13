@@ -38,6 +38,35 @@ real-time pressure, anything that breaks the quiet-ledger mood.
 
 ## Findings log (newest first)
 
+### Iteration 2 — 2026-06-12 — full voyage round-trip → return-leg bug
+
+**Played:** sold starting rum at home (£45), sailed to Kota Pinang, bought
+52cwt pepper at £8 (£416), sailed home. Watched the time/cost of the loop.
+
+**Finding (shipped, HIGH impact): return voyages were nearly free.**
+`voyageDays(gs, port)` used only the *destination's* `daysFromHome`. Home's is
+0 → `|| 1` → **every return to Bayan-Kor cost 1 day** regardless of how far you
+sailed out. A Kota Pinang trip was 3 days out, 1 day back — gutting the
+time-cost the map advertises ("3 days from Bayan-Kor") and flattening the
+risk/reward of far ports (a 7-day Nest run was really only 8 days round-trip,
+not 14). → **Fix:** leg cost = `max(origin.daysFromHome, destination.daysFromHome)`,
+so the return costs what the outbound did. Verified live: KP round-trip is now
+3 days each way (Day 5 → Day 9). This restores a core economic tension — far
+ports are now real commitments, making the "where do I sail" decision matter.
+Also fixed the "after 1 days" / "N days" pluralization on both arrival lines.
+
+**Bugs spotted, queued for a batched text-polish pass (don't sprinkle commits):**
+- Trade toast doesn't pluralize units: "Sold 5 barrel of Rum" → "barrels".
+  COMMODITIES units are singular; needs a small `pluralize(unit, n)` helper
+  applied at the toast + likely a few other unit render sites.
+- "Aline of squalls runs along the horizon" — missing space in a voyage
+  encounter prose string (source typo: "A line").
+
+**Still pending (carried from iter 1): the lodging/quota payoff beat** — the
+quota loop's reward is deferred + abstract (godown count, Indiaman later).
+Worth a focused look: does lodging the first pepper *feel* like progress?
+
+
 ### Iteration 1 — 2026-06-12 — opening playthrough → onboarding intel
 
 **Played:** fresh charter, full 4-beat prologue → Director letter → first port view.

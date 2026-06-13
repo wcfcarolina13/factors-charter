@@ -1012,7 +1012,12 @@ const applyVoyageWear = (ship, days) => {
 // (which trims one day off every voyage) and the ship type's voyageBonus
 // (the brigantine, on legs of 4+ days). Always returns at least 1.
 const voyageDays = (gs, port) => {
-  const base = port?.daysFromHome || 1;
+  // The world models distance as days-from-home only. A leg costs the GREATER
+  // of the two ports' home-distances, so the return trip costs what the
+  // outbound did — home's own distance is 0, which otherwise made every
+  // return ~1 day regardless of how far out you'd sailed.
+  const origin = PORTS[gs?.location];
+  const base = Math.max(port?.daysFromHome || 0, origin?.daysFromHome || 0) || 1;
   const hasShipwright = !!gs.outpost?.buildings?.shipwright?.built;
   // The Vizier's Bugis pilots know the strait and inland waters — one day off
   // any passage. Granted by the Vizier's boon (see makeVizierBoonLetter).
@@ -8411,7 +8416,7 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
         ship: applyVoyageWear(newGs.ship, baseDays),
         location: portKey,
         visited: newGs.visited.includes(portKey) ? newGs.visited : [...newGs.visited, portKey],
-        journal: [...newGs.journal, { day: newGs.day, entry: `Made landfall at ${portKey} after ${baseDays} days at sea, without incident worthy of record.` }],
+        journal: [...newGs.journal, { day: newGs.day, entry: `Made landfall at ${portKey} after ${baseDays} day${baseDays === 1 ? '' : 's'} at sea, without incident worthy of record.` }],
       };
 
       await arriveAt(newGs, portKey);
@@ -8485,7 +8490,7 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
         ship: applyVoyageWear(newGs.ship, totalDays),
         location: dest,
         visited: newGs.visited.includes(dest) ? newGs.visited : [...newGs.visited, dest],
-        journal: [...newGs.journal, { day: newGs.day, entry: `Made landfall at ${dest} after ${totalDays} days at sea.` }],
+        journal: [...newGs.journal, { day: newGs.day, entry: `Made landfall at ${dest} after ${totalDays} day${totalDays === 1 ? '' : 's'} at sea.` }],
       };
 
       setEncounter(null);

@@ -989,6 +989,15 @@ const fmtCwt = (n) => {
   return n.toFixed(1);
 };
 
+// Commodity unit, pluralized for a count. Measure-abbreviations (cwt, oz, lb)
+// don't take an 's'; the rest ("barrel", "sack", "string"…) do.
+const UNCOUNTABLE_UNITS = new Set(['cwt', 'oz', 'lb']);
+const unitLabel = (commodity, n) => {
+  const u = COMMODITIES[commodity]?.unit || 'unit';
+  if (n === 1 || UNCOUNTABLE_UNITS.has(u)) return u;
+  return `${u}s`;
+};
+
 // Wear applied per voyage day. Random within the ship type's range so a long
 // leg adds up. Returns a new ship object — does not mutate. Teak-hulled
 // brigantines wear noticeably slower than the pinnace.
@@ -8691,17 +8700,19 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
   // Move goods from the ship's hold into the godown at Bayan-Kor.
   // Pepper/cinnamon lodged here count toward the London quota (computed from
   // the warehouse stock at display time, not stored separately).
+  // Returns the amount actually moved (0 on a no-op) so the godown panel can
+  // confirm the lodging — the culmination of a quota voyage deserves a beat.
   const lodgeGoods = (commodity, qty) => {
-    if (gs.location !== 'Bayan-Kor') return;
+    if (gs.location !== 'Bayan-Kor') return 0;
     const have = gs.goods[commodity] || 0;
-    if (have < 1) return;
+    if (have < 1) return 0;
     const w = COMMODITIES[commodity].weight || 1;
     const cap = warehouseCap(gs);
     const used = warehouseUsed(gs);
     const room = Math.max(0, cap - used);
     const byRoom = w > 0 ? Math.floor(room / w) : qty;
     const move = Math.max(0, Math.min(qty, have, byRoom));
-    if (move <= 0) return;
+    if (move <= 0) return 0;
     setGs(prev => ({
       ...prev,
       goods: { ...prev.goods, [commodity]: (prev.goods[commodity] || 0) - move },
@@ -8714,6 +8725,7 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
       },
       journal: [...prev.journal, { day: prev.day, entry: `Lodged ${move} ${COMMODITIES[commodity].unit} of ${COMMODITIES[commodity].name} in the godown.` }],
     }));
+    return move;
   };
 
   // Move goods from the godown back to the ship's hold. Limited by hold cap.
@@ -10582,7 +10594,12 @@ function Header({ gs, onReturnToTitle, onSuccession, onRenewal, viewportMode, sy
               )}
           </div>
           <div className="display" style={{ fontSize: '0.78em', color: '#8a6a3f', letterSpacing: '0.08em', marginTop: '0.2rem' }}>
-            GODOWN {fmtCwt(warehouseUsed(gs))}/{warehouseCap(gs)} · LONDON: PEPPER {Math.floor(gs.quotas?.pepper?.have || 0)}/{gs.quotas?.pepper?.needed ?? 400} · CINNAMON {Math.floor(gs.quotas?.cinnamon?.have || 0)}/{gs.quotas?.cinnamon?.needed ?? 200}
+            {/* "Secured" = shipped to London PLUS lodged in the godown (which the
+                Indiaman lifts whole at her next call). Counting lodged makes the
+                quota number move the moment the player lodges — the payoff beat —
+                while the win condition and the Court's reckoning still run on
+                shipped alone (see the Ledger for the shipped/awaiting split). */}
+            GODOWN {fmtCwt(warehouseUsed(gs))}/{warehouseCap(gs)} · FOR LONDON: PEPPER {Math.floor(gs.quotas?.pepper?.have || 0) + Math.floor(gs.outpost?.warehouse?.pepper || 0)}/{gs.quotas?.pepper?.needed ?? 400} · CINNAMON {Math.floor(gs.quotas?.cinnamon?.have || 0) + Math.floor(gs.outpost?.warehouse?.cinnamon || 0)}/{gs.quotas?.cinnamon?.needed ?? 200}
           </div>
         </div>
         <SyncBadge gs={gs} sync={sync} />
@@ -11574,13 +11591,13 @@ function PortView({ gs, buyGood, sellGood, refitShip, arrivalProse, setTab, lodg
     if (!buyGood(c, qty, price)) return;
     const gross = qty * price;
     const duty = Math.round(gross * taxRate);
-    showTradeNote(`Bought ${qty} ${COMMODITIES[c].unit} of ${COMMODITIES[c].name} for £${gross + duty}${duty > 0 ? `, £${duty} of it duty` : ''}.`);
+    showTradeNote(`Bought ${qty} ${unitLabel(c, qty)} of ${COMMODITIES[c].name} for £${gross + duty}${duty > 0 ? `, £${duty} of it duty` : ''}.`);
   };
   const sellWithNote = (c, qty, price) => {
     if (!sellGood(c, qty, price)) return;
     const gross = qty * price;
     const duty = Math.round(gross * taxRate);
-    showTradeNote(`Sold ${qty} ${COMMODITIES[c].unit} of ${COMMODITIES[c].name} — £${gross - duty} to the strongbox${duty > 0 ? `, less £${duty} duty` : ''}.`);
+    showTradeNote(`Sold ${qty} ${unitLabel(c, qty)} of ${COMMODITIES[c].name} — £${gross - duty} to the strongbox${duty > 0 ? `, less £${duty} duty` : ''}.`);
   };
 
   // Compute the largest qty the player can buy of a commodity, given money,
@@ -11822,6 +11839,28 @@ function GodownPanel({ gs, lodgeGoods, withdrawGoods }) {
   const cap = warehouseCap(gs);
   const used = warehouseUsed(gs);
   const ware = gs.outpost?.warehouse || {};
+
+  // Lodging is the payoff of a quota voyage — confirm it with a beat, framed
+  // in quota terms for pepper/cinnamon ("N of 400 secured for London") so the
+  // headline number's meaning lands at the moment the cargo goes in.
+  const [lodgeNote, setLodgeNote] = useState(null);
+  const lodgeNoteTimer = useRef(null);
+  useEffect(() => () => { if (lodgeNoteTimer.current) clearTimeout(lodgeNoteTimer.current); }, []);
+  const lodgeWithNote = (c, qty) => {
+    const moved = lodgeGoods(c, qty);
+    if (!moved) return;
+    const q = gs.quotas?.[c];
+    let text;
+    if (q) {
+      const secured = Math.floor(q.have || 0) + Math.floor(ware[c] || 0) + moved;
+      text = `Lodged ${moved} ${unitLabel(c, moved)} of ${COMMODITIES[c].name} — ${secured} of ${q.needed} secured for London.`;
+    } else {
+      text = `Lodged ${moved} ${unitLabel(c, moved)} of ${COMMODITIES[c].name} in the godown.`;
+    }
+    if (lodgeNoteTimer.current) clearTimeout(lodgeNoteTimer.current);
+    setLodgeNote({ key: Date.now(), text });
+    lodgeNoteTimer.current = setTimeout(() => setLodgeNote(null), 2800);
+  };
   const hold = gs.goods || {};
   const holdRemaining = Math.max(0, cargoCap(gs) - cargoWeight(hold));
   const hasGreat = !!gs.outpost?.buildings?.great_godown?.built;
@@ -11876,14 +11915,27 @@ function GodownPanel({ gs, lodgeGoods, withdrawGoods }) {
               </div>
             </div>
             <div className="actions">
-              <button className="ghost-button-sm" disabled={lodgeMax < 1} onClick={() => lodgeGoods(c, 1)}>Lodge 1</button>
-              <button className="ghost-button-sm" disabled={lodgeMax < 1} onClick={() => lodgeGoods(c, lodgeMax)}>Lodge all ({lodgeMax})</button>
+              <button className="ghost-button-sm" disabled={lodgeMax < 1} onClick={() => lodgeWithNote(c, 1)}>Lodge 1</button>
+              <button className="ghost-button-sm" disabled={lodgeMax < 1} onClick={() => lodgeWithNote(c, lodgeMax)}>Lodge all ({lodgeMax})</button>
               <button className="ghost-button-sm" disabled={withdrawMax < 1} onClick={() => withdrawGoods(c, 1)}>Draw 1</button>
               <button className="ghost-button-sm" disabled={withdrawMax < 1} onClick={() => withdrawGoods(c, withdrawMax)}>Draw all ({withdrawMax})</button>
             </div>
           </div>
         );
       })}
+      {lodgeNote && (
+        <div key={lodgeNote.key} className="ink-fade-in" style={{
+          position: 'fixed', left: '50%', transform: 'translateX(-50%)',
+          bottom: 'calc(1rem + env(safe-area-inset-bottom, 0px))',
+          maxWidth: 'min(92vw, 30rem)', zIndex: 60, pointerEvents: 'none',
+          background: '#f0e3c4', border: '1px solid #6b4423', borderLeft: '3px solid #5c1a08',
+          boxShadow: '0 2px 10px rgba(42,26,10,0.25)', padding: '0.5rem 0.9rem',
+          fontFamily: '"EB Garamond", serif', fontStyle: 'italic',
+          color: '#4a3220', fontSize: '0.92em',
+        }}>
+          {lodgeNote.text}
+        </div>
+      )}
     </div>
   );
 }

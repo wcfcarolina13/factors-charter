@@ -38,6 +38,40 @@ real-time pressure, anything that breaks the quiet-ledger mood.
 
 ## Findings log (newest first)
 
+### Iteration 3 — 2026-06-12 — the quota-lodging payoff beat
+
+**Tested:** doctored pepper into the hold, lodged it, watched the feedback.
+
+**Finding (shipped, HIGH impact): lodging — the culmination of the whole quota
+loop — was the weakest reward moment in the game.** A player sails 6 days,
+spends most of their capital, comes home, lodges their first pepper, and gets:
+(a) **no confirmation** (buy/sell toast, but lodge was silent), and (b) the
+**headline quota number doesn't move** — "LONDON: PEPPER 0/400" stayed 0
+because it showed *shipped* only; the lodged 50 sat as "awaiting" buried in
+the In-Port row. The single number the player was told to fill ignored their
+work until the Indiaman called months later.
+
+→ **Fix (verified live):**
+1. **Lodging toast**, quota-framed: *"Lodged 40 cwt of Pepper — 50 of 400
+   secured for London."* The payoff lands at the moment the cargo goes in.
+2. **HUD quota now counts secured = shipped + lodged**, relabeled "FOR
+   LONDON". Lodging 40 jumped the HUD 10→50/400 instantly — the dopamine
+   beat. Honest because the Indiaman lift is **uncapped** (it ships the whole
+   godown at her next call, verified in tickDays), so lodged pepper is
+   genuinely en route. Win condition + Court's reckoning + quarterly-nag math
+   still run on *shipped* alone (unchanged); the Ledger/In-Port keep the
+   shipped-vs-awaiting split for the detail.
+3. `lodgeGoods` now returns the amount moved so the panel can confirm.
+
+**Also (cleared a queued text-polish item):** added `unitLabel(commodity, n)`
+— measure-abbrevs (cwt/oz/lb) stay singular, the rest pluralize. Fixed the
+buy/sell/lodge toasts ("Sold 5 barrels of Rum", was "5 barrel"). Verified live.
+
+**Still queued:** the "Aline of squalls" missing-space typo (one prose string).
+Next iteration candidates: (a) goal-gradient — is the next ambition (brigantine,
+buildings) ever surfaced as a *target*? (b) milestone recognition — first
+£1000, first building, first quota tenth — does anything mark the moment?
+
 ### Iteration 2 — 2026-06-12 — full voyage round-trip → return-leg bug
 
 **Played:** sold starting rum at home (£45), sailed to Kota Pinang, bought

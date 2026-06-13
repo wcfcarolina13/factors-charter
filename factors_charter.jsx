@@ -442,6 +442,91 @@ function useSyncState(slot) {
   };
 }
 
+// Live online/offline state. When offline the deterministic game plays in
+// full; only the online enhancements (illustrations, cross-device sync) are
+// unavailable, and the player deserves to know that's why — not to think the
+// game is broken.
+function useOnlineStatus() {
+  const [online, setOnline] = useState(
+    typeof navigator === 'undefined' ? true : navigator.onLine !== false
+  );
+  useEffect(() => {
+    const up = () => setOnline(true);
+    const down = () => setOnline(false);
+    window.addEventListener('online', up);
+    window.addEventListener('offline', down);
+    return () => {
+      window.removeEventListener('online', up);
+      window.removeEventListener('offline', down);
+    };
+  }, []);
+  return online;
+}
+
+// True once a new service worker takes control mid-session (a deploy landed
+// while the page was open). skipWaiting + clientsClaim mean the new bundle is
+// already live on next navigation; the toast just invites a refresh so the
+// player isn't on half-old code. Guards against the first-ever-load claim
+// (no prior controller) registering as an "update".
+function useSwUpdate() {
+  const [updated, setUpdated] = useState(false);
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !navigator.serviceWorker) return;
+    const hadController = !!navigator.serviceWorker.controller;
+    const onChange = () => { if (hadController) setUpdated(true); };
+    navigator.serviceWorker.addEventListener('controllerchange', onChange);
+    return () => navigator.serviceWorker.removeEventListener('controllerchange', onChange);
+  }, []);
+  return updated;
+}
+
+// Fixed top banner for ambient state — offline notice and new-version prompt.
+// pointer-events scoped so it never blocks taps on the UI beneath except on
+// the refresh control itself.
+function AmbientStatus({ online, swUpdated }) {
+  if (online && !swUpdated) return null;
+  return (
+    <div style={{
+      position: 'fixed', top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0,
+      zIndex: 70, display: 'flex', flexDirection: 'column', alignItems: 'center',
+      gap: '1px', pointerEvents: 'none',
+    }}>
+      {!online && (
+        <div style={{
+          background: '#5c1a08', color: '#f0e3c4', fontFamily: '"EB Garamond", serif',
+          fontStyle: 'italic', fontSize: '0.82em', padding: '0.25rem 0.9rem',
+          letterSpacing: '0.02em', boxShadow: '0 1px 4px rgba(42,26,10,0.3)',
+        }}>
+          Ashore, no packet-boat — the journal keeps; illustrations and sync await yr. return.
+        </div>
+      )}
+      {swUpdated && (
+        <button
+          onClick={() => window.location.reload()}
+          style={{
+            pointerEvents: 'auto', cursor: 'pointer',
+            background: '#8b5a1a', color: '#f0e3c4', border: 'none',
+            fontFamily: '"IM Fell English SC", serif', fontSize: '0.8em',
+            letterSpacing: '0.04em', padding: '0.25rem 0.9rem',
+            boxShadow: '0 1px 4px rgba(42,26,10,0.3)',
+          }}>
+          A new printing is ready — tap to refresh.
+        </button>
+      )}
+    </div>
+  );
+}
+
+// iOS Safari evicts localStorage after ~7 idle days (ITP). The factor key in
+// the cloud is the real safety net, but a one-time nudge to keep it somewhere
+// is cheap insurance. Returns true on iOS-family browsers.
+function isIOSlike() {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  return /iP(hone|ad|od)/.test(ua) ||
+    (navigator.platform === 'MacIntel' && (navigator.maxTouchPoints || 0) > 1);
+}
+
 // ═══════════════════════════════════════════════════════════════
 //  THE FACTOR'S CHARTER — playable prototype
 //  A text-based colonial trading game in the spirit of
@@ -928,9 +1013,12 @@ const applyVoyageWear = (ship, days) => {
 const voyageDays = (gs, port) => {
   const base = port?.daysFromHome || 1;
   const hasShipwright = !!gs.outpost?.buildings?.shipwright?.built;
+  // The Vizier's Bugis pilots know the strait and inland waters — one day off
+  // any passage. Granted by the Vizier's boon (see makeVizierBoonLetter).
+  const hasPilots = !!gs.flags?.bugisPilots;
   const t = SHIP_TYPES[gs.ship?.type] || SHIP_TYPES.pinnace;
   const shipBonus = (t.voyageBonus && base >= 4) ? t.voyageBonus : 0;
-  return Math.max(1, base - (hasShipwright ? 1 : 0) - shipBonus);
+  return Math.max(1, base - (hasShipwright ? 1 : 0) - (hasPilots ? 1 : 0) - shipBonus);
 };
 
 // Yard available to the player at their current port. Home upgrades from
@@ -2214,6 +2302,127 @@ The Vizier`,
           changes: {
             flags: { vizierIntelLetterCount: (s.flags?.vizierIntelLetterCount ?? 0) + 1 },
             journal: 'Declined the Vizier\'s offer. The favours-book remains as it was.',
+          },
+        },
+      },
+    ],
+    read: false,
+  };
+}
+
+// ─────────── THE VIZIER'S BOON (payoff of vizierBoonOwed) ───────────
+// vizierBoonOwed is planted by the marriage counter-propose and the intel
+// channel, with a hook ("The Vizier owes you a boon"). For a long while
+// nothing called it. Now the Vizier writes once, ~45 days after the debt is
+// first on the books, to make good. Three resolving branches — economy
+// (teak), logistics (Bugis pilots), politics (a Crown word). Each clears the
+// owed state and closes the hook by exact text via closeHookText.
+const VIZIER_BOON_HOOKS = [
+  'The Vizier owes you a boon — teak or Bugis pilots. The boon is to be called when the Factor names the matter.',
+  'The Vizier\'s favour is on the books. He will name it when it suits him.',
+];
+
+function makeVizierBoonLetter(s) {
+  const haveTeak = !!s.flags?.teakConcession;
+  return {
+    id: 9310000 + s.day,
+    from: 'The Rajah\'s Vizier',
+    subject: 'The matter of the favour',
+    body: `Sir, — A debt unnamed is a debt that sours, and I am too old a hand to let a good understanding go to vinegar for want of an hour's attention. You stood when I asked it, and the palace does not forget.
+
+I am in a position to do you one of three good turns, and you shall choose, for it is yr. account and not mine. ${haveTeak ? 'The teak yard you already hold; but' : 'There is'} the inland teak — say the word and the cutting is yrs. before the rains. Or there are the Bugis pilots, who know the strait as you know yr. own ledger, and who would shave a day from every passage you make. Or, if it is the King's men who trouble you, I have a quiet word to spend at Bencoolen that would smooth a matter there.
+
+Name it, and consider the account square.
+
+Yr. obedt. servant,
+The Vizier`,
+    responses: [
+      {
+        label: haveTeak ? 'The teak — let the second cutting be mine' : 'Call it for the inland teak concession',
+        seed: 'teak; rajah +; closes boon',
+        fixedOutcome: {
+          prose: 'You write for the teak, and the answer is a tally-stick and a name — the headman of the cutting above Kota Pinang, who will know you when you come. The Vizier counts the matter closed, and says so, which from him is a kind of warmth.',
+          changes: {
+            reputation: { rajah: 4 },
+            money: haveTeak ? 120 : 0,
+            flags: { teakConcession: true, vizierBoonOwed: false, vizierBoonCalled: true },
+            closeHookText: VIZIER_BOON_HOOKS,
+            journal: haveTeak
+              ? 'Called the Vizier\'s boon for the teak — already held, so he pressed £120 of the season\'s cut on me instead. The favour is settled.'
+              : 'Called the Vizier\'s boon for the inland teak concession. The cutting above Kota Pinang is mine. The favour is settled.',
+          },
+        },
+      },
+      {
+        label: 'Call it for the Bugis pilots',
+        seed: 'pilots; faster voyages; closes boon',
+        fixedOutcome: {
+          prose: 'Within the fortnight two quiet men present themselves at the wharf, barefoot, incurious, and worth more than any chart. They have sailed the strait since boyhood and read the water like a page. Yr. passages will be the shorter for them.',
+          changes: {
+            reputation: { rajah: 2 },
+            flags: { bugisPilots: true, vizierBoonOwed: false, vizierBoonCalled: true },
+            closeHookText: VIZIER_BOON_HOOKS,
+            journal: 'Called the Vizier\'s boon for the Bugis pilots. Two strait-men now sail with the ship; every passage is a day shorter. The favour is settled.',
+          },
+        },
+      },
+      {
+        label: 'Call it for a word with the Crown at Bencoolen',
+        seed: 'crown +; closes boon',
+        fixedOutcome: {
+          prose: 'You ask the Vizier to spend his word at the fort, and he does — through what channel you do not learn, but a Crown officer who was cool to you is, at the next meeting, markedly less so. The palace and the fort are not friends; that the Vizier could do this at all is its own intelligence.',
+          changes: {
+            reputation: { crown: 6, rajah: 1 },
+            flags: { vizierBoonOwed: false, vizierBoonCalled: true },
+            closeHookText: VIZIER_BOON_HOOKS,
+            journal: 'Called the Vizier\'s boon for a word with the Crown at Bencoolen. A King\'s officer warmed to me by the palace\'s influence. The favour is settled.',
+          },
+        },
+      },
+    ],
+    read: false,
+  };
+}
+
+// ─────────── THE FINAL DISPATCH (charter-end pacing beat) ───────────
+// One-off Director letter at <=180 days remaining: a quota reckoning and a
+// pointed reminder of the deadline, so the close of the charter does not
+// arrive as a brick wall. Deterministic — no AI. Single acknowledging
+// response (informational, no branch).
+function makeFinalDispatchLetter(s) {
+  const totalPep  = (s.quotas?.pepper?.have   || 0);
+  const totalCin  = (s.quotas?.cinnamon?.have || 0);
+  const lodgedPep = Math.floor(s.outpost?.warehouse?.pepper   || 0);
+  const lodgedCin = Math.floor(s.outpost?.warehouse?.cinnamon || 0);
+  const pepShort  = Math.max(0, 400 - totalPep - lodgedPep);
+  const cinShort  = Math.max(0, 200 - totalCin - lodgedCin);
+  const onCourse  = pepShort === 0 && cinShort === 0;
+  const callsLeft = INDIAMAN_TOTAL - (s.indiaman?.visits || 0);
+  const reckoning = `By our books you have shipped ${totalPep} of 400 pepper and ${totalCin} of 200 cinnamon, with ${lodgedPep} and ${lodgedCin}cwt respectively lodged at yr. godown against the next call.`;
+  const standing = onCourse
+    ? 'You stand within reach of the terms. See it carried, and the Court will remember it kindly.'
+    : `There wants ${pepShort}cwt of pepper and ${cinShort}cwt of cinnamon yet, and ${callsLeft <= 0 ? 'no further Indiaman is appointed to yr. station' : `but ${callsLeft} call${callsLeft !== 1 ? 's' : ''} of the Indiaman remain`}. We do not write to alarm you; we write so that you cannot say you were not told.`;
+  return {
+    id: 9320000 + s.day,
+    from: 'The Court of Directors, London',
+    subject: 'The closing of yr. charter',
+    body: `Sir, — The third year of yr. charter draws toward its close: some ${s.daysRemaining} days remain to the reckoning. We send this that the matter may be plainly before you while there is yet time to act upon it.
+
+${reckoning}
+
+${standing}
+
+Whatever cannot be shipped by the close of the term cannot be shipped at all, and the Court reckons the account as it finds it. We trust you will not need this said twice.
+
+Yr. obedt. servants, the Court of Directors.`,
+    responses: [
+      {
+        label: 'Read, and set yr. hand to the season ahead',
+        seed: 'acknowledge; no change',
+        fixedOutcome: {
+          prose: 'You read it twice, and put it in the drawer with the others. The figures do not change for being looked at, but a man steers better for knowing the distance to the rocks.',
+          changes: {
+            journal: `The Court's final dispatch: ${s.daysRemaining} days to the reckoning. ${onCourse ? 'Within reach of the terms.' : `Short ${pepShort}cwt pepper, ${cinShort}cwt cinnamon.`}`,
           },
         },
       },
@@ -4290,6 +4499,8 @@ function makeSuccessorState(prev, newName) {
     if (/LetterSent$/.test(k)) continue;            // letter triggers reset
     if (/QuestStep$/.test(k)) continue;             // multi-step quests reset
     if (/^sabotage_/.test(k)) continue;             // sabotage arcs reset per charter
+    if (/^vizierBoon/.test(k)) continue;            // the Vizier's favour is a per-Factor relationship
+    if (k === 'bugisPilots') continue;              // a granted boon, re-earnable by the successor
     if (k === 'banned_eustace_until') continue;     // travel bans expire with the charter
     if (k === 'firstLetterPresented') continue;
     carryFlags[k] = v;
@@ -4396,6 +4607,8 @@ function makeRenewedState(prev) {
     if (/LetterSent$/.test(k)) continue;
     if (/QuestStep$/.test(k)) continue;
     if (/^sabotage_/.test(k)) continue;             // sabotage arcs reset per charter
+    if (/^vizierBoon/.test(k)) continue;            // the Vizier's favour is a per-Factor relationship
+    if (k === 'bugisPilots') continue;              // a granted boon, re-earnable by the successor
     if (k === 'banned_eustace_until') continue;     // travel bans expire with the charter
     if (k === 'firstLetterPresented') continue;
     carryFlags[k] = v;
@@ -4816,6 +5029,40 @@ function tickDays(gs, days) {
       s.flags = { ...(s.flags || {}), dutchPassLetterSent: true };
       s.lettersGenerated = (s.lettersGenerated || 0) + 1;
       s.awayLog.push({ day: s.day, type: 'letter', text: 'A discreet packet from the Dutch House at Eustace — Mynheer Boom’s hand.' });
+    }
+
+    // ── The Vizier's boon: stamp the day the debt first appears, then write
+    // to make good ~45 days later. Closes the long-dead vizierBoonOwed loop.
+    if (s.flags?.vizierBoonOwed && !s.flags?.vizierBoonOwedSince) {
+      s.flags = { ...(s.flags || {}), vizierBoonOwedSince: s.day };
+    }
+    if (
+      !s.charterClosed &&
+      !s.flags?.vizierBoonLetterSent &&
+      !s.flags?.vizierBoonCalled &&
+      s.flags?.vizierBoonOwed &&
+      s.day >= (s.flags?.vizierBoonOwedSince || s.day) + 45
+    ) {
+      const letter = makeVizierBoonLetter(s);
+      s.letters = [...s.letters, letter];
+      s.flags = { ...(s.flags || {}), vizierBoonLetterSent: true };
+      s.lettersGenerated = (s.lettersGenerated || 0) + 1;
+      s.awayLog.push({ day: s.day, type: 'letter', text: 'A letter from the palace under the Vizier’s seal — the matter of a favour.' });
+    }
+
+    // ── The Final Dispatch: the Court's quota reckoning in the last 180 days,
+    // so the charter's close is foreseen rather than a brick wall. One-off.
+    if (
+      !s.charterClosed &&
+      !s.flags?.finalDispatchSent &&
+      (s.daysRemaining || 0) <= 180 &&
+      (s.daysRemaining || 0) > 0
+    ) {
+      const letter = makeFinalDispatchLetter(s);
+      s.letters = [...s.letters, letter];
+      s.flags = { ...(s.flags || {}), finalDispatchSent: true };
+      s.lettersGenerated = (s.lettersGenerated || 0) + 1;
+      s.awayLog.push({ day: s.day, type: 'letter', text: 'A weighty packet from London, the Court’s seal doubled upon it.' });
     }
 
     // ── Reverend Pyke: once the chapel is built and the Mission has noted
@@ -7402,6 +7649,22 @@ function TitleScreen({ saves, remoteOnlyCharters = [], remoteLoading = false, fa
   const [flash, setFlash] = useState('');
   const [confirmingDelete, setConfirmingDelete] = useState(null); // slot id
   const [hydrating, setHydrating] = useState(null); // playthroughId currently being pulled
+  // One-time iOS storage-eviction nudge — shown only on iOS-family browsers
+  // with a save to lose, until dismissed.
+  const ITP_DISMISS_KEY = 'factor_itp_nudge_dismissed_v1';
+  const [showItpNudge, setShowItpNudge] = useState(false);
+  useEffect(() => {
+    try {
+      const dismissed = window.localStorage.getItem(ITP_DISMISS_KEY);
+      if (!dismissed && isIOSlike() && Array.isArray(saves) && saves.length > 0) {
+        setShowItpNudge(true);
+      }
+    } catch (e) { /* storage blocked — nothing to protect anyway */ }
+  }, [saves]);
+  const dismissItpNudge = () => {
+    setShowItpNudge(false);
+    try { window.localStorage.setItem(ITP_DISMISS_KEY, '1'); } catch (e) { /* ignore */ }
+  };
 
   const hasSaves = Array.isArray(saves) && saves.length > 0;
   const hasRemoteOnly = Array.isArray(remoteOnlyCharters) && remoteOnlyCharters.length > 0;
@@ -7474,6 +7737,25 @@ function TitleScreen({ saves, remoteOnlyCharters = [], remoteLoading = false, fa
         kept in his own hand, beginning the day of his arrival at Bayan-Kor.
       </p>
       <Fleuron char="❧" />
+
+      {showItpNudge && (
+        <div style={{
+          marginTop: '1.5rem', textAlign: 'left', maxWidth: '32rem',
+          marginLeft: 'auto', marginRight: 'auto',
+          padding: '0.8rem 1rem', background: 'rgba(255,255,255,0.35)',
+          borderLeft: '3px solid #8b5a1a',
+        }}>
+          <div className="display" style={{ fontSize: '0.8em', color: '#8b5a1a', letterSpacing: '0.06em', marginBottom: '0.3rem' }}>
+            A WORD ON KEEPING YR. SAVES
+          </div>
+          <p className="italic" style={{ margin: '0 0 0.6rem', color: '#4a3220', fontSize: '0.9em' }}>
+            On an Apple device, a charter left untouched for a week may be swept from this device's memory. Yr. charters are also kept under yr. factor key{factorKey ? <> (<strong>{factorKey}</strong>)</> : ''} — copy it somewhere safe, or download a manuscript from the in-game menu, and no tide can carry yr. work off.
+          </p>
+          <button className="ghost-button" onClick={dismissItpNudge} style={{ fontSize: '0.82em' }}>
+            Understood
+          </button>
+        </div>
+      )}
 
       {/* ROSTER of charters in progress */}
       {hasSaves && (
@@ -7921,6 +8203,14 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
     }
     if (changes.hook) {
       next.hooks = [...next.hooks, changes.hook];
+    }
+    // Close an open thread by exact text — the letter-outcome counterpart to
+    // the pursue/voyage closeHook path (those bind to a pursued thread; a
+    // scripted letter knows the literal string it planted). Accepts a string
+    // or an array of strings.
+    if (changes.closeHookText) {
+      const toClose = Array.isArray(changes.closeHookText) ? changes.closeHookText : [changes.closeHookText];
+      next.hooks = (next.hooks || []).filter(h => !toClose.includes(h));
     }
     // Ship damage — never apply to letter outcomes, no matter what the model returned.
     if (changes.shipDamage && !opts.isLetter && next.ship) {
@@ -12613,6 +12903,8 @@ export default function FactorsCharter() {
   const [lastSavedAt, setLastSavedAt] = useState(null);
   const viewportMode = useViewportMode();
   const sync = useSyncState(activeSaveId);
+  const online = useOnlineStatus();
+  const swUpdated = useSwUpdate();
   const [pendingConflict, setPendingConflict] = useState(null);  // { localGs, remoteRecord }
   // Remote charter manifests under the device's factor key. Populated on
   // title-phase entry. Each entry is { id, day, daysRemaining, location,
@@ -12826,6 +13118,7 @@ export default function FactorsCharter() {
     const remoteOnlyCharters = remoteCharters.filter(c => !localPlaythroughIds.has(c.id));
     return (
       <Page>
+        <AmbientStatus online={online} swUpdated={swUpdated} />
         <TitleScreen
           saves={savesIndex}
           remoteOnlyCharters={remoteOnlyCharters}
@@ -12861,6 +13154,7 @@ export default function FactorsCharter() {
 
   return (
     <>
+      <AmbientStatus online={online} swUpdated={swUpdated} />
       <GameHub gs={gs} setGs={setGs} lastSavedAt={lastSavedAt} onReturnToTitle={handleReturnToTitle} onSuccession={handleSuccession} onRenewal={handleRenewal} viewportMode={viewportMode} sync={sync} />
       {pendingConflict && (
         <ConflictModal

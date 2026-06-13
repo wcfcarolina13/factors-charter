@@ -19,6 +19,7 @@ import { recordTrade, reckonRows, reckonTotal } from './src/util/trade-stats.js'
 import { reconcileHookMeta, hookAgeNote, staleHookCount } from './src/util/hooks-age.js';
 import { pendingWealthMilestones, seedWealthFlags } from './src/util/milestones.js';
 import { VENTURES, accrueVentureIncome, accrueVentureProduce, ventureUnlocked, ventureBuyMult, ventureQuarterlyIncome, venturesWorth, establishedVentureCount } from './src/util/ventures.js';
+import { nextAmbition } from './src/util/ambition.js';
 
 // ─────────── FACTOR KEY (cross-device identity) ───────────
 //
@@ -11372,6 +11373,55 @@ function Tabs({ tab, setTab, unread, atHome, viewportMode }) {
 
 // ─────────── JOURNAL VIEW ───────────
 
+// The Factor's unowned aspirations, for the Journal-hub goal-gradient line:
+// the brigantine path, ventures not yet taken, buildings not yet raised. Each
+// carries a first-person label and a cost; nextAmbition picks the nearest rung.
+function buildAspirations(gs) {
+  const out = [];
+  const isPinnace = (gs.ship?.type || 'pinnace') !== 'brigantine';
+  const commissioning = gs.shipCommission && gs.shipCommission.daysLeft > 0;
+  if (isPinnace && !commissioning) {
+    const yardBuilt = !!gs.outpost?.buildings?.shipwright?.built;
+    const yardQueued = (gs.outpost?.queue || []).some(q => q.key === 'shipwright');
+    if (yardBuilt) {
+      const ownTeak = gs.flags?.teakConcession === 'self';
+      out.push({ key: 'brigantine', label: 'commission the brigantine', cost: ownTeak ? 600 : 900 });
+    } else if (!yardQueued) {
+      out.push({ key: 'shipwright', label: 'raise the Shipwright’s Yard, that a brigantine may be laid down', cost: BUILDINGS.shipwright.cost });
+    }
+  }
+  for (const [id, def] of Object.entries(VENTURES)) {
+    if (def.viaQuest || gs.ventures?.[id]?.established || !ventureUnlocked(id, gs.ventures)) continue;
+    out.push({ key: 'venture:' + id, label: 'take up ' + def.name.replace(/ —.*$/, ''), cost: def.cost });
+  }
+  const addedYard = out.some(a => a.key === 'shipwright');
+  for (const [k, b] of Object.entries(BUILDINGS)) {
+    if (k === 'shipwright' && addedYard) continue;   // already offered via the brigantine path
+    if (gs.outpost?.buildings?.[k]?.built) continue;
+    if ((gs.outpost?.queue || []).some(q => q.key === k)) continue;
+    if (b.requires?.rep && !Object.entries(b.requires.rep).every(([f, n]) => (gs.reputation?.[f] || 0) >= n)) continue;
+    out.push({ key: 'building:' + k, label: 'raise the ' + b.name, cost: b.cost });
+  }
+  return out;
+}
+
+// Render a nextAmbition() result into the Factor's first-person journal voice.
+function ambitionLine(a) {
+  if (!a) return null;
+  switch (a.kind) {
+    case 'reach':  return `I have it in mind to ${a.label}. £${a.gap} is yet wanting.`;
+    case 'afford': return `I have the means now to ${a.label} — £${a.cost} lies in the strongbox.`;
+    case 'quota': {
+      const parts = [];
+      if (a.pepGap > 0) parts.push(`${a.pepGap} cwt pepper`);
+      if (a.cinGap > 0) parts.push(`${a.cinGap} cwt cinnamon`);
+      return `The charter wants ${parts.join(' and ')} yet, to be lodged for London.`;
+    }
+    case 'quota-met': return 'The charter’s measure is met; what I build now is my own.';
+    default: return null;
+  }
+}
+
 function JournalView({ gs, arrivalProse, setTab, openLetterById, pursueThread, viewportMode }) {
   const entries = [...gs.journal].reverse().slice(0, 20);
   const unread = gs.letters.filter(l => !l.read);
@@ -11422,6 +11472,22 @@ function JournalView({ gs, arrivalProse, setTab, openLetterById, pursueThread, v
           </button>
         </div>
       )}
+
+      {(() => {
+        if (gs.charterClosed) return null;
+        const secured = {
+          pepper:   { needed: gs.quotas?.pepper?.needed   || 400, secured: Math.floor((gs.quotas?.pepper?.have   || 0) + (gs.outpost?.warehouse?.pepper   || 0)) },
+          cinnamon: { needed: gs.quotas?.cinnamon?.needed || 200, secured: Math.floor((gs.quotas?.cinnamon?.have || 0) + (gs.outpost?.warehouse?.cinnamon || 0)) },
+        };
+        const line = ambitionLine(nextAmbition({ money: gs.money, aspirations: buildAspirations(gs), quota: secured }));
+        if (!line) return null;
+        return (
+          <div className="ink-fade-in" style={{ marginBottom: '1.5rem', padding: '0.6rem 0.9rem', borderLeft: '3px solid rgba(92,26,8,0.55)', background: 'rgba(255,255,255,0.18)' }}>
+            <div className="display" style={{ fontSize: '0.78em', color: '#6b4423', letterSpacing: '0.12em', marginBottom: '0.15rem' }}>MY PRESENT AIM</div>
+            <div className="italic" style={{ color: '#4a3220', fontSize: '0.95em' }}>{line}</div>
+          </div>
+        );
+      })()}
 
       {arrivalProse && arrivalProse.port === gs.location && (
         viewportMode === 'desktop' ? (

@@ -44,6 +44,16 @@ export const VENTURES = {
     blurb: 'A full country ship, two-masted and crewed, running the Bengal and Coromandel trade under yr. flag while you keep yr. own deck. This is a fleet.',
     establishText: 'The Carnatic is yrs., and a fleet with her. She runs the Bay under yr. flag and remits each quarter.',
   },
+  // HOME path — not freely purchasable (viaQuest). Established through the
+  // Wexley matter: yr. sister's letters about the family's portion in a Bristol
+  // trading house. Dividends cross two oceans — Crusoe's off-stage estate.
+  bristol_concern: {
+    name: 'Yr. portion in Pyne & Wexley, of Bristol',
+    category: 'Home',
+    income: 110,
+    viaQuest: true,
+    blurb: 'The late yr. father’s share in a Bristol trading house, secured and increased by money sent home through yr. sister’s hand. It works while you sleep, an ocean away.',
+  },
 };
 
 export const VENTURE_QUARTER = 90;

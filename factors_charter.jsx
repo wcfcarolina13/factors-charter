@@ -2466,6 +2466,72 @@ Yr. obedt. servants, the Court of Directors.`,
   };
 }
 
+// ─────────── THE WEXLEY MATTER (home-country venture via the sister) ───────────
+// Yr. sister's familial letters were flavour; this gives them weight. The
+// family's portion in a Bristol trading house (Pyne & Wexley) is in question.
+// Investing money sent home establishes the bristol_concern venture — dividends
+// crossing two oceans, Crusoe's off-stage estate. Three choices: grow it
+// (invest → the venture), hold it (cautious, no income but the door open), or
+// sell out (cash now, the name leaves the books). One-off; gated in tickDays.
+function makeWexleyMatterLetter(s) {
+  return {
+    id: 9340000 + s.day,
+    from: 'Mrs. Eliza Wexley, your sister',
+    subject: 'A Matter of Our Late Father’s Concern',
+    body: `Dear Brother, — I write on a matter I would not trouble you with were it not pressing, and were you not, of all of us, the one with means in hand.
+
+You will recall our father held a third part in the trading house of Pyne & Wexley here in Bristol — the glass and the West-Country cloth, chiefly. Mr. Pyne, who survives him, has put it to me that the house wants fresh capital, and that the family may either increase our portion now, ahead of strangers he would otherwise bring in, or be bought out of it at a price I will not dignify by repeating.
+
+I have no money to send, as you know. But a portion increased is a portion that pays, year upon year, whether you are in Bristol or in Bayan-Kor. The decision is yrs., for the purse is yrs. Mr. Pyne wants an answer by the spring ships.
+
+Yr. affectionate sister,
+Eliza`,
+    responses: [
+      {
+        label: 'Send £700 home — secure and increase our portion',
+        seed: 'invest; establishes the Bristol concern; home dividends',
+        requiresMoney: 700,
+        fixedOutcome: {
+          prose: 'You write a bill on yr. London agent for £700 and a letter to Eliza that is warmer than the bill. By the next homeward Indiaman the matter is done: the Wexley portion in Pyne & Wexley is enlarged and entered in yr. name. It will pay each quarter now, an ocean away, while you sleep.',
+          changes: {
+            money: -700,
+            establishVenture: 'bristol_concern',
+            flags: { wexleyMatter: 'invested' },
+            journal: 'Sent £700 home to Eliza to secure and grow our portion in Pyne & Wexley of Bristol. The house will remit dividends each quarter. An estate at home, of a kind.',
+          },
+        },
+      },
+      {
+        label: 'Send £200 to merely hold what is ours',
+        seed: 'cautious hold; no income yet; door left open',
+        requiresMoney: 200,
+        fixedOutcome: {
+          prose: 'You send £200 — enough to hold the family in the books, not enough to grow. Eliza will understand; she is the more prudent of you, and always was. Mr. Pyne is kept at bay. The matter may come round again, when the strongbox is fuller.',
+          changes: {
+            money: -200,
+            flags: { wexleyMatter: 'held' },
+            journal: 'Sent £200 home to hold our portion in Pyne & Wexley. Held, not grown. The door is left open.',
+            hook: 'The family portion in Pyne & Wexley of Bristol is held but not grown; a fuller strongbox might yet increase it.',
+          },
+        },
+      },
+      {
+        label: 'Let Mr. Pyne buy us out; take the settlement',
+        seed: 'sell out; one-time cash; the name leaves the books',
+        fixedOutcome: {
+          prose: 'You write that the family will take Mr. Pyne’s offer and be done. The settlement comes by the spring ships — less than the portion was worth, more than nothing, and yrs. clear. The Wexley name leaves the Bristol books after three generations. Eliza’s letter, when it comes, is brief.',
+          changes: {
+            money: 180,
+            flags: { wexleyMatter: 'soldout' },
+            journal: 'Let Mr. Pyne buy out the family portion in Pyne & Wexley. £180 came by the settlement; the Wexley name is off the Bristol books.',
+          },
+        },
+      },
+    ],
+    read: false,
+  };
+}
+
 // ─────────── BROTHERHOOD OPERATIVE QUESTLINE (3 STEPS) ───────────
 // First multi-step plot in the game. Pattern: each step is a letter with
 // fixedOutcome responses. Each response sets a flag that gates the next
@@ -5062,6 +5128,22 @@ function tickDays(gs, days) {
       s.flags = { ...(s.flags || {}), teakLetterSent: true };
       s.lettersGenerated = (s.lettersGenerated || 0) + 1;
       s.awayLog.push({ day: s.day, type: 'letter', text: 'A formal letter came down from the palace, the Vizier’s seal upon it.' });
+    }
+
+    // ── The Wexley matter: yr. sister writes of the family's portion in a
+    // Bristol trading house — the home-country path into the enterprise.
+    // One-off, mid-early game once the Factor has found his feet.
+    if (
+      !s.charterClosed &&
+      !s.flags?.wexleyMatterLetterSent &&
+      !s.flags?.wexleyMatter &&          // already resolved (persists across succession)
+      s.day >= 120
+    ) {
+      const letter = makeWexleyMatterLetter(s);
+      s.letters = [...s.letters, letter];
+      s.flags = { ...(s.flags || {}), wexleyMatterLetterSent: true };
+      s.lettersGenerated = (s.lettersGenerated || 0) + 1;
+      s.awayLog.push({ day: s.day, type: 'letter', text: 'A thick letter from Bristol, in Eliza’s hand — a matter of the family’s concern.' });
     }
 
     // ── Dutch trade pass: Mynheer Boom writes once the Factor has put into
@@ -8418,6 +8500,12 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
     // Narrative flags — merge in.
     if (changes.flags && typeof changes.flags === 'object') {
       next.flags = { ...(next.flags || {}), ...changes.flags };
+    }
+    // Establish a venture from a letter outcome (e.g. the Bristol concern via
+    // the sister's matter). The money cost is handled by changes.money on the
+    // same choice; this just marks it established so it begins remitting.
+    if (changes.establishVenture && VENTURES[changes.establishVenture] && !next.ventures?.[changes.establishVenture]?.established) {
+      next.ventures = { ...(next.ventures || {}), [changes.establishVenture]: { established: true, establishedDay: next.day, lastPaidDay: next.day } };
     }
     // Rivalry deltas — sabotage arcs (and any future caller) can patch
     // per-rival fields and append pressure modifiers via the change payload.
@@ -12422,7 +12510,9 @@ function OutpostView({ gs, startBuild, expediteBuild, establishVenture, viewport
   // The enterprise beyond the compound — ventures (fleet, agents, capital).
   const ventures = gs.ventures || {};
   const establishedVentures = Object.entries(VENTURES).filter(([id]) => ventures[id]?.established);
-  const availableVentures = Object.entries(VENTURES).filter(([id]) => !ventures[id]?.established);
+  // viaQuest ventures (the Bristol concern) aren't bought from this panel —
+  // they come through a questline. Hide them from the purchasable list.
+  const availableVentures = Object.entries(VENTURES).filter(([id, def]) => !ventures[id]?.established && !def.viaQuest);
   const quarterlyIncome = ventureQuarterlyIncome(ventures);
   const ventureBenefitLine = (id) => {
     const def = VENTURES[id];
@@ -12806,7 +12896,7 @@ function AwayDigestScreen({ digest, onContinue, onResolveRaid }) {
 // Shared sub-component: renders the parchment body of one letter (content +
 // response choices). Used by both the mobile opened-letter path and
 // LettersDesktop's reading pane.
-function LetterReadingPane({ letter, onRespond, setOpenLetterId }) {
+function LetterReadingPane({ letter, onRespond, setOpenLetterId, money }) {
   return (
     <div className="parchment" style={{ padding: '1.5rem', background: 'rgba(255,253,245,0.6)' }}>
       <div className="display" style={{ fontSize: '0.85em', color: '#6b4423' }}>FROM</div>
@@ -12823,17 +12913,29 @@ function LetterReadingPane({ letter, onRespond, setOpenLetterId }) {
       ) : (
         <div>
           <div className="display" style={{ fontSize: '0.85em', color: '#6b4423', marginBottom: '0.5rem' }}>YOUR REPLY</div>
-          {letter.responses.map((r, i) => (
-            <div key={i} style={{ marginBottom: '0.5rem' }}>
-              <button
-                className="ghost-button"
-                style={{ width: '100%', textAlign: 'left' }}
-                onClick={() => { if (setOpenLetterId) setOpenLetterId(null); onRespond(letter, r); }}
-              >
-                &mdash; {r.label}
-              </button>
-            </div>
-          ))}
+          {letter.responses.map((r, i) => {
+            // A response may require funds in the strongbox (e.g. sending an
+            // investment home). Gate the button so it can't be picked when the
+            // sum can't be raised.
+            const short = typeof r.requiresMoney === 'number' && (money ?? Infinity) < r.requiresMoney;
+            return (
+              <div key={i} style={{ marginBottom: '0.5rem' }}>
+                <button
+                  className="ghost-button"
+                  style={{ width: '100%', textAlign: 'left' }}
+                  disabled={short}
+                  onClick={() => { if (setOpenLetterId) setOpenLetterId(null); onRespond(letter, r); }}
+                >
+                  &mdash; {r.label}
+                </button>
+                {short && (
+                  <div className="italic" style={{ fontSize: '0.8em', color: '#8b1a1a', marginTop: '0.2rem', marginLeft: '0.3rem' }}>
+                    The strongbox wants £{r.requiresMoney - (money || 0)} more for this.
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -12892,7 +12994,7 @@ function LettersDesktop({ gs, setGs, onRespond }) {
       <div>
         {selected ? (
           <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 320px', gap: '1rem', alignItems: 'start' }}>
-            <LetterReadingPane letter={selected} onRespond={onRespond} />
+            <LetterReadingPane letter={selected} onRespond={onRespond} money={gs.money} />
             <InlineIllustration prose={selected.body} />
           </div>
         ) : (
@@ -12932,7 +13034,7 @@ function LettersView({ gs, setGs, onRespond, openLetterId, setOpenLetterId, view
     return (
       <div>
         <button className="ghost-button" onClick={() => setOpenLetterId(null)} style={{ marginBottom: '1rem' }}>← Back to letters</button>
-        <LetterReadingPane letter={letter} onRespond={onRespond} setOpenLetterId={setOpenLetterId} />
+        <LetterReadingPane letter={letter} onRespond={onRespond} setOpenLetterId={setOpenLetterId} money={gs.money} />
       </div>
     );
   }

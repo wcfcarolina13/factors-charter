@@ -66,6 +66,29 @@ Core system + 4 ventures across 3 categories:
   £160: The Kingfisher £90; A stake in the bazaar £70." Verified £150→£310.
 - 12 vitest cases; tests 165→177. Build clean, zero console errors.
 
+### Ventures — the Home path (Bradley's idea, shipped 2026-06-12, verified live)
+> Bradley: "There's intrigue from the heartland, your sister sending letters.
+> Can't that be a connection to some sort of boon or investment?"
+
+Wired the sister's familial letters (previously pure flavour) into a **Home**
+development path — Crusoe's off-stage estate, a design pillar already noted.
+**The Wexley Matter:** a one-off scripted letter (`makeWexleyMatterLetter`,
+fires day ≥120) — the family's portion in a Bristol trading house (Pyne &
+Wexley) is in question. Three gated choices:
+- **Send £700, secure & grow it** → establishes the `bristol_concern` venture
+  (Home, £110/qtr) — dividends crossing two oceans.
+- **Send £200 to merely hold it** → cautious, no income, leaves a hook open.
+- **Let Pyne buy us out** → £180 one-time, the name leaves the books.
+
+New plumbing (reusable): `changes.establishVenture` in `applyOutcomeChangesPure`
+(a letter outcome can grant a venture); `requiresMoney` gate on letter response
+buttons (disabled + "the strongbox wants £N more" when you can't raise the sum);
+`viaQuest` ventures hidden from the purchasable list. Resets per charter via
+the `...LetterSent` regex; the `wexleyMatter` flag persists so a successor who
+inherited the resolved matter doesn't get it again. Verified live: letter fires
+day 123, invest deducts £700 + establishes the venture (£1000→£300), it lands
+in "YR. HOLDINGS" under Home and not in the buy list. Tests 177/177, clean.
+
 **Phase 2 plan (next loop iterations):** a Production venture (yr. own pepper/
 spice supply, reducing reliance on Kota Pinang); more Network/Capital options;
 balance the income vs sinks; a digest "venture" prose branch; possibly surface

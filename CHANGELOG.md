@@ -4,6 +4,18 @@ The Factor's Charter — a chronological log of what's shipped. Newest first.
 
 ---
 
+## 2026-06-13 — Addictiveness pass: goal-gradient + living ventures
+
+Two follow-ups to the sprawl work, answering "what else makes it more fun, addictive, rewarding." Both verified live at mobile viewport; tests **197 → 203**; build clean; zero console errors.
+
+**Goal-gradient — "MY PRESENT AIM" on the Journal hub.** The next concrete rung was only discoverable by opening the Outpost; the goal gradient (the single strongest pull between sessions) was never surfaced. Now one diegetic first-person line on the hub names the **nearest reachable** ambition and its gap — the strongest framing ("I have it in mind to take up An agent at Kota Pinang. £50 is yet wanting."). Pure `nextAmbition` in `src/util/ambition.js` picks across the brigantine path (yard → commission), unowned-and-unlocked ventures, and available buildings by smallest funding gap; if all are affordable it names the grandest unowned thing; with nothing left, the quota, then a merchant-prince nod. Kept to ONE line — not the gamey "ambitions list" `DESIGN_NOTES` ruled out. Hidden once the charter closes. 8 new vitest cases.
+
+**Living ventures — the enterprise writes back.** The sprawl was passive (a flat quarterly number). Now the established enterprise occasionally throws an **event** — a windfall, a setback, or news worth pursuing — turning income into a narrated, *variable* stream (the variable-reward lever; Morrowind's "scale generates friction"). `VENTURE_EVENTS` registry + pure `pickVentureEvent` scheduler in `ventures.js`: 14 events across all 7 ventures (good/ill seasons for the ships, the bazaar, the gardens, the Bristol house; two `once` news beats that plant a hook). `tickDays` rolls one event per home-station tick behind a 45-day cooldown + 22% gate, applying money / godown produce (cap-respecting, mirrors the harvest) / a planted hook, narrated in the journal + away-digest. Hook events reuse the existing **Pursue** system, so the enterprise surfaces threads the player chooses to chase — agency with no new plumbing. New `gs` fields (`ventureEventDay`, `lastVentureEventId`, `ventureEventsFired`) seeded in `ensureShape`, fresh on succession so an inherited enterprise's news re-fires for the successor. 6 new vitest cases.
+
+Live verification: the aim line points £50 short of the agent (nearest, not cheapest) and updates to the grandest-affordable when flush; a forced-RNG voyage fired a money event (+£35, narrated, cooldown engaged) and, isolated, a `once` event that planted its hook (tracked, surfaced in the Pursue panel).
+
+---
+
 ## 2026-06-13 — Ventures Phase 2: the Production path + the merchant-prince finish
 
 Closes the loop Bradley set for the sprawling-enterprise direction: ventures let you BUILD the sprawl, and now the sprawl MATTERS at the charter's end. Three units, each verified live (doctored saves at mobile viewport), committed separately. Tests **177 → 189**; build clean; zero console errors throughout.

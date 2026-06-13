@@ -131,6 +131,33 @@ itself is now complete end-to-end.
 
 ## Findings log (newest first)
 
+### Addictiveness pass — 2026-06-13 — goal-gradient + living ventures
+
+Bradley asked "what else makes it more fun/addictive/rewarding"; chose #2-then-#1
+from the menu (goal-gradient first, living ventures next). Both shipped + verified.
+
+- **MY PRESENT AIM (goal-gradient).** The one addictiveness lever still thinly
+  served. One diegetic line on the Journal hub names the NEAREST reachable rung +
+  its gap (the strongest pull): "I have it in mind to take up An agent at Kota
+  Pinang. £50 is yet wanting." Pure `nextAmbition` (src/util/ambition.js) picks by
+  smallest funding gap across the brigantine path, unowned ventures, and available
+  buildings; afford-state names the grandest unowned thing; then quota; then a
+  merchant-prince nod. One line, not a gamey list. Verified live: reach-state £50
+  short of the agent (nearest, not cheapest); afford-state names the £1500 Carnatic.
+- **Living ventures — the enterprise writes back.** The big one. Established
+  ventures now occasionally throw an event — windfall / setback / news worth
+  pursuing — so passive income becomes a narrated, VARIABLE stream (variable-reward
+  lever; "scale generates friction"). 14-event `VENTURE_EVENTS` registry + pure
+  `pickVentureEvent` scheduler; `tickDays` rolls one per tick behind a 45-day
+  cooldown + 22% gate, applying money / godown produce / a planted hook. Hook
+  events reuse Pursue (agency, no new plumbing). Verified live (forced RNG): a
+  money event fired (+£35, narrated, cooldown set); an isolated `once` event
+  planted its hook (tracked in `ventureEventsFired`, shown in the Pursue panel).
+
+**Frontiers left** (all Bradley's call): venture-UPGRADE decision letters (pay to
+raise a venture's income/yield — needs per-venture tier state); a market-intel
+surface (#3 on the menu — "where the money is now"); a rival tonnage race (#5).
+
 ### Ventures Phase 2 — 2026-06-13 — Production path + merchant-prince finish + Wexley Step 2
 
 The handed-off ventures work (chip `task_4cae01ca`). Closed the sprawl loop end to

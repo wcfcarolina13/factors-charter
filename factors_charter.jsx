@@ -226,6 +226,10 @@ function useViewportMode() {
 function useSyncState(slot) {
   const [status, setStatus] = useState('idle');
   const [error, setError] = useState(null);
+  // True once a synced payload passes 200 KB — the 256 KB server cap is
+  // close enough that the player should export a manuscript before sync
+  // starts failing outright. Surfaced by SyncBadge.
+  const [sizeWarning, setSizeWarning] = useState(false);
   const debounceTimer = useRef(null);
   const inFlight = useRef(false);
   const pullInFlight = useRef(false);
@@ -276,6 +280,7 @@ function useSyncState(slot) {
     // Strip it from the synced payload; the local copy keeps it for export.
     const { aiLog: _omit, ...gsForSync } = gs;
     const body = JSON.stringify(gsForSync);
+    setSizeWarning(body.length > 200 * 1024);
     if (body.length > 256 * 1024) {
       setStatus('error');
       setError('save too large to sync (>256 KB even without aiLog)');
@@ -426,7 +431,7 @@ function useSyncState(slot) {
   };
 
   return {
-    status, error,
+    status, error, sizeWarning,
     pointer: readPointer,
     writePointer,
     triggerPush, pushNow, pullNow, cancelPendingPush,
@@ -6709,6 +6714,12 @@ const Page = ({ children }) => (
     fontSize: '17px',
     lineHeight: 1.55,
     boxSizing: 'border-box',
+    // index.html sets viewport-fit=cover, which lets content run under the
+    // notch / dynamic island / home bar. These resolve to 0 everywhere else.
+    paddingTop: 'env(safe-area-inset-top, 0px)',
+    paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+    paddingLeft: 'env(safe-area-inset-left, 0px)',
+    paddingRight: 'env(safe-area-inset-right, 0px)',
   }}>
     <style>{FONT_IMPORT}{`
       *, *::before, *::after { box-sizing: border-box; }
@@ -6794,7 +6805,7 @@ const Page = ({ children }) => (
         padding: 0.5rem 0; border-bottom: 1px solid rgba(74,44,20,0.15);
         gap: 0.5rem;
       }
-      .trade-row .actions { display: flex; gap: 0.3rem; flex-wrap: wrap; justify-content: flex-end; }
+      .trade-row .actions { display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: flex-end; }
       @media (min-width: 600px) {
         .trade-row { flex-direction: row; align-items: center; justify-content: space-between; }
       }
@@ -9252,7 +9263,27 @@ async function robustCopy(text) {
 // transport to another device, and lets them paste a key from another
 // device to inherit that device's charters here. Replacement is immediate;
 // the title screen on next visit will list charters under the new key.
+// Shared modal chrome: lock body scroll while open (iOS Safari scrolls the
+// page behind position:fixed overlays without it) and dismiss on Escape.
+// Pass null for onClose to lock scroll without an Escape path (forced-choice
+// modals like the sync conflict).
+function useModalChrome(onClose) {
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  useEffect(() => {
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKey = (e) => { if (e.key === 'Escape') closeRef.current?.(); };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener('keydown', onKey);
+    };
+  }, []);
+}
+
 function FactorKeyModal({ onClose, onChange }) {
+  useModalChrome(onClose);
   const currentKey = readFactorKey() || '';
   const [pasted, setPasted] = useState('');
   const [flash, setFlash] = useState('');
@@ -9391,6 +9422,8 @@ function GalleryModal({ gs, onClose, onRegenerate, onDiscard }) {
   const sorted = [...visible].sort((a, b) => (b.capturedAt || 0) - (a.capturedAt || 0));
   const [enlarged, setEnlarged] = React.useState(null); // illustration entry
   const [confirmingDiscard, setConfirmingDiscard] = React.useState(null); // id
+  // Escape peels the lightbox first, then the modal.
+  useModalChrome(() => { if (enlarged) setEnlarged(null); else onClose(); });
 
   const totalCount = all.length;
   const visibleCount = visible.length;
@@ -9585,6 +9618,9 @@ function GalleryModal({ gs, onClose, onRegenerate, onDiscard }) {
 // auto-downloaded as a Manuscript JSON before the choice commits, so a wrong
 // pick is recoverable via the existing Restore from manuscript flow.
 function ConflictModal({ localGs, remoteRecord, onResolve }) {
+  // Scroll lock only — no Escape path. The conflict demands a choice; an
+  // accidental dismissal would leave the two saves silently diverged.
+  useModalChrome(null);
   const remoteGs = remoteRecord?.body || {};
 
   const stats = (gs, savedAt) => ({
@@ -9661,6 +9697,7 @@ function ConflictModal({ localGs, remoteRecord, onResolve }) {
 }
 
 function IllustrationModal({ prose, onClose }) {
+  useModalChrome(onClose);
   const recordIllustration = React.useContext(IllustrationRecorderContext);
   const illustrationsList = React.useContext(IllustrationsListContext);
 
@@ -10020,6 +10057,7 @@ function ImaginePanel({ prose, label = 'Imagine this scene' }) {
 // in any sandboxed iframe; falls back to manual long-press copying if the
 // clipboard is refused.
 function ExportModal({ title, content, filename, onClose, helperText, wrap }) {
+  useModalChrome(onClose);
   const [flash, setFlash] = useState('');
   const taRef = useRef(null);
 
@@ -10137,17 +10175,22 @@ function SyncBadge({ gs, sync }) {
     sync.status === 'offline' ? 'offline' :
     sync.status === 'error' ? 'sync error' :
     sync.status === 'conflict' ? 'conflict' :
+    sync.sizeWarning ? 'synced — grows heavy' :
     'synced';
 
   const color =
     sync.status === 'offline' || sync.status === 'error' ? '#8b1a1a' :
     sync.status === 'conflict' ? '#5c1a08' :
+    sync.sizeWarning && sync.status === 'idle' ? '#8b5a1a' :
     '#6b4423';
 
   const pointer = sync.pointer();
-  const tooltip = pointer?.lastSyncAt
+  const sizeNote = sync.sizeWarning
+    ? '\nThe save approaches the sync limit — export a manuscript from the Menu as a keepsake.'
+    : '';
+  const tooltip = (pointer?.lastSyncAt
     ? `last sync: ${new Date(pointer.lastSyncAt).toLocaleString()}\nID: ${gs.playthroughId}`
-    : `ID: ${gs.playthroughId || '—'}`;
+    : `ID: ${gs.playthroughId || '—'}`) + sizeNote;
 
   return (
     <span title={tooltip} style={{
@@ -10502,17 +10545,43 @@ function Tabs({ tab, setTab, unread, atHome, viewportMode }) {
         ...(atHome ? [{ key: 'outpost', label: 'Outpost' }] : []),
         { key: 'letters',  label: `Letters${unread ? ` (${unread})` : ''}` },
       ];
+  // The tab row scrolls horizontally with its scrollbar hidden — on a narrow
+  // phone nothing signals that more tabs sit off-screen. A right-edge fade
+  // shows while there is further to scroll and clears at the end.
+  const rowRef = useRef(null);
+  const [moreRight, setMoreRight] = useState(false);
+  useEffect(() => {
+    const el = rowRef.current;
+    if (!el) return;
+    const update = () => setMoreRight(el.scrollWidth - el.clientWidth - el.scrollLeft > 8);
+    update();
+    el.addEventListener('scroll', update, { passive: true });
+    window.addEventListener('resize', update);
+    return () => {
+      el.removeEventListener('scroll', update);
+      window.removeEventListener('resize', update);
+    };
+  }, [viewportMode, atHome, unread]);
   return (
-    <div className="tab-row">
-      {tabs.map(t => (
-        <button
-          key={t.key}
-          onClick={() => setTab(t.key)}
-          className={`tab-button ${tab === t.key ? 'active' : ''}`}
-        >
-          {t.label}
-        </button>
-      ))}
+    <div style={{ position: 'relative' }}>
+      <div className="tab-row" ref={rowRef}>
+        {tabs.map(t => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            className={`tab-button ${tab === t.key ? 'active' : ''}`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      {moreRight && (
+        <div aria-hidden style={{
+          position: 'absolute', top: 0, right: 0, bottom: '1px', width: '28px',
+          pointerEvents: 'none',
+          background: 'linear-gradient(to left, rgba(216,196,150,0.95), rgba(216,196,150,0))',
+        }} />
+      )}
     </div>
   );
 }
@@ -12681,6 +12750,19 @@ export default function FactorsCharter() {
     const result = await sync.pullCharterById(playthroughId);
     if (result.status !== 'ok' || !result.body) return;
     const id = newSlotId();
+    // Seed the new slot's sync pointer with the cloud metadata just pulled.
+    // Without it the next launch's detectConflict sees lastKnown === null and
+    // fires a false-positive conflict modal for a charter that is in step
+    // with the cloud. The sync hook is still keyed to the previous slot at
+    // this point (setActiveSaveId hasn't re-rendered), so write the slot's
+    // pointer key directly.
+    try {
+      window.localStorage.setItem(`factor_save_${id}_sync`, JSON.stringify({
+        lastKnownCloudVersion: result.version,
+        lastSyncAt: result.savedAt,
+        lastKnownDay: result.body?.day || 0,
+      }));
+    } catch (e) { /* best-effort — worst case is the old conservative conflict */ }
     setActiveSaveId(id);
     setGs(ensureShape(result.body));
     setPhase('game');

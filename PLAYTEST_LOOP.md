@@ -36,6 +36,43 @@ real-time pressure, anything that breaks the quiet-ledger mood.
 
 ---
 
+## NEW DIRECTION (Bradley, 2026-06-12): the sprawling enterprise
+
+> "The original idea for this mod was that eventually your enterprise is
+> sprawling. We want it to feel like you're building something with different
+> ways to develop it." + approved a *carrot* money sink for late-game tension.
+
+**Design: VENTURES** — large optional investments, each growing the operation in
+a different direction, that keep late-game money meaningful (you always want to
+fund the next one) and make the Factor feel like an empire-builder. Pure logic +
+registry in `src/util/ventures.js`; rendered as "The Enterprise" in the Outpost.
+State `gs.ventures: { [id]: { established, establishedDay, lastPaidDay } }`,
+persists across succession/renewal (lasting world state, like buildings).
+
+Categories (different development paths): **Shipping** (a fleet remitting passive
+income), **Network** (agents abroad that cheapen yr. trade), **Capital** (a
+financial stake), **Production** (yr. own supply — Phase 2).
+
+### Ventures — Phase 1 (shipped 2026-06-12, verified live)
+Core system + 4 ventures across 3 categories:
+- **The Kingfisher** (Shipping, £600 → £90/qtr) — first vessel of a fleet.
+- **An agent at Kota Pinang** (Network, £450) — pepper & cinnamon 10% cheaper
+  there (wired into `priceFor` buy side; verified KP pepper £8→£7).
+- **A stake in the bazaar** (Capital, £800 → £70/qtr).
+- **The Carnatic** (Shipping, £1500 → £240/qtr; *requires the Kingfisher* — a
+  tiered path; verified the gate unlocks).
+- Quarterly passive income accrues in `tickDays` (`accrueVentureIncome`, catches
+  up multiple quarters) with a journal + away-log beat: "The enterprise remitted
+  £160: The Kingfisher £90; A stake in the bazaar £70." Verified £150→£310.
+- 12 vitest cases; tests 165→177. Build clean, zero console errors.
+
+**Phase 2 plan (next loop iterations):** a Production venture (yr. own pepper/
+spice supply, reducing reliance on Kota Pinang); more Network/Capital options;
+balance the income vs sinks; a digest "venture" prose branch; possibly surface
+total enterprise value as a prestige metric; then playtest until beautiful.
+
+---
+
 ## Findings log (newest first)
 
 ### Iteration 14 — 2026-06-12 — capstone integration playthrough (CLEAN) → loop concluded

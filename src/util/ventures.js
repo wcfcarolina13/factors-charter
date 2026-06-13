@@ -1,0 +1,106 @@
+// VENTURES — the sprawling enterprise. Large optional investments the Factor
+// pours money into, each growing the operation in a DIFFERENT direction:
+// Shipping (a fleet that remits passive income), Network (agents abroad that
+// cheapen yr. trade), Capital (a financial stake), Production (yr. own supply,
+// Phase 2). A carrot money sink: the late game stops being "money has no use"
+// and becomes "what do I build next." Established ventures are lasting world
+// state — they persist across succession/renewal like the outpost.
+//
+// Pure data + logic so it's testable and the monolith just renders it.
+// gs.ventures shape: { [id]: { established: true, establishedDay, lastPaidDay } }
+
+export const VENTURES = {
+  coastal_trader: {
+    name: 'The Kingfisher — a coastal trader',
+    category: 'Shipping',
+    cost: 600,
+    income: 90,        // £ remitted each quarter (90 days)
+    blurb: 'A single-masted country boat under a hired master, to run the near coast for small cargoes. The first vessel of a fleet that is not yet a fleet.',
+    establishText: 'The Kingfisher is bought and a master engaged; she will run the coast and remit her takings each quarter.',
+  },
+  kota_agent: {
+    name: 'An agent at Kota Pinang',
+    category: 'Network',
+    cost: 450,
+    // Mechanical benefit: cheaper pepper & cinnamon when buying at Kota Pinang.
+    buyDiscount: { port: 'Kota Pinang', commodities: ['pepper', 'cinnamon'], mult: 0.9 },
+    blurb: 'A resident factor of yr. own at the Sultan’s port, to hold the pepper against yr. arrival and shave the Sultan’s men from the price.',
+    establishText: 'Yr. man is installed at Kota Pinang. The pepper comes cheaper now, and is there when you call.',
+  },
+  bazaar_stake: {
+    name: 'A stake in the bazaar',
+    category: 'Capital',
+    cost: 800,
+    income: 70,
+    blurb: 'A silent share in Mehmet Pasha’s lending house. The bazaar’s coin is always in motion, and a portion of its motion becomes yrs.',
+    establishText: 'Yr. stake is laid with Mehmet Pasha. A share of the bazaar’s interest will come to you each quarter.',
+  },
+  country_ship: {
+    name: 'The Carnatic — a country ship',
+    category: 'Shipping',
+    cost: 1500,
+    income: 240,
+    requires: { venture: 'coastal_trader' },
+    blurb: 'A full country ship, two-masted and crewed, running the Bengal and Coromandel trade under yr. flag while you keep yr. own deck. This is a fleet.',
+    establishText: 'The Carnatic is yrs., and a fleet with her. She runs the Bay under yr. flag and remits each quarter.',
+  },
+};
+
+export const VENTURE_QUARTER = 90;
+
+// Whether a venture's prerequisites are met by the current ventures state.
+export function ventureUnlocked(id, venturesState) {
+  const def = VENTURES[id];
+  if (!def) return false;
+  const req = def.requires;
+  if (!req) return true;
+  if (req.venture && !venturesState?.[req.venture]?.established) return false;
+  return true;
+}
+
+// Quarterly income remittance for established income-ventures. Pure: returns a
+// new ventures map (with advanced lastPaidDay), the total income this tick, and
+// per-venture lines for the journal/digest. Catches up over multiple quarters
+// if a long gap passed (advances lastPaidDay by whole quarters).
+export function accrueVentureIncome(venturesState, day) {
+  const ventures = { ...(venturesState || {}) };
+  let income = 0;
+  const lines = [];
+  for (const [id, v] of Object.entries(ventures)) {
+    if (!v?.established) continue;
+    const def = VENTURES[id];
+    if (!def?.income) continue;
+    let last = typeof v.lastPaidDay === 'number' ? v.lastPaidDay
+             : (typeof v.establishedDay === 'number' ? v.establishedDay : day);
+    let paid = 0;
+    while (day - last >= VENTURE_QUARTER) { paid += def.income; last += VENTURE_QUARTER; }
+    if (paid > 0) {
+      income += paid;
+      lines.push({ id, name: def.name, amount: paid });
+      ventures[id] = { ...v, lastPaidDay: last };
+    }
+  }
+  return { ventures, income, lines };
+}
+
+// Buy-price multiplier from an established network agent for a given port +
+// commodity. 1 when no agent applies. Folded into priceFor's buy side.
+export function ventureBuyMult(venturesState, portKey, commodity) {
+  let mult = 1;
+  for (const [id, v] of Object.entries(venturesState || {})) {
+    if (!v?.established) continue;
+    const d = VENTURES[id]?.buyDiscount;
+    if (d && d.port === portKey && d.commodities.includes(commodity)) mult *= d.mult;
+  }
+  return mult;
+}
+
+// Total quarterly passive income from all established income-ventures — for
+// the UI "the enterprise remits £N each quarter" line.
+export function ventureQuarterlyIncome(venturesState) {
+  let total = 0;
+  for (const [id, v] of Object.entries(venturesState || {})) {
+    if (v?.established && VENTURES[id]?.income) total += VENTURES[id].income;
+  }
+  return total;
+}

@@ -18,6 +18,7 @@ import { canOfferSabotage, resolveSabotage, sabotageCoda } from './src/util/sabo
 import { recordTrade, reckonRows, reckonTotal } from './src/util/trade-stats.js';
 import { reconcileHookMeta, hookAgeNote, staleHookCount } from './src/util/hooks-age.js';
 import { pendingWealthMilestones, seedWealthFlags } from './src/util/milestones.js';
+import { VENTURES, accrueVentureIncome, ventureUnlocked, ventureBuyMult, ventureQuarterlyIncome } from './src/util/ventures.js';
 
 // ─────────── FACTOR KEY (cross-device identity) ───────────
 //
@@ -901,7 +902,10 @@ const priceFor = (portKey, commodity, day, gs) => {
   const booksMult = gs?.outpost?.buildings?.counting_house?.built
     ? (side === 'sell' ? 0.97 : 1.03)
     : 1;
-  return Math.max(1, Math.round(base * mult * (1 + fluct) * windowMult * booksMult));
+  // A network agent (e.g. at Kota Pinang) cheapens what you BUY there — i.e.
+  // when the port sells to you (side === 'sell' in this port-centric naming).
+  const agentMult = (gs && side === 'sell') ? ventureBuyMult(gs.ventures, portKey, commodity) : 1;
+  return Math.max(1, Math.round(base * mult * (1 + fluct) * windowMult * booksMult * agentMult));
 };
 
 // The port's own fair rate for a commodity — base × port multiplier ×
@@ -1149,6 +1153,7 @@ const ensureShape = (gs) => {
   // makeInitialState but old / corrupted saves may have lost.
   if (!Array.isArray(next.hooks)) next.hooks = [];
   if (!Array.isArray(next.recentEncounters)) next.recentEncounters = [];
+  if (!next.ventures || typeof next.ventures !== 'object') next.ventures = {};
   // Sidecar timestamps for thread aging (keyed by hook text). Stamp any
   // already-open hooks at the current day on first migration — we begin
   // tracking now rather than inventing a past for old saves.
@@ -1385,6 +1390,7 @@ Mr. W. died this morning at half past four. The Reverend will not come down from
   journal: [],
   letters: [directorLetter, wilbrahamPapers],
   hooks: ['The inland teak concession \u2014 ter Borch wants it.'],
+  ventures: {},          // the sprawling enterprise \u2014 fleet, agents, capital; persists across succession
   visited: ['Bayan-Kor'],
   acquaintances: [],     // AI-introduced minor characters; recur via stateContext
   flags: {},             // narrative flags the AI may set
@@ -5583,6 +5589,19 @@ function tickDays(gs, days) {
   // Reconcile thread-age timestamps against the final hook set — any thread
   // raised during these days gets stamped, any closed one is dropped.
   s.hookMeta = reconcileHookMeta(s.hooks, s.hookMeta, s.day);
+
+  // The enterprise remits — established income ventures (the fleet, the bazaar
+  // stake) pay their quarter. Felt as a recurring reward beat in the away log.
+  if (!s.charterClosed) {
+    const acc = accrueVentureIncome(s.ventures, s.day);
+    if (acc.income > 0) {
+      s.ventures = acc.ventures;
+      s.money = (s.money || 0) + acc.income;
+      const detail = acc.lines.map(l => `${VENTURES[l.id].name.replace(/ —.*$/, '')} £${l.amount}`).join('; ');
+      s.awayLog.push({ day: s.day, type: 'venture', text: `Yr. ventures remitted £${acc.income} this quarter — ${detail}.` });
+      s.journal = [...(s.journal || []), { day: s.day, entry: `The enterprise remitted £${acc.income}: ${detail}.` }];
+    }
+  }
   return s;
 }
 
@@ -8759,6 +8778,25 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
     }));
   };
 
+  // Establish a venture — a lasting investment in the enterprise. Unlike a
+  // building, it's instant (a contract signed, a ship bought, an agent
+  // installed); income ventures begin remitting the next quarter, the agent's
+  // discount takes effect at once.
+  const establishVenture = (id) => {
+    const def = VENTURES[id];
+    if (!def) return;
+    if (gs.ventures?.[id]?.established) return;
+    if (gs.money < def.cost) return;
+    if (!ventureUnlocked(id, gs.ventures)) return;
+    if (gs.charterClosed) return;
+    setGs(prev => ({
+      ...prev,
+      money: prev.money - def.cost,
+      ventures: { ...(prev.ventures || {}), [id]: { established: true, establishedDay: prev.day, lastPaidDay: prev.day } },
+      journal: [...prev.journal, { day: prev.day, entry: `Established a venture — ${def.name}. £${def.cost} laid out from the strongbox. ${def.establishText}` }],
+    }));
+  };
+
   const handleDigestContinue = () => {
     setAwayDigest(null);
     setTab('journal');
@@ -9242,7 +9280,7 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
                 {effectiveTab === 'ledger' && viewportMode !== 'desktop' && <LedgerView gs={gs} />}
                 {effectiveTab === 'map' && viewportMode !== 'desktop' && <MapView gs={gs} sailTo={sailTo} />}
                 {effectiveTab === 'port' && <PortView gs={gs} buyGood={buyGood} sellGood={sellGood} refitShip={refitShip} arrivalProse={arrivalProse} setTab={setTab} lodgeGoods={lodgeGoods} withdrawGoods={withdrawGoods} commissionBrigantine={commissionBrigantine} takeBottomry={takeBottomry} liftContractOpium={liftContractOpium} runDutchCustoms={runDutchCustoms} viewportMode={viewportMode} />}
-                {effectiveTab === 'outpost' && atHome && <OutpostView gs={gs} startBuild={startBuild} expediteBuild={expediteBuild} viewportMode={viewportMode} />}
+                {effectiveTab === 'outpost' && atHome && <OutpostView gs={gs} startBuild={startBuild} expediteBuild={expediteBuild} establishVenture={establishVenture} viewportMode={viewportMode} />}
                 {effectiveTab === 'letters' && <LettersView gs={gs} setGs={setGs} onRespond={handleLetterResponse} openLetterId={openLetterId} setOpenLetterId={setOpenLetterId} viewportMode={viewportMode} />}
               </>
             );
@@ -12362,7 +12400,7 @@ function CommissionPanel({ gs, commissionBrigantine }) {
   );
 }
 
-function OutpostView({ gs, startBuild, expediteBuild, viewportMode }) {
+function OutpostView({ gs, startBuild, expediteBuild, establishVenture, viewportMode }) {
   const built = Object.entries(gs.outpost.buildings).filter(([,v]) => v.built);
   const queue = gs.outpost.queue;
 
@@ -12379,6 +12417,18 @@ function OutpostView({ gs, startBuild, expediteBuild, viewportMode }) {
   const meetsRequires = (b) => {
     if (!b.requires?.rep) return true;
     return Object.entries(b.requires.rep).every(([f, n]) => gs.reputation[f] >= n);
+  };
+
+  // The enterprise beyond the compound — ventures (fleet, agents, capital).
+  const ventures = gs.ventures || {};
+  const establishedVentures = Object.entries(VENTURES).filter(([id]) => ventures[id]?.established);
+  const availableVentures = Object.entries(VENTURES).filter(([id]) => !ventures[id]?.established);
+  const quarterlyIncome = ventureQuarterlyIncome(ventures);
+  const ventureBenefitLine = (id) => {
+    const def = VENTURES[id];
+    if (def.income) return `Remits £${def.income} each quarter.`;
+    if (def.buyDiscount) return `${def.buyDiscount.commodities.map(c => COMMODITIES[c].name.toLowerCase()).join(' and ')} come ${Math.round((1 - def.buyDiscount.mult) * 100)}% cheaper at ${def.buyDiscount.port}.`;
+    return '';
   };
 
   const containerStyle = viewportMode === 'desktop'
@@ -12513,6 +12563,68 @@ function OutpostView({ gs, startBuild, expediteBuild, viewportMode }) {
             );
           })}
         </div>
+      </div>
+
+      {/* THE ENTERPRISE — ventures beyond the compound. A different way to
+          grow: a fleet, agents abroad, a financial stake. */}
+      <div style={{ marginTop: '2rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.3rem' }}>
+          <h2 className="display" style={{ fontSize: '1.25em', color: '#5c1a08', margin: 0 }}>The Enterprise</h2>
+          {quarterlyIncome > 0 && (
+            <span className="display" style={{ fontSize: '0.82em', color: '#3a5c2a' }}>remits £{quarterlyIncome} / quarter</span>
+          )}
+        </div>
+        <p className="italic" style={{ color: '#4a3220', marginBottom: '1rem', fontSize: '0.95em' }}>
+          Beyond the compound, yr. fortune may be put to work — a fleet of yr. own, an agent at a foreign port, a stake in the bazaar. Each grows the concern in a different direction.
+        </p>
+
+        {establishedVentures.length > 0 && (
+          <div style={{ marginBottom: '1.2rem' }}>
+            <div className="display" style={{ fontSize: '0.85em', color: '#6b4423', letterSpacing: '0.06em', marginBottom: '0.5rem' }}>YR. HOLDINGS</div>
+            {establishedVentures.map(([id, def]) => (
+              <div key={id} className="parchment" style={{ padding: '0.7rem 1rem', marginBottom: '0.5rem', background: 'rgba(255,255,255,0.3)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '0.4rem' }}>
+                  <div className="display" style={{ color: '#5c1a08' }}>{def.name}</div>
+                  <div style={{ fontSize: '0.75em', color: '#8a6a3f', fontStyle: 'italic' }}>{def.category}</div>
+                </div>
+                <div style={{ fontSize: '0.85em', color: '#3a5c2a', fontStyle: 'italic' }}>{ventureBenefitLine(id)}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {availableVentures.length > 0 && (
+          <div>
+            <div className="display" style={{ fontSize: '0.85em', color: '#6b4423', letterSpacing: '0.06em', marginBottom: '0.5rem' }}>VENTURES TO BE TAKEN UP</div>
+            {availableVentures.map(([id, def]) => {
+              const unlocked = ventureUnlocked(id, ventures);
+              const canPay = gs.money >= def.cost;
+              const reqName = def.requires?.venture ? VENTURES[def.requires.venture]?.name : null;
+              return (
+                <div key={id} className="parchment" style={{ padding: '0.8rem 1rem', marginBottom: '0.6rem', background: 'rgba(255,255,255,0.22)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '0.4rem' }}>
+                    <div className="display" style={{ fontSize: '1.05em', color: '#5c1a08' }}>{def.name}</div>
+                    <div style={{ fontSize: '0.75em', color: '#8a6a3f', fontStyle: 'italic' }}>{def.category}</div>
+                  </div>
+                  <p className="italic" style={{ margin: '0.2rem 0 0.4rem 0', color: '#4a3220', fontSize: '0.9em' }}>{def.blurb}</p>
+                  <div style={{ fontSize: '0.83em', color: '#3a5c2a', fontStyle: 'italic', marginBottom: '0.5rem' }}>{ventureBenefitLine(id)}</div>
+                  {!unlocked && reqName && (
+                    <div className="italic" style={{ fontSize: '0.82em', color: '#8b1a1a', marginBottom: '0.4rem' }}>
+                      &mdash; Requires {reqName} first.
+                    </div>
+                  )}
+                  <button
+                    className="wax-button"
+                    disabled={!unlocked || !canPay}
+                    onClick={() => establishVenture(id)}
+                  >
+                    {unlocked ? `Lay out £${def.cost}` : 'Locked'}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );

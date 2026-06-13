@@ -89,14 +89,58 @@ inherited the resolved matter doesn't get it again. Verified live: letter fires
 day 123, invest deducts £700 + establishes the venture (£1000→£300), it lands
 in "YR. HOLDINGS" under Home and not in the buy list. Tests 177/177, clean.
 
-**Phase 2 plan (next loop iterations):** a Production venture (yr. own pepper/
-spice supply, reducing reliance on Kota Pinang); more Network/Capital options;
-balance the income vs sinks; a digest "venture" prose branch; possibly surface
-total enterprise value as a prestige metric; then playtest until beautiful.
+### Ventures — Phase 2 (shipped 2026-06-13, verified live)
+Closed the loop: ventures let you BUILD the sprawl; now the sprawl MATTERS at the
+finish. Three units, each verified live + committed separately. Tests 177→189.
+
+- **Production path (the make-vs-buy axis).** Two tiered Production ventures that
+  lodge yr. own spice into the godown each quarter instead of buying it:
+  - *A pepper garden of yr. own* (£700 → 16 cwt pepper/qtr).
+  - *A spice estate at the river-head* (£1300, requires the pepper garden →
+    10 cwt cinnamon + 6 cwt pepper/qtr; cinnamon is the scarce one-port quota good).
+  - Pure `accrueVentureProduce` mirrors `accrueVentureIncome` (quarterly, catch-up);
+    the monolith lodges into `gs.outpost.warehouse` respecting cap/overflow exactly
+    like the plantation harvest, surfacing in the `harvest` digest branch. Verified
+    live: a voyage lodged 16 cwt pepper (godown 0→16), lastPaidDay advanced one
+    quarter, journal + harvest beats fired.
+  - Balance: ~264 pepper / 120 cinnamon max passive over a full charter —
+    accelerates the curve, never auto-fills 400/200, a £2000 sink behind a tier gate.
+- **Merchant-prince finish.** `enterpriseWorth(gs)` (strongbox + godown goods +
+  buildings + ship + ventures' book value) surfaced in the Ledger ("THE WHOLE
+  CONCERN" breakdown) and the Enterprise header line. New `merchant-prince`
+  charter-end destiny gated on ≥3 ventures — below the four faction-patron endings,
+  above the by-outcome defaults, and NOT gated on quota success (you go home rich on
+  what you built, not what the Court gave). Letter from yr. London agent quoting the
+  live worth. Verified live: a FAILED-quota close with 3 ventures resolved to
+  merchant-prince and auto-presented the agent's letter (£6,890); slot labelled
+  "a merchant prince".
+- **Wexley Step 2** (the optional, also shipped). Pays off the "hold" door: if the
+  portion was merely held, day≥270 brings Eliza's letter that the Bristol house
+  prospered — increase to a full share (£600, establishes the concern, closes the
+  hook via `closeHookText`), buy out on the good season (£320), or hold again.
+  Shared `WEXLEY_HELD_HOOK` constant keeps Step 1's hook and Step 2's close in sync.
+  Verified live end-to-end: hold → increase → Bristol concern established, hook gone.
+
+**What's left for Bradley (subjective/feel, not autonomous):** more Network/Capital
+venture options if the catalog wants breadth; a bespoke "venture" away-digest prose
+branch (Production currently reuses `harvest`, income uses `venture`); economic
+re-tuning after he plays a full charter with the Production path. The sprawl loop
+itself is now complete end-to-end.
 
 ---
 
 ## Findings log (newest first)
+
+### Ventures Phase 2 — 2026-06-13 — Production path + merchant-prince finish + Wexley Step 2
+
+The handed-off ventures work (chip `task_4cae01ca`). Closed the sprawl loop end to
+end: a Production development axis (yr. own gardens lodge spice into the godown),
+a `merchant-prince` charter-end destiny that rewards a Factor who built a real
+concern (gated ≥3 ventures, not on quota success — a genuine alternative life), an
+`enterpriseWorth` prestige metric in the Ledger + Enterprise panel, and the optional
+Wexley Step 2 paying off the "hold" door. Each unit verified live at mobile viewport
+via doctored saves; tests 177→189; build clean; zero console errors. Full detail in
+the "Ventures — Phase 2" section above and `CHANGELOG.md` 2026-06-13.
 
 ### Iteration (post-handoff) — 2026-06-12 — faction-keyed encounters
 

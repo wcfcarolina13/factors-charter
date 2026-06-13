@@ -4,6 +4,27 @@ The Factor's Charter — a chronological log of what's shipped. Newest first.
 
 ---
 
+## 2026-06-13 — Ventures Phase 2: the Production path + the merchant-prince finish
+
+Closes the loop Bradley set for the sprawling-enterprise direction: ventures let you BUILD the sprawl, and now the sprawl MATTERS at the charter's end. Three units, each verified live (doctored saves at mobile viewport), committed separately. Tests **177 → 189**; build clean; zero console errors throughout.
+
+**1. Production path — the missing development axis (make vs. buy / vertical integration).** Two tiered Production ventures that lodge yr. *own* spice into the godown each quarter instead of buying it at the Sultan's port:
+- **A pepper garden of yr. own** (£700 → 16 cwt pepper/qtr).
+- **A spice estate at the river-head** (£1300, *requires the pepper garden* → 10 cwt cinnamon + 6 cwt pepper/qtr; cinnamon is the scarce, one-port quota good — the real "reduce reliance" payoff).
+- Pure `accrueVentureProduce` in `src/util/ventures.js` mirrors `accrueVentureIncome` (quarterly, catches up over gaps); the monolith lodges yields into `gs.outpost.warehouse` respecting godown capacity exactly like the plantation harvest (surplus rots), surfacing in the `harvest` away-digest branch. Benefit line: "Yields N cwt … to the godown each quarter."
+- Balance: ~264 pepper / 120 cinnamon max passive over a full charter — accelerates the curve, never auto-fills the 400/200 quota, a real £2000 sink behind a tier gate. Removes grind for a sink rather than adding it.
+
+**2. Merchant-prince finish — making the sprawl felt and rewarded.**
+- `enterpriseWorth(gs)` (monolith) sums strongbox + godown goods (at base price) + buildings raised + ship + ventures' book value (`venturesWorth`/`ventureWorth`/`establishedVentureCount`, pure + tested in ventures.js). Surfaced in the Ledger ("THE WHOLE CONCERN" with a per-part breakdown) and the Enterprise panel header line.
+- New `merchant-prince` charter-end destiny in `evalCharterDestiny`, gated on **≥3 established ventures**. Ranks below the four faction-patron endings (a claimed patron is the truer ending) but above the Court's by-outcome defaults — and is deliberately **not** gated on quota success: a Factor who built a real concern goes home a merchant of substance on what HE built, not what the Court gave him. It can lift even a failed quota into a genuine alternative life.
+- Letter branch in `makeCharterEndLetter` from yr. London agent (Josiah Tench), quoting the concern's live worth — a ledger-as-reward beat in the Factor's voice. Wired through the away-log charter-end beat and the title-screen slot label ("a merchant prince").
+
+**3. Wexley matter, Step 2 (optional) — the Bristol house prospers.** Pays off the door the cautious "hold" choice (£200) left open. If the family portion was merely HELD, `makeWexleyStep2Letter` fires day ≥ 270 (while still held): the house has had a famous season and Mr. Pyne offers to grow the portion on better terms. Send £600 → increase to a full share (establishes the Bristol concern, closes the open thread via `closeHookText`); take the buyout on the good season (£320, handsomer than the original £180); or hold again. The held-branch hook is now a shared `WEXLEY_HELD_HOOK` constant so Step 1's `hook` and Step 2's `closeHookText` can't drift; the `wexleyStep2LetterSent` gate resets on succession like every other letter gate, so a successor's inherited held matter ripens afresh.
+
+Live verification highlights: both Production ventures render with correct benefit lines + tier gate; a voyage lodged 16 cwt pepper into the godown (0→16), `lastPaidDay` advanced exactly one quarter, journal + harvest beats fired. With 3 ventures and the patron paths suppressed, a closing charter on a **failed** quota resolved to merchant-prince and auto-presented the agent's letter quoting £6,890. The full Wexley arc resolved hold → increase: £600 deducted, Bristol concern established, `wexleyMatter` held→invested, open hook removed.
+
+---
+
 ## 2026-06-12 — Thread aging (Phase 6 of June audit)
 
 Closes the last open *engineering* item from the triage (hooks staleness, #7). The remaining open items all genuinely need Bradley's input (PWA icons, R2 dashboard binding, fine-goods playtest) or are content needing tone sign-off (acquaintance mechanical gating).

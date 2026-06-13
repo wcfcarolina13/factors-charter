@@ -64,14 +64,19 @@ are listed at the bottom so they don't get re-reported.
    state and closes the lingering hook via a new reusable `closeHookText`
    change (the letter-outcome counterpart to the pursue/voyage `closeHook`).
    Per-Factor, so it resets on succession/renewal.
-7. **Hooks staleness** (M, partially addressed) — proper aging needs a
-   schema change (`gs.hooks` are plain strings across ~8 push sites →
-   `{text, openedDay}`), deferred as a larger refactor. The Court-letter
-   nag idea is also a poor fiction fit (the Court doesn't know the Factor's
-   private threads). The 2026-06-12 `closeHookText` primitive is the first
-   step toward a real lifecycle — scripted letters can now retire the hooks
-   they plant. Next: the schema migration, then surface stale threads to the
-   *player* (not the Court) in the Pursue panel.
+7. ~~**Hooks staleness**~~ — shipped 2026-06-12. Resolved without the
+   string→object schema migration: a sidecar `gs.hookMeta` map
+   (`{ [hookText]: openedDay }`, keyed by the text that is *already* every
+   filter's identity) carries the one new fact — when a thread was first
+   noted — with zero changes to the ~8 push/close sites. Pure logic in
+   `src/util/hooks-age.js` (`reconcileHookMeta` / `hookAgeNote` /
+   `staleHookCount`, 11 vitest cases), reconciled in `tickDays` and on load.
+   The Pursue panel now shows a per-thread marginal note ("noted 60 days
+   past"; "↯ a matter long left — these 200 days" past the 120-day stale
+   line) and a red nudge when matters lie unattended — surfaced to the
+   *player*, not the Court (the better fiction fit). Threads aren't
+   auto-deleted; the player still chooses to pursue or let go. The
+   `closeHookText` primitive (2026-06-12) handles scripted closure.
 8. **Acquaintances** (mostly addressed) — already fed into `stateContext`
    (so the artifact-path AI references them; the "purely decorative" audit
    claim was stale for the live-AI path). The PWA has no live AI, so the

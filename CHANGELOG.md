@@ -4,6 +4,20 @@ The Factor's Charter — a chronological log of what's shipped. Newest first.
 
 ---
 
+## 2026-06-12 — Thread aging (Phase 6 of June audit)
+
+Closes the last open *engineering* item from the triage (hooks staleness, #7). The remaining open items all genuinely need Bradley's input (PWA icons, R2 dashboard binding, fine-goods playtest) or are content needing tone sign-off (acquaintance mechanical gating).
+
+Open threads (`gs.hooks`) accumulate over a charter with no sense of which have gone cold. Rather than migrate the `string[]` to `{text, openedDay}[]` (~8 push/close sites, real regression risk), a sidecar `gs.hookMeta` map (`{ [hookText]: openedDay }`) carries the one new fact — when a thread was first noted — keyed by the hook text that is *already* the canonical identity for every `closeHook`/`closeHookText` filter. Net touch: `ensureShape` init + one `tickDays` reconcile + the Pursue panel. No push site changed.
+
+- Pure logic in `src/util/hooks-age.js`: `reconcileHookMeta` (stamp new, preserve known, drop closed), `hookAgeNote`, `staleHookCount`. 11 vitest cases; tests **145 → 156**.
+- Pursue panel now shows a period-voice marginal note under each thread — nothing under ~30 days, "noted N days past" beyond that, and "↯ a matter long left — these N days" past the 120-day stale line — plus a red header nudge ("A matter has lain long unattended. Pursue it, or let it go.") when any thread is stale.
+- Threads are never auto-deleted; the cue informs, the player still chooses to pursue or let go. Mid-encounter hooks created outside `tickDays` simply read as fresh (no note) until the next day-advance stamps them — which is the correct reading anyway.
+
+Verified live at mobile viewport with a doctored save (threads at 5 / 60 / 200 days): fresh shows no note, 60-day shows "noted 60 days past", 200-day shows the stale ↯ marker, and the singular nudge renders. Tests 156/156; build clean; zero console errors.
+
+---
+
 ## 2026-06-12 — Content beats + offline-enhancement UX (Phase 5 of June audit)
 
 The last actionable cluster from the June triage — two narrative payoffs and the three online-enhancement-layer UX gaps. (Remaining open items need your input: PWA icons, the R2 dashboard binding, the fine-goods balance playtest.)

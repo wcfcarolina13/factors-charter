@@ -1,12 +1,12 @@
 # HANDOFF — The Factor's Charter
 
-**Date:** 2026-05-10 (cross-device sync + image gallery + outcome bite + cache + PWA SW)
+**Date:** 2026-06-12 (June audit, Phases 1–4)
 **For:** Bradley (or a fresh Claude session) resuming this project
 **Branch:** `main`
 **Live build:** https://factors-charter.pages.dev (auto-deploys from `main`)
-**Status:** Five commits landed on `main` today. Tests **129/129**; build clean (main **415 KB / 122 KB gz**, precache **553 KiB**). JSX file is **12,480 lines**. Workers AI binding live; **R2 bucket binding still pending** (one-time dashboard step — see below).
+**Status:** Ten commits sit on local `main` **UNPUSHED** (awaiting Bradley's go-ahead to deploy), spanning four phases of the 2026-06-09 audit: trade toast + urgency cue + timeouts (P1), Trade Reckoning + self-hosted fonts (P2), price drivers + raid posture (P3), mobile polish + sync hardening (P4). Tests **145/145**; build clean; precache **~800 KiB** (fonts now vendored); JSX file ~**12,890 lines**. Full per-phase detail in `CHANGELOG.md`; the triaged backlog (with shipped items struck and rejected audit claims recorded) is in `DESIGN_NOTES.md` § "Audit triage — 2026-06-09". Workers AI binding live; **R2 bucket binding still pending** (one-time dashboard step — see below).
 
-> Previous handoff archived in `git log` at commit `5caf118`.
+> The 2026-05-10 session detail below is retained as written; its test/size figures are superseded by the status line above. Previous handoff archived in `git log` at commit `5caf118`.
 
 ---
 

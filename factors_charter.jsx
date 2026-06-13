@@ -2494,6 +2494,10 @@ Yr. obedt. servants, the Court of Directors.`,
 // crossing two oceans, Crusoe's off-stage estate. Three choices: grow it
 // (invest → the venture), hold it (cautious, no income but the door open), or
 // sell out (cash now, the name leaves the books). One-off; gated in tickDays.
+// The open thread the 'hold' branch leaves behind — closed by exact text when
+// the matter is later resolved (Step 2). Shared so the two never drift apart.
+const WEXLEY_HELD_HOOK = 'The family portion in Pyne & Wexley of Bristol is held but not grown; a fuller strongbox might yet increase it.';
+
 function makeWexleyMatterLetter(s) {
   return {
     id: 9340000 + s.day,
@@ -2532,7 +2536,7 @@ Eliza`,
             money: -200,
             flags: { wexleyMatter: 'held' },
             journal: 'Sent £200 home to hold our portion in Pyne & Wexley. Held, not grown. The door is left open.',
-            hook: 'The family portion in Pyne & Wexley of Bristol is held but not grown; a fuller strongbox might yet increase it.',
+            hook: WEXLEY_HELD_HOOK,
           },
         },
       },
@@ -2545,6 +2549,69 @@ Eliza`,
             money: 180,
             flags: { wexleyMatter: 'soldout' },
             journal: 'Let Mr. Pyne buy out the family portion in Pyne & Wexley. £180 came by the settlement; the Wexley name is off the Bristol books.',
+          },
+        },
+      },
+    ],
+    read: false,
+  };
+}
+
+// Wexley matter — Step 2. Pays off the 'hold' branch's open door: the Bristol
+// house has prospered, and Mr. Pyne now offers to let the family increase its
+// portion on better terms than before. Fires only when the matter was HELD,
+// well after the holding decision. Mirrors the multi-step scripted-letter
+// pattern. Closes WEXLEY_HELD_HOOK on either resolving choice.
+function makeWexleyStep2Letter(s) {
+  return {
+    id: 9341000 + s.day,
+    from: 'Mrs. Eliza Wexley, your sister',
+    subject: 'Pyne & Wexley Prosper — and the Door Stands Open',
+    body: `Dear Brother, — You will be glad of better news than my last. The house has had a famous season — the West-Country cloth sold well into Spain, and Mr. Pyne has taken a contract for the glass that I do not fully understand but which has put the whole concern in good heart.
+
+He has not forgotten that we held our portion when we might have grown it, and he has it in him to be fair: he will let us increase to a full share now, ahead of the strangers, at a figure kinder than he offered before. Or, if you would rather be quit of it, he will buy us out at a price that this good season has made handsome.
+
+It is, as ever, yr. decision and yr. purse. But the door he left ajar is open wider now, and will not stand so for long.
+
+Yr. affectionate sister,
+Eliza`,
+    responses: [
+      {
+        label: 'Send £600 — increase to a full share',
+        seed: 'invest; establishes the Bristol concern; home dividends',
+        requiresMoney: 600,
+        fixedOutcome: {
+          prose: 'You write a bill on yr. London agent for £600 and a warmer letter to Eliza beneath it. By the next homeward Indiaman the thing is done: the Wexley portion in Pyne & Wexley is enlarged to a full share and entered in yr. name. It will pay each quarter now, an ocean away, while you sleep — and the holding you kept these long months is grown at last.',
+          changes: {
+            money: -600,
+            establishVenture: 'bristol_concern',
+            flags: { wexleyMatter: 'invested' },
+            closeHookText: WEXLEY_HELD_HOOK,
+            journal: 'Sent £600 home to increase our portion in Pyne & Wexley to a full share. The house prospers; it will remit dividends each quarter. The door we left open is shut behind us, and on the right side of it.',
+          },
+        },
+      },
+      {
+        label: 'Let Mr. Pyne buy us out on the good season',
+        seed: 'sell out; one-time cash on better terms; the name leaves the books',
+        fixedOutcome: {
+          prose: 'You write that the family will take Mr. Pyne’s offer and be done while the offer is good. The settlement comes by the spring ships — handsome, as Eliza promised, the good season having lifted it well above what was first named. The Wexley name leaves the Bristol books after three generations, but it leaves them with money in hand.',
+          changes: {
+            money: 320,
+            flags: { wexleyMatter: 'soldout' },
+            closeHookText: WEXLEY_HELD_HOOK,
+            journal: 'Let Mr. Pyne buy out the family portion in Pyne & Wexley on the good season. £320 came by the settlement — handsome; the Wexley name is off the Bristol books, but well off them.',
+          },
+        },
+      },
+      {
+        label: 'Hold as we are; let the door stand',
+        seed: 'decline again; no change; the matter rests',
+        fixedOutcome: {
+          prose: 'You let it lie. The portion is held, not grown, as it has been; Eliza will not press you, though you fancy a line of her letter wishes you would. Mr. Pyne will keep the door ajar a while yet, but a while only. The matter rests where it stood.',
+          changes: {
+            flags: { wexleyStep2: 'declined' },
+            journal: 'Declined again to grow the Pyne & Wexley portion. Held, as before. The door is left open a while longer.',
           },
         },
       },
@@ -5194,6 +5261,24 @@ function tickDays(gs, days) {
       s.flags = { ...(s.flags || {}), wexleyMatterLetterSent: true };
       s.lettersGenerated = (s.lettersGenerated || 0) + 1;
       s.awayLog.push({ day: s.day, type: 'letter', text: 'A thick letter from Bristol, in Eliza’s hand — a matter of the family’s concern.' });
+    }
+
+    // ── The Wexley matter, Step 2: if the family portion was merely HELD, the
+    // Bristol house later prospers and Mr. Pyne offers to let it grow on better
+    // terms — paying off the door the 'hold' branch left open. One-off per
+    // charter (the gate resets on succession so a successor's held matter ripens
+    // afresh); only fires while the matter is still 'held'.
+    if (
+      !s.charterClosed &&
+      s.flags?.wexleyMatter === 'held' &&
+      !s.flags?.wexleyStep2LetterSent &&
+      s.day >= 270
+    ) {
+      const letter = makeWexleyStep2Letter(s);
+      s.letters = [...s.letters, letter];
+      s.flags = { ...(s.flags || {}), wexleyStep2LetterSent: true };
+      s.lettersGenerated = (s.lettersGenerated || 0) + 1;
+      s.awayLog.push({ day: s.day, type: 'letter', text: 'Another letter from Bristol, in Eliza’s hand — the family’s house has prospered.' });
     }
 
     // ── Dutch trade pass: Mynheer Boom writes once the Factor has put into

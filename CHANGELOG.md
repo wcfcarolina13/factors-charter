@@ -4,6 +4,27 @@ The Factor's Charter — a chronological log of what's shipped. Newest first.
 
 ---
 
+## 2026-06-12 — Content beats + offline-enhancement UX (Phase 5 of June audit)
+
+The last actionable cluster from the June triage — two narrative payoffs and the three online-enhancement-layer UX gaps. (Remaining open items need your input: PWA icons, the R2 dashboard binding, the fine-goods balance playtest.)
+
+**Content:**
+- **The Vizier's boon (closes the dead `vizierBoonOwed` flag).** Set since v-whenever by the marriage counter-propose and the intel channel — with a hook the player could never act on. Now the Vizier writes ~45 days after the debt is first stamped (`vizierBoonOwedSince`, set in `tickDays`) to make good. Three resolving branches: the inland **teak concession** (or £120 if already held), the **Bugis pilots** (a real new effect — −1 day on every voyage, wired into `voyageDays`), or a **Crown word at Bencoolen** (crown standing). Each clears the owed state and retires the lingering hook.
+- **`closeHookText` — reusable hook-close primitive.** The letter-outcome counterpart to the pursue/voyage `closeHook` path: a scripted letter can now retire a hook it planted, by exact string. First step toward a real hook lifecycle (the audit's hook-staleness item; full aging still needs a `gs.hooks` string→object schema migration, deferred).
+- **The Final Dispatch.** One-off deterministic Director letter at ≤180 days remaining: a live quota reckoning (shipped + lodged vs. 400/200, the shortfall, Indiaman calls left) and a pointed deadline reminder. The charter's close is now foreseen rather than a brick wall.
+- Both new flags reset per-Factor on succession/renewal; the boon's `bugisPilots` is re-earnable by a successor.
+
+**Offline-enhancement UX:**
+- **Offline indicator** — `useOnlineStatus` + a fixed "ashore, no packet-boat — the journal keeps; illustrations and sync await yr. return" banner while `navigator.onLine` is false. Sets the expectation that the *enhancements*, not the game, are what's paused.
+- **New-version prompt** — `useSwUpdate` listens for SW `controllerchange` (guarded against the first-ever-load claim) and offers a "new printing is ready — tap to refresh" control, so a deploy landing mid-session isn't silent half-old code.
+- **iOS storage nudge** — a one-time dismissible title-screen card on iOS-family browsers (where Safari evicts localStorage after ~7 idle days) pointing to the factor key and manuscript export as the durable copy.
+
+Two deferred audit items documented rather than forced: hook-staleness aging (needs the schema migration) and deeper acquaintance *mechanical* gating (already in `stateContext` for the artifact AI; further gating is net-new content needing tone sign-off).
+
+Verified live at mobile viewport: both letters fire on time-advance with correct reckoning/branch prose; the Bugis-pilots branch sets `bugisPilots`, clears `vizierBoonOwed`, and `closeHookText` removes exactly the boon hook (leaving the unrelated teak hook); offline banner toggles on the online/offline events; iOS nudge shows under a spoofed iOS navigator, dismisses, and persists. Tests 145/145; build clean; zero console errors.
+
+---
+
 ## 2026-06-12 — Mobile polish batch + sync robustness (Phase 4 of June audit)
 
 Audit items 9–13 and 17–18, closing out everything actionable from the June triage short of content work.

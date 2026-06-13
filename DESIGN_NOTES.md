@@ -51,19 +51,33 @@ are listed at the bottom so they don't get re-reported.
    diamonds/ambergris (near-zero weight, £150–200 base) are quota-exempt and
    may dominate late-game income. Gated to the Nest behind pirates rep, so
    maybe fine. Verify in Bradley's next charter before rebalancing.
-5. **Charter-end pacing** (M) — no "final stretch" narrative beat. The HUD
-   urgency cue (shipped) is cosmetic; a Director "Final Dispatch" letter at
-   ~180 days with a quota reckoning would make the deadline diegetic.
-6. **`flags.vizierBoonOwed` never pays off** (S) — set by the Vizier
-   marriage counter-propose branch, read by nothing. One late-game letter
-   helper + one `tickDays` gate closes it.
-7. **Hooks staleness** (M) — `gs.hooks` entries persist indefinitely unless
-   pursued to closure; no aging or nagging. Candidate: Director mentions
-   long-open threads in quarterly letters.
-8. **Acquaintances are decorative** (L) — roster surfaces in Ledger but only
-   Faulke/Idris gate anything. Cheapest move: feed 1–2 relevant acquaintances
-   into `stateContext` so AI prose references them (artifact path), and key
-   1–2 scripted arrivals on roster membership.
+5. ~~**Charter-end pacing**~~ — shipped 2026-06-12. `makeFinalDispatchLetter`
+   fires once at ≤180 days remaining: a deterministic Director letter with a
+   live quota reckoning (shipped + lodged vs. 400/200, shortfall, Indiaman
+   calls left) and a pointed deadline reminder. The deadline is now foreseen,
+   not a brick wall.
+6. ~~**`flags.vizierBoonOwed` never pays off**~~ — shipped 2026-06-12.
+   `makeVizierBoonLetter` fires ~45 days after the debt is first stamped
+   (`vizierBoonOwedSince`, set in `tickDays`). Three resolving branches —
+   teak concession, Bugis pilots (a real new effect: −1 voyage day, wired
+   into `voyageDays`), or a Crown word at Bencoolen — each clears the owed
+   state and closes the lingering hook via a new reusable `closeHookText`
+   change (the letter-outcome counterpart to the pursue/voyage `closeHook`).
+   Per-Factor, so it resets on succession/renewal.
+7. **Hooks staleness** (M, partially addressed) — proper aging needs a
+   schema change (`gs.hooks` are plain strings across ~8 push sites →
+   `{text, openedDay}`), deferred as a larger refactor. The Court-letter
+   nag idea is also a poor fiction fit (the Court doesn't know the Factor's
+   private threads). The 2026-06-12 `closeHookText` primitive is the first
+   step toward a real lifecycle — scripted letters can now retire the hooks
+   they plant. Next: the schema migration, then surface stale threads to the
+   *player* (not the Court) in the Pursue panel.
+8. **Acquaintances** (mostly addressed) — already fed into `stateContext`
+   (so the artifact-path AI references them; the "purely decorative" audit
+   claim was stale for the live-AI path). The PWA has no live AI, so the
+   remaining value is *mechanical* gating (an acquaintance unlocking a
+   scripted arrival or shifting a branch) — that's net-new content needing
+   tone sign-off, deferred to a design pass rather than invented here.
 
 ### Mobile UI/UX (open)
 
@@ -106,17 +120,18 @@ are listed at the bottom so they don't get re-reported.
     tracks `sizeWarning` (payload > 200 KB of the 256 KB cap); SyncBadge
     shows "synced — grows heavy" in amber with a manuscript-export nudge in
     the tooltip.
-19. **iOS ITP eviction nudge** (S–M) — localStorage saves can be evicted
-    after 7 days of disuse in Safari-installed contexts. The factor-key cloud
-    copy is the real mitigation; a title-screen nudge ("your key is your
-    save — copy it somewhere") is the cheap insurance.
-20. **SW update toast** (M) — `skipWaiting`+`clientsClaim` mean a deploy can
-    swap code under a live session; `useRegisterSW`'s needRefresh hook could
-    surface a quiet "a new printing is available — refresh" line.
-21. **Offline indicator** (S) — no `navigator.onLine` surface anywhere;
-    SyncBadge shows 'offline' only after a failed push. A small "ashore,
-    no packet-boat" header hint when offline would set expectations for
-    illustrations/sync.
+19. ~~**iOS ITP eviction nudge**~~ — shipped 2026-06-12. One-time
+    dismissible title-screen card on iOS-family browsers with a save to lose
+    (`isIOSlike()` + `factor_itp_nudge_dismissed_v1`): names the factor key
+    and points to manuscript export.
+20. ~~**SW update toast**~~ — shipped 2026-06-12. `useSwUpdate` listens for
+    `controllerchange` (guarded against the first-load claim via a prior-
+    controller check); `AmbientStatus` shows a "new printing is ready — tap
+    to refresh" control. Framework-native, no `useRegisterSW` dependency.
+21. ~~**Offline indicator**~~ — shipped 2026-06-12. `useOnlineStatus` +
+    `AmbientStatus` show a fixed "ashore, no packet-boat" banner while
+    `navigator.onLine` is false, clearing on reconnect. Sets the expectation
+    that illustrations/sync (not the game) are what's paused.
 
 ### Online-enhancement seam (for the local-LLM plan, backlog)
 

@@ -44,6 +44,28 @@ export const VENTURES = {
     blurb: 'A full country ship, two-masted and crewed, running the Bengal and Coromandel trade under yr. flag while you keep yr. own deck. This is a fleet.',
     establishText: 'The Carnatic is yrs., and a fleet with her. She runs the Bay under yr. flag and remits each quarter.',
   },
+  // PRODUCTION path — yr. own supply. Gardens of yr. own that lodge spice into
+  // the godown each quarter, reducing reliance on the Sultan's port. The
+  // make-vs-buy axis: vertical integration instead of arbitrage. Pepper first,
+  // then a fuller estate that adds the scarcer cinnamon. Mirrors the plantation
+  // BUILDING's harvest, but as a private venture on yr. own account.
+  pepper_garden: {
+    name: 'A pepper garden of yr. own',
+    category: 'Production',
+    cost: 700,
+    produce: [{ commodity: 'pepper', amount: 16 }],
+    blurb: 'Cleared ground inland, held on yr. own account and apart from the Company’s plantation, planted thick to pepper. The vine pays the patient man — a crop lodged in yr. godown each season, bought from no one.',
+    establishText: 'The ground is taken and the first rows go in. The garden will lodge its pepper in yr. godown each quarter, yr. own and owing nothing to the Sultan’s price.',
+  },
+  spice_estate: {
+    name: 'A spice estate at the river-head',
+    category: 'Production',
+    cost: 1300,
+    requires: { venture: 'pepper_garden' },
+    produce: [{ commodity: 'cinnamon', amount: 10 }, { commodity: 'pepper', amount: 6 }],
+    blurb: 'A proper estate above the river-head — cinnamon ground added to the pepper, with a kiln and a drying-floor and men kept the year round. The cinnamon, which comes from one port only, now comes from yr. own land.',
+    establishText: 'The estate is yrs.: cinnamon and pepper both, lodged in the godown each quarter. The scarcer spice no longer waits on the Sultan’s warehouse.',
+  },
   // HOME path — not freely purchasable (viaQuest). Established through the
   // Wexley matter: yr. sister's letters about the family's portion in a Bristol
   // trading house. Dividends cross two oceans — Crusoe's off-stage estate.
@@ -93,6 +115,34 @@ export function accrueVentureIncome(venturesState, day) {
   return { ventures, income, lines };
 }
 
+// Quarterly produce for established Production ventures (yr. own gardens/estate).
+// Pure: returns a new ventures map (advanced lastPaidDay) and the per-commodity
+// yields produced this tick. Catches up over multiple quarters, mirroring
+// accrueVentureIncome. Production and income ventures are disjoint (a venture has
+// `income` OR `produce`, never both), so each advances lastPaidDay independently.
+// The monolith lodges the yields into the godown, respecting its capacity
+// (surplus rots in the rains, as the plantation harvest does).
+export function accrueVentureProduce(venturesState, day) {
+  const ventures = { ...(venturesState || {}) };
+  const yields = [];   // { id, name, commodity, amount }
+  for (const [id, v] of Object.entries(ventures)) {
+    if (!v?.established) continue;
+    const def = VENTURES[id];
+    if (!def?.produce) continue;
+    let last = typeof v.lastPaidDay === 'number' ? v.lastPaidDay
+             : (typeof v.establishedDay === 'number' ? v.establishedDay : day);
+    let quarters = 0;
+    while (day - last >= VENTURE_QUARTER) { quarters += 1; last += VENTURE_QUARTER; }
+    if (quarters > 0) {
+      for (const p of def.produce) {
+        yields.push({ id, name: def.name, commodity: p.commodity, amount: p.amount * quarters });
+      }
+      ventures[id] = { ...v, lastPaidDay: last };
+    }
+  }
+  return { ventures, yields };
+}
+
 // Buy-price multiplier from an established network agent for a given port +
 // commodity. 1 when no agent applies. Folded into priceFor's buy side.
 export function ventureBuyMult(venturesState, portKey, commodity) {
@@ -113,4 +163,32 @@ export function ventureQuarterlyIncome(venturesState) {
     if (v?.established && VENTURES[id]?.income) total += VENTURES[id].income;
   }
   return total;
+}
+
+// ─── Enterprise worth — the prestige metric behind the merchant-prince finish ───
+
+// Book value of a single established venture: what it took to raise (its cost),
+// or, for a quest-granted income venture with no purchase price (the Bristol
+// concern), its income capitalized at ~12% (×8).
+export function ventureWorth(id, v) {
+  const def = VENTURES[id];
+  if (!def || !v?.established) return 0;
+  if (typeof def.cost === 'number') return def.cost;
+  if (typeof def.income === 'number') return def.income * 8;
+  return 0;
+}
+
+// Total book value of all established ventures.
+export function venturesWorth(venturesState) {
+  let total = 0;
+  for (const [id, v] of Object.entries(venturesState || {})) total += ventureWorth(id, v);
+  return total;
+}
+
+// How many ventures are established — the count the merchant-prince destiny
+// gates on (a sprawling concern built on the Factor's own account).
+export function establishedVentureCount(venturesState) {
+  let n = 0;
+  for (const v of Object.values(venturesState || {})) if (v?.established) n += 1;
+  return n;
 }

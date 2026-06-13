@@ -18,7 +18,7 @@ import { canOfferSabotage, resolveSabotage, sabotageCoda } from './src/util/sabo
 import { recordTrade, reckonRows, reckonTotal } from './src/util/trade-stats.js';
 import { reconcileHookMeta, hookAgeNote, staleHookCount } from './src/util/hooks-age.js';
 import { pendingWealthMilestones, seedWealthFlags } from './src/util/milestones.js';
-import { VENTURES, accrueVentureIncome, ventureUnlocked, ventureBuyMult, ventureQuarterlyIncome } from './src/util/ventures.js';
+import { VENTURES, accrueVentureIncome, accrueVentureProduce, ventureUnlocked, ventureBuyMult, ventureQuarterlyIncome, venturesWorth, establishedVentureCount } from './src/util/ventures.js';
 
 // ─────────── FACTOR KEY (cross-device identity) ───────────
 //
@@ -5682,6 +5682,34 @@ function tickDays(gs, days) {
       const detail = acc.lines.map(l => `${VENTURES[l.id].name.replace(/ —.*$/, '')} £${l.amount}`).join('; ');
       s.awayLog.push({ day: s.day, type: 'venture', text: `Yr. ventures remitted £${acc.income} this quarter — ${detail}.` });
       s.journal = [...(s.journal || []), { day: s.day, entry: `The enterprise remitted £${acc.income}: ${detail}.` }];
+    }
+
+    // Production ventures lodge their own spice into the godown — yr. own
+    // gardens and estate, growing yr. supply instead of buying it. Surplus
+    // rots for want of room, as the plantation harvest does.
+    const prod = accrueVentureProduce(s.ventures, s.day);
+    if (prod.yields.length > 0) {
+      s.ventures = prod.ventures;
+      const cap = warehouseCap(s);
+      const stored = {};   // commodity -> cwt actually lodged this quarter
+      let lostAny = false;
+      for (const y of prod.yields) {
+        const used = cargoWeight(s.outpost.warehouse);
+        const room = Math.max(0, cap - used);
+        const fit = Math.min(y.amount, Math.floor(room / (COMMODITIES[y.commodity].weight || 1)));
+        if (fit > 0) s.outpost.warehouse[y.commodity] = (s.outpost.warehouse[y.commodity] || 0) + fit;
+        if (fit < y.amount) lostAny = true;
+        stored[y.commodity] = (stored[y.commodity] || 0) + fit;
+      }
+      const detail = Object.entries(stored).filter(([, n]) => n > 0)
+        .map(([c, n]) => `${n} cwt ${COMMODITIES[c].name.toLowerCase()}`).join(' and ');
+      if (detail) {
+        const txt = lostAny
+          ? `Yr. own gardens yielded their season into the godown — ${detail} — though some was lost to the rains for want of room.`
+          : `Yr. own gardens yielded their season into the godown — ${detail}, bought from no one.`;
+        s.awayLog.push({ day: s.day, type: 'harvest', text: txt });
+        s.journal = [...(s.journal || []), { day: s.day, entry: txt }];
+      }
     }
   }
   return s;
@@ -12553,6 +12581,7 @@ function OutpostView({ gs, startBuild, expediteBuild, establishVenture, viewport
   const ventureBenefitLine = (id) => {
     const def = VENTURES[id];
     if (def.income) return `Remits £${def.income} each quarter.`;
+    if (def.produce) return `Yields ${def.produce.map(p => `${p.amount} cwt ${COMMODITIES[p.commodity].name.toLowerCase()}`).join(' and ')} to the godown each quarter.`;
     if (def.buyDiscount) return `${def.buyDiscount.commodities.map(c => COMMODITIES[c].name.toLowerCase()).join(' and ')} come ${Math.round((1 - def.buyDiscount.mult) * 100)}% cheaper at ${def.buyDiscount.port}.`;
     return '';
   };

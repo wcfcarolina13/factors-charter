@@ -38,6 +38,37 @@ real-time pressure, anything that breaks the quiet-ledger mood.
 
 ## Findings log (newest first)
 
+### Iteration 6 — 2026-06-12 — the brigantine launch beat
+
+**Investigated:** first-visit foreign-port discovery, then the brigantine launch.
+
+- **Foreign-port discovery — verified GOOD, no change.** First visit gives an
+  atmospheric vignette + optional scripted encounter, and — crucially — the
+  Chart persistently shows visited ports' full trade info ("NOTED IN YOUR
+  LEDGER": what they sell/buy, prices, cheap/dear tags, stock). So discovery
+  has lasting planning value. Well-designed; left alone.
+- **Brigantine launch — the biggest reward miss, shipped.** Launching the
+  brigantine is the single largest upgrade in the game (pinnace 60cwt →
+  brigantine 180cwt, 3× hold, +guns) — a transformation of the whole operation.
+  But the launch pushed a `shipyard` awayLog event that **wasn't in the digest
+  priority list**, so the homecoming prose fell through to generic "the godown
+  standing, ledger half-kept." The most exciting moment in the game landed with
+  generic prose and one buried ledger line.
+  → **Fix (verified live):** (1) added a celebratory `shipyard` digest branch
+  ("a trader on his own account, and the difference is the whole of the
+  matter") + put `shipyard` in the priority list above indiaman; (2) the launch
+  now also drops a journal *milestone* (wax-styled, like the wealth ones:
+  "The Astrolabe is launched… Wilbraham never got so far"). Verified live: both
+  fire on return. (3) Caught + fixed a factual slip — a digest line said "twice
+  the burthen" when it's 3× (60→180); now "thrice."
+
+**Pattern noticed across iters 3–6:** the game's *systems* are well-built, but
+its *big moments* (lodging, wealth, the Indiaman's returns, the launch) kept
+landing quietly. The through-line of this loop has been giving each major
+payoff a felt beat in the Factor's voice. Likely remaining: building-completion
+prose (does raising the Great Godown / Counting House feel like progress?), and
+charter-end (the finale).
+
 ### Iteration 5 — 2026-06-12 — the homecoming digest & the Indiaman win
 
 **Played:** engineered a rich return (building completing + Indiaman calling +

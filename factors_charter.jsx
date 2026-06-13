@@ -4814,6 +4814,13 @@ function tickDays(gs, days) {
           type: 'shipyard',
           text: `${newShip.name} was launched at the slipway, two-masted and teak-built. The old ${oldShip?.name || 'pinnace'} went away with a Bugis trader for £${credit}.`,
         });
+        // The largest upgrade in the game — mark it as a turning point in the
+        // Factor's own hand (rendered distinctly, like the wealth milestones).
+        s.journal = [...(s.journal || []), {
+          day: s.day,
+          entry: `${newShip.name} is launched, and with her my standing in this strait is altered. I came out a clerk with a charter and a leaky pinnace; I have a country ship of my own commissioning under me now. Wilbraham never got so far.`,
+          milestone: true,
+        }];
         s.shipCommission = null;
       } else {
         s.shipCommission = { ...s.shipCommission, daysLeft: left };
@@ -6907,6 +6914,11 @@ const FALLBACK_AWAY_DIGEST = {
     'You missed the Indiaman, and worse, she had little to take. Her sailing-bills are spread on the desk; the letter that came with them will not be a warm one.',
     'The Company\u2019s ship has come and gone, and the godown was bare when she came. A chance does not return for the asking; the next call must be better met.',
   ],
+  shipyard: [
+    'She was waiting at the slipway when you came in — two-masted, teak-built, her paint still green. The pinnace that carried you out is gone with the tide. You command a country ship now, and the strait will know it.',
+    'The new vessel lies at the wharf, thrice the burthen of the old and far more bite. Hodge has the launch entered in the books; Dass walked her deck twice and said nothing, which from him is the highest praise.',
+    'Yr. brigantine is launched. A man with such a ship is no longer a clerk minding a quota — he is a trader on his own account, and the difference is the whole of the matter.',
+  ],
   construction: [
     'A new beam stands in the compound. Hodge runs through the figures of the build, then the figures of the household. The day proceeds.',
     'The work was finished while you were away. The men have gone back to their usual labour, and the carpenter is gone with the tide.',
@@ -6929,7 +6941,7 @@ const FALLBACK_AWAY_DIGEST = {
 function pickAwayDigestFallback(awayEvents) {
   const events = awayEvents || [];
   const types = new Set(events.map(e => e.type));
-  for (const key of ['raid', 'incident', 'indiaman', 'construction', 'harvest', 'letter']) {
+  for (const key of ['raid', 'incident', 'shipyard', 'indiaman', 'construction', 'harvest', 'letter']) {
     if (!types.has(key)) continue;
     let pool;
     if (key === 'indiaman') {

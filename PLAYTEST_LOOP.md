@@ -38,6 +38,42 @@ real-time pressure, anything that breaks the quiet-ledger mood.
 
 ## Findings log (newest first)
 
+### Iteration 4 — 2026-06-12 — milestone recognition (compounding feels good)
+
+**Investigated:** goal-gradient (is the next ambition a visible target?) and
+milestone recognition (is crossing a threshold ever marked?).
+
+- **Goal-gradient — already decent, left alone.** The brigantine is well
+  surfaced as an ambition: a dashed "A LARGER VESSEL" teaser when you lack the
+  Shipwright's Yard (plants the desire + names the prerequisite), then a
+  commission panel with cost, then an "ON THE STOCKS" progress bar. Buildings
+  show cost in the Outpost tab. A unified "ambitions" list would be more gamey
+  than flavorful — not worth it.
+- **Milestone recognition — the gap, shipped.** Building completion is marked
+  (away digest + named-NPC arrival), but **wealth — the clearest compounding
+  metric — was entirely unmarked.** A Factor crossing into real merchant money
+  (£1k, £2.5k, £5k, £10k) got nothing.
+  → **Fix (verified live):** wealth milestones drop a once-only turning-point
+  reflection in the Factor's journal, in his dry voice ("The strongbox passed
+  a thousand pounds… I have begun to be a merchant, and not merely a clerk
+  with a charter"). Rendered with a wax-red left border + ⁂ glyph so it reads
+  as a beat, not a ledger line. Pure logic in `src/util/milestones.js`
+  (`pendingWealthMilestones` / `seedWealthFlags`, 9 vitest cases; 156→165).
+  Fired by a guarded `gs.money` effect in GameHub (flag = once-only guard).
+  ensureShape seeds already-met thresholds silently so existing rich saves
+  don't fire a retroactive run. Verified: fires exactly on the 960→1034
+  crossing, once, with the wax styling; doesn't re-fire; doesn't fire
+  retroactively on load.
+- **Also (completing iter-3's pluralization):** the screenshot caught that the
+  *journal* still said "Sold 5 barrel" while the toast said "barrels". Applied
+  `unitLabel` to all four journal pushes (buy/sell/lodge/draw). Now consistent
+  ("Sold 3 barrels of Rum"). Verified live.
+
+**Queued:** "Aline of squalls" typo (one prose string). Next candidates:
+(a) first-profitable-voyage or first-building milestones (extend the system if
+it feels good in play); (b) the away-digest return — does coming back from a
+long voyage to accumulated news feel rewarding or like a wall of text?
+
 ### Iteration 3 — 2026-06-12 — the quota-lodging payoff beat
 
 **Tested:** doctored pepper into the hold, lodged it, watched the feedback.

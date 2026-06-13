@@ -17,6 +17,7 @@ import { pickPlate } from './src/util/plates.js';
 import { canOfferSabotage, resolveSabotage, sabotageCoda } from './src/util/sabotage.js';
 import { recordTrade, reckonRows, reckonTotal } from './src/util/trade-stats.js';
 import { reconcileHookMeta, hookAgeNote, staleHookCount } from './src/util/hooks-age.js';
+import { pendingWealthMilestones, seedWealthFlags } from './src/util/milestones.js';
 
 // ─────────── FACTOR KEY (cross-device identity) ───────────
 //
@@ -1101,6 +1102,9 @@ const ensureShape = (gs) => {
   if (!Array.isArray(next.acquaintances)) next.acquaintances = [];
   if (!next.tradeStats || typeof next.tradeStats !== 'object') next.tradeStats = {};
   if (!next.flags || typeof next.flags !== 'object') next.flags = {};
+  // Seed wealth-milestone flags for thresholds an existing save already meets,
+  // so crossing into this feature doesn't retroactively fire a run of them.
+  next.flags = seedWealthFlags(next.money, next.flags);
   if (!Array.isArray(next.aiLog)) next.aiLog = [];
   if (!next.outpost || typeof next.outpost !== 'object') {
     next.outpost = { buildings: {}, queue: [], warehouse: {} };
@@ -8090,6 +8094,27 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
     setGs(prev => recordIllustrationInGs(prev, prose));
   }, [setGs]);
 
+  // Wealth milestones: when the strongbox first crosses a threshold, drop a
+  // turning-point reflection in the Factor's journal. Guarded by the flag the
+  // entry sets, so the effect fires once per threshold and can't loop. Keyed
+  // on money — but the flag guard means a re-run with the same money no-ops.
+  useEffect(() => {
+    if (!gs) return;
+    const pending = pendingWealthMilestones(gs.money, gs.flags);
+    if (pending.length === 0) return;
+    setGs(prev => {
+      const stillPending = pendingWealthMilestones(prev.money, prev.flags);
+      if (stillPending.length === 0) return prev;
+      const flags = { ...prev.flags };
+      const journal = [...prev.journal];
+      for (const m of stillPending) {
+        flags[m.flag] = true;
+        journal.push({ day: prev.day, entry: m.entry, milestone: true });
+      }
+      return { ...prev, flags, journal };
+    });
+  }, [gs?.money]);
+
   // The very first time the game proper begins (after the opening sequence),
   // route the player straight into the unread Director letter so they cannot miss it.
   useEffect(() => {
@@ -8675,7 +8700,7 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
           [commodity]: Math.max(0, (prev.portStocks?.[prev.location]?.[commodity] ?? 0) - qty),
         },
       },
-      journal: [...prev.journal, { day: prev.day, entry: `Bought ${qty} ${COMMODITIES[commodity].unit} of ${COMMODITIES[commodity].name} at ${gs.location} for £${grossCost}${taxLine}.` }],
+      journal: [...prev.journal, { day: prev.day, entry: `Bought ${qty} ${unitLabel(commodity, qty)} of ${COMMODITIES[commodity].name} at ${gs.location} for £${grossCost}${taxLine}.` }],
     }));
     return true;
   };
@@ -8692,7 +8717,7 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
       money: prev.money + proceeds,
       goods: { ...prev.goods, [commodity]: prev.goods[commodity] - qty },
       tradeStats: recordTrade(prev.tradeStats, { kind: 'sell', commodity, qty, amount: proceeds }),
-      journal: [...prev.journal, { day: prev.day, entry: `Sold ${qty} ${COMMODITIES[commodity].unit} of ${COMMODITIES[commodity].name} at ${gs.location} for £${grossProceeds}${taxLine}.` }],
+      journal: [...prev.journal, { day: prev.day, entry: `Sold ${qty} ${unitLabel(commodity, qty)} of ${COMMODITIES[commodity].name} at ${gs.location} for £${grossProceeds}${taxLine}.` }],
     }));
     return true;
   };
@@ -8723,7 +8748,7 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
           [commodity]: ((prev.outpost.warehouse || {})[commodity] || 0) + move,
         },
       },
-      journal: [...prev.journal, { day: prev.day, entry: `Lodged ${move} ${COMMODITIES[commodity].unit} of ${COMMODITIES[commodity].name} in the godown.` }],
+      journal: [...prev.journal, { day: prev.day, entry: `Lodged ${move} ${unitLabel(commodity, move)} of ${COMMODITIES[commodity].name} in the godown.` }],
     }));
     return move;
   };
@@ -8748,7 +8773,7 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
           [commodity]: ((prev.outpost.warehouse || {})[commodity] || 0) - move,
         },
       },
-      journal: [...prev.journal, { day: prev.day, entry: `Drew ${move} ${COMMODITIES[commodity].unit} of ${COMMODITIES[commodity].name} from the godown into the hold.` }],
+      journal: [...prev.journal, { day: prev.day, entry: `Drew ${move} ${unitLabel(commodity, move)} of ${COMMODITIES[commodity].name} from the godown into the hold.` }],
     }));
   };
 
@@ -10994,7 +11019,16 @@ function JournalView({ gs, arrivalProse, setTab, openLetterById, pursueThread, v
           {entries.map((e, i) => (
             <div key={i} style={{ marginBottom: '0.7rem', display: 'flex', gap: '1rem' }}>
               <div className="display" style={{ fontSize: '0.85em', color: '#6b4423', minWidth: '4rem' }}>Day {e.day}</div>
-              <div>{e.entry}</div>
+              {e.milestone ? (
+                <div style={{
+                  borderLeft: '3px solid #5c1a08', paddingLeft: '0.7rem',
+                  fontStyle: 'italic', color: '#4a3220',
+                }}>
+                  <span className="display" style={{ color: '#5c1a08', marginRight: '0.3rem' }}>⁂</span>{e.entry}
+                </div>
+              ) : (
+                <div>{e.entry}</div>
+              )}
             </div>
           ))}
         </div>

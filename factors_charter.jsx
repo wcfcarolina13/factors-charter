@@ -6567,7 +6567,7 @@ const FALLBACK_OUTCOME_BUCKETS = {
     { prose: 'A figure not previously friendly presses a small purse into yr. hand, the kind of payment that does not appear in any company book.', journal: 'A private gratuity, not for the ledger.', money: 22 },
   ],
   cost: [
-    { prose: 'It plays out as you might expect, neither as well nor as ill as feared. A small purse changes hands at the close.', journal: 'A small disbursement settled the matter.', money: -10 },
+    { prose: 'The matter wants a little silver to lie quiet, and silver it gets — paid across a back table, against no receipt. Cheaper now than later, the bosun observes, and he is not often wrong about such things.', journal: 'A small sum paid to keep a matter quiet.', money: -10 },
     { prose: 'The matter resolves itself in the way of small troubles — a clerk’s fee here, a private word there.', journal: 'Closed the day’s affair at the cost of a few crowns.', money: -8 },
     { prose: 'A figure appears at the wharf with a private bill not previously declared. The sum is small. The principle of the thing is not.', journal: 'A private bill paid at the wharf, against principle.', money: -15 },
   ],
@@ -6594,6 +6594,47 @@ const FALLBACK_OUTCOME_LETTER = [
   { prose: 'Words committed to paper. They will reach London by August at earliest.', journal: 'Reply written. The desk is again clear.' },
   { prose: 'The reply reads true on the second pass.', journal: 'Sealed the answer and put it with the outgoing.' },
 ];
+
+// Thread-aware outcome prose for a pursued matter (or a voyage encounter that
+// engaged a specific open thread). The generic FALLBACK_OUTCOME_BUCKETS lines
+// never echo WHICH matter was pursued, so resolving a named thread read as a
+// contextless transaction ("a small purse changes hands at the close"). This
+// weaves the thread in and gives the resolution weight keyed to the kind of
+// bite the choice carried. The bucket still supplies the mechanical changes;
+// only the prose + journal become thread-aware.
+function pursueOutcomeProse(thread, outcomeKey, closes, roll) {
+  const t = thread.slice(0, 100).replace(/\s+$/, '') + (thread.length > 100 ? '…' : '');
+  const r = Math.abs(roll || 0);
+  const closeTail = (closes
+    ? ['and the matter is closed.', 'and it will not trouble the day-book again.', 'and there, at last, it ends.']
+    : ['though it is not yet finished with you.', 'and the thread of it runs on.', 'and there is more in it yet to come.']
+  )[r % 3];
+  const tables = {
+    windfall: [
+      { p: `You carry the matter — ${t} — to a profitable close. A little silver comes of it, slipped across with no ceremony, ${closeTail}`, j: 'Pursued the matter to a small profit.' },
+      { p: `The thing — ${t} — pays better than you looked for: a private gratuity that finds the strongbox and appears in no company book, ${closeTail}`, j: 'A private gratuity, pursued and won.' },
+    ],
+    cost: [
+      { p: `You press the matter — ${t} — and it does not come free. A clerk's fee here, a quiet word there, and the strongbox the lighter for it, ${closeTail}`, j: 'Pursued the matter; a small disbursement.' },
+      { p: `The matter — ${t} — is brought to ground, but a private bill follows it to the wharf. The sum is small; the principle of paying it is not, ${closeTail}`, j: 'A private bill paid to settle the matter.' },
+    ],
+    damage: [
+      { p: `You drive at the matter — ${t} — and it bruises the ship before it yields: a strained spar, a seam working wet, both for the carpenter, ${closeTail}`, j: 'Pursued the matter; the ship took the cost of it.' },
+    ],
+    rep_shift: [
+      { p: `You take up the matter — ${t} — and word of how you handled it travels where such words travel. Some think the better of you for it; some the worse, ${closeTail}`, j: 'Pursued the matter; word of it has carried.' },
+    ],
+    hook_opens: [
+      { p: `You work at the matter — ${t} — and it opens onto another. There is a name now, or a place, or a figure not before in view, to be taken up when the time serves.`, j: 'Pursued one matter; it opened onto another.' },
+      { p: `The matter — ${t} — does not so much close as set a fresh card on the table. You make a note in the back of the day-book and let it rest, for now.`, j: 'One thread pursued; a new one planted.' },
+    ],
+    time_lost: [
+      { p: `You give the day to the matter — ${t} — and the day takes it, with little to show at the end but the hours spent and a clearer view of the ground, ${closeTail}`, j: 'A day given to the matter.' },
+    ],
+  };
+  const pool = tables[outcomeKey] || tables.time_lost;
+  return pool[r % pool.length];
+}
 
 async function genOutcome(gs, encounterProse, choice, opts = {}) {
   const isLetter = !!opts.isLetter;
@@ -6672,15 +6713,25 @@ Reputation deltas should be small (±1 to ±15). Only include factions that actu
   const hookText = (!isLetter && choice && choice.outcomeKey === 'hook_opens' && typeof choice.hook === 'string' && choice.hook.trim())
     ? choice.hook.trim()
     : '';
+  // When a specific thread is in play — a pursued matter, or a voyage scene that
+  // engaged an open thread — make the fallback prose NAME and resolve that matter
+  // instead of a contextless bucket line. The bucket still supplies the bite.
+  let proseText = pick.prose;
+  let journalText = pick.journal;
+  if (!isLetter && engagedThread) {
+    const tw = pursueOutcomeProse(engagedThread, (choice && choice.outcomeKey) || 'cost', !!(choice && choice.closesHook), Math.floor(Math.random() * 1000));
+    proseText = tw.p;
+    journalText = tw.j;
+  }
   const fallback = {
-    prose: pick.prose,
+    prose: proseText,
     changes: {
       money: isLetter ? 0 : (pick.money || 0),
       days: isLetter ? 0 : (Number.isFinite(pick.days) ? pick.days : 1),
       reputation: isLetter ? {} : (repOverride || pick.reputation || {}),
       goods: isLetter ? {} : (pick.goods || {}),
       shipDamage: isLetter ? undefined : (pick.shipDamage || undefined),
-      journal: pick.journal,
+      journal: journalText,
       hook: hookText,
       // Choice-level intent to close the bound thread. The pursue path
       // always honours this. The voyage path honours it only when an
@@ -8912,7 +8963,9 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
     // it exact-matches an existing open hook — verified at apply time).
     let opts = {};
     if (encounter?.type === 'pursue') {
-      opts = { isPursue: true };
+      // Pass the pursued thread so the outcome prose can name and resolve THAT
+      // matter rather than fall to a contextless bucket line.
+      opts = { isPursue: true, engagedThread: encounter.thread };
     } else if (encounter?.type === 'voyage' && encounter.engagedThread) {
       opts = { engagedThread: encounter.engagedThread };
     }

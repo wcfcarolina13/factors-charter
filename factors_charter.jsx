@@ -16,6 +16,7 @@ import { priceWindowMult, pruneExpiredWindows, activeWindowsFor, priceDrift } fr
 import { pickPlate } from './src/util/plates.js';
 import { canOfferSabotage, resolveSabotage, sabotageCoda } from './src/util/sabotage.js';
 import { recordTrade, reckonRows, reckonTotal } from './src/util/trade-stats.js';
+import { reconcileHookMeta, hookAgeNote, staleHookCount } from './src/util/hooks-age.js';
 
 // ─────────── FACTOR KEY (cross-device identity) ───────────
 //
@@ -1129,6 +1130,11 @@ const ensureShape = (gs) => {
   // Defensive ensureShape additions — fields that have always existed in
   // makeInitialState but old / corrupted saves may have lost.
   if (!Array.isArray(next.hooks)) next.hooks = [];
+  // Sidecar timestamps for thread aging (keyed by hook text). Stamp any
+  // already-open hooks at the current day on first migration — we begin
+  // tracking now rather than inventing a past for old saves.
+  if (!next.hookMeta || typeof next.hookMeta !== 'object') next.hookMeta = {};
+  next.hookMeta = reconcileHookMeta(next.hooks, next.hookMeta, next.day || 1);
   if (!Array.isArray(next.journal)) next.journal = [];
   if (!Array.isArray(next.letters)) next.letters = [];
   if (!Array.isArray(next.crew)) next.crew = [];
@@ -5534,6 +5540,9 @@ function tickDays(gs, days) {
       }
     }
   }
+  // Reconcile thread-age timestamps against the final hook set — any thread
+  // raised during these days gets stamped, any closed one is dropped.
+  s.hookMeta = reconcileHookMeta(s.hooks, s.hookMeta, s.day);
   return s;
 }
 
@@ -10982,6 +10991,9 @@ function PursueThreadPanel({ gs, pursueThread }) {
   const [open, setOpen] = useState(false);
   const hooks = (gs.hooks || []).slice(-6);
   const acqs = (gs.acquaintances || []).slice(-6);
+  const meta = gs.hookMeta || {};
+  const today = gs.day || 0;
+  const staleCount = staleHookCount(gs.hooks || [], meta, today);
 
   const renderAcquaintance = (a) => {
     const where = a.location ? `, ${a.location}` : '';
@@ -11002,10 +11014,25 @@ function PursueThreadPanel({ gs, pursueThread }) {
           </button>
         )}
       </div>
+      {staleCount > 0 && (
+        <div className="italic" style={{ fontSize: '0.8em', color: '#8b1a1a', marginBottom: '0.4rem' }}>
+          {staleCount === 1 ? 'A matter has' : `${staleCount} matters have`} lain long unattended. Pursue {staleCount === 1 ? 'it' : 'them'}, or let {staleCount === 1 ? 'it' : 'them'} go.
+        </div>
+      )}
 
-      {hooks.map((h, i) => (
-        <div key={`h${i}`} className="italic" style={{ marginBottom: '0.3rem', color: '#4a3220' }}>&mdash; {h}</div>
-      ))}
+      {hooks.map((h, i) => {
+        const note = hookAgeNote(h, meta, today);
+        return (
+          <div key={`h${i}`} style={{ marginBottom: '0.3rem' }}>
+            <div className="italic" style={{ color: '#4a3220' }}>&mdash; {h}</div>
+            {note && (
+              <div className="italic" style={{ fontSize: '0.76em', color: note.stale ? '#8b1a1a' : '#8a6a3f', marginLeft: '0.9rem' }}>
+                {note.stale ? '↯ ' : ''}{note.text}
+              </div>
+            )}
+          </div>
+        );
+      })}
 
       {open && (
         <div className="ink-fade-in" style={{ marginTop: '0.7rem', padding: '0.7rem 0.9rem', background: 'rgba(255,253,245,0.55)', borderLeft: '3px solid #5c1a08' }}>

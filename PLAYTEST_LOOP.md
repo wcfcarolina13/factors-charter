@@ -38,6 +38,36 @@ real-time pressure, anything that breaks the quiet-ledger mood.
 
 ## Findings log (newest first)
 
+### Iteration 10 — 2026-06-12 — succession / second-charter freshness
+
+**Played:** doctored a successful charter-end (brigantine + 4 buildings +
+standing + £3000), took up a successor, inspected the second charter.
+
+- **Succession mechanics — verified EXCELLENT, no change.** The "you don't
+  lose, you continue" pillar works: the successor (Thomas Reed) inherits the
+  brigantine (HOLD 0/180), all buildings (great-godown's 520 cap and all), full
+  faction standing, 60% of the money (£1800), wealth-milestone flags, and the
+  predecessor as a remembered acquaintance — while the clock, quota, hooks,
+  trade books, rivals, and port stocks reset, and foreign ports become
+  first-visits again for re-discovery. The successor Director letter is
+  well-written, explicitly framing the inheritance and judging the
+  predecessor's reputation by their returns. Genuinely strong replayability.
+- **The one gap, shipped: the appointment letter didn't auto-present.** The
+  *opening* auto-opens its first Director letter (the `firstLetterPresented`
+  effect), but that effect had `[]` deps — mount-only — and GameHub never
+  unmounts across succession, so the successor's appointment letter (the whole
+  payoff of "you continue") sat as an unopened card on the hub. → **Fix
+  (verified live):** keyed the effect on `[gs?.firstLetterPresented]` instead of
+  `[]`. Succession and renewal both reset that flag to false, so the effect now
+  re-fires and routes the player straight to the new appointment letter — the
+  inheritance framing presents itself, mirroring the opening. Verified: the
+  successor letter now auto-opens ("You inherit the godown…"), and the
+  new-game opening still auto-opens too (no regression).
+
+**Where the loop stands:** spine, frequent interactions, finale, and now the
+replay path are all polished. The game's full arc — first charter through
+succession into a second — presents every major beat properly.
+
 ### Iteration 9 — 2026-06-12 — voyage-encounter texture
 
 **Investigated:** the most frequent interaction (25-65 encounters/charter).

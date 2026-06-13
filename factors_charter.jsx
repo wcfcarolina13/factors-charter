@@ -8201,8 +8201,11 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
     });
   }, [gs?.money]);
 
-  // The very first time the game proper begins (after the opening sequence),
-  // route the player straight into the unread Director letter so they cannot miss it.
+  // Route the player straight into the unread Director letter so they cannot
+  // miss it — at the opening AND on succession/renewal, which reset
+  // firstLetterPresented to false to present the new appointment letter (the
+  // payoff of "you continue"). Keyed on the flag, not mount, so it re-fires
+  // for the successor's letter even though GameHub never unmounts.
   useEffect(() => {
     if (!gs.firstLetterPresented && gs.letters.length > 0) {
       const firstUnread = gs.letters.find(l => !l.read);
@@ -8212,7 +8215,7 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
         setGs(prev => ({ ...prev, firstLetterPresented: true }));
       }
     }
-  }, []);
+  }, [gs?.firstLetterPresented]);
 
   // The charter's close is the game's climax — route the player straight to
   // the Court's final letter the moment the hub is clear, so the 3-year arc

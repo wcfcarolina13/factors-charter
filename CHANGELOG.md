@@ -4,6 +4,17 @@ The Factor's Charter — a chronological log of what's shipped. Newest first.
 
 ---
 
+## 2026-06-13 — Pursue outcomes name the matter (prose fix)
+
+Pursuing a specific named thread fell to a contextless fallback bucket line ("It plays out as you might expect, neither as well nor as ill as feared. A small purse changes hands at the close.") — it never said *which* matter resolved, so a deliberate investigation read as a flat transaction. The encounter setup echoed the thread; the outcome forgot it.
+
+- `handleEncounterChoice` now passes the pursued thread into `genOutcome` (`engagedThread: encounter.thread`).
+- New `pursueOutcomeProse(thread, outcomeKey, closes, roll)`: when a thread is in play (a pursue, or a voyage scene that engaged one), the fallback prose + journal **name the matter** and resolve it with weight keyed to the choice's bite (windfall / cost / damage / rep / hook / time), with a close tail that reflects whether the choice settled or merely advanced it. The bucket still supplies the mechanical changes. Also freshened the single weakest generic `cost` line for non-thread voyage outcomes.
+
+Verified live on the deterministic path: pursuing the Kota Pinang agent's thread to a close now reads "The matter — Yr. Kota Pinang agent reports the Sultan's pepper price will fall… — is brought to ground, but a private bill follows it to the wharf…" — names the matter, keeps the £8 bite, closes the thread. Tests 203/203; build clean; zero console errors.
+
+---
+
 ## 2026-06-13 — Addictiveness pass: goal-gradient + living ventures
 
 Two follow-ups to the sprawl work, answering "what else makes it more fun, addictive, rewarding." Both verified live at mobile viewport; tests **197 → 203**; build clean; zero console errors.

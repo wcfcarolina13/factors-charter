@@ -1369,7 +1369,7 @@ Mr. W. died this morning at half past four. The Reverend will not come down from
   // Auto-delivered AI letters from the wider world (sister, captains, factions).
   // The Director (Indiaman + quarterly) and the Vizier (teak letter) have their
   // own dedicated cadences; this is for everyone else.
-  lettersAuto: { nextDay: 35 },
+  lettersAuto: { nextDay: 12 },  // first contact from the wider world lands around the maiden voyage's return; the world should feel alive early, not after a month of silence. Subsequent cadence (30–55d) is unchanged.
   pendingLetterRequests: [],
   // Private trade allowance — period-accurate side income. Each Indiaman call
   // offers up to PRIVATE_TRADE_LIMIT cwt of any commodity to be shipped on
@@ -3362,8 +3362,15 @@ const AUTO_SENDERS = [
 ];
 
 function pickAutoSender(s) {
-  const eligible = AUTO_SENDERS.filter(snd => !snd.gate || snd.gate(s));
+  let eligible = AUTO_SENDERS.filter(snd => !snd.gate || snd.gate(s));
   if (eligible.length === 0) return null;
+  // First contact (early game) should be warm and orienting — family and a
+  // friendly captain — not a wary rival sizing you up. Restrict the very early
+  // letters to faction-null senders; the factions write once you're established.
+  if ((s.day || 0) < 25) {
+    const warm = eligible.filter(snd => !snd.faction);
+    if (warm.length > 0) eligible = warm;
+  }
   const total = eligible.reduce((a, b) => a + b.weight, 0);
   let r = Math.random() * total;
   for (const snd of eligible) {
@@ -4565,7 +4572,7 @@ function makeSuccessorState(prev, newName) {
     quotas: { pepper: { needed: 400, have: 0 }, cinnamon: { needed: 200, have: 0 } },
     charterClosed: null,
     indiaman: { lastVisit: 0, nextDay: 180, visits: 0, lastQuarterly: 0 },
-    lettersAuto: { nextDay: 35 },
+    lettersAuto: { nextDay: 12 },  // first contact from the wider world lands around the maiden voyage's return; the world should feel alive early, not after a month of silence. Subsequent cadence (30–55d) is unchanged.
     pendingLetterRequests: [],
     privateConsignment: null,
     privateConsignmentOffered: false,
@@ -4654,7 +4661,7 @@ function makeRenewedState(prev) {
     quotas: { pepper: { needed: 400, have: 0 }, cinnamon: { needed: 200, have: 0 } },
     charterClosed: null,
     indiaman: { lastVisit: 0, nextDay: 180, visits: 0, lastQuarterly: 0 },
-    lettersAuto: { nextDay: 35 },
+    lettersAuto: { nextDay: 12 },  // first contact from the wider world lands around the maiden voyage's return; the world should feel alive early, not after a month of silence. Subsequent cadence (30–55d) is unchanged.
     pendingLetterRequests: [],
     privateConsignment: null,
     privateConsignmentOffered: false,

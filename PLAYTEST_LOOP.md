@@ -38,6 +38,32 @@ real-time pressure, anything that breaks the quiet-ledger mood.
 
 ## Findings log (newest first)
 
+### Iteration 7 — 2026-06-12 — early-game narrative pacing
+
+**Investigated:** building-completion rewards, then early-game letter cadence.
+
+- **Building completion — verified GOOD, no change.** All 8 buildings deliver
+  a named NPC via BUILDING_ARRIVALS on completion (shown in the away digest),
+  so each is a specific per-building beat. Won't over-egg with more celebration.
+  (The "make big moments land" theme — lodging, wealth, Indiaman, brigantine —
+  is now complete; building completion was already handled.)
+- **Early-game narrative silence — the gap, shipped.** The inbox is this
+  prose-game's narrative engine, but after the opening (Director + Wilbraham at
+  day 1) **nothing new arrived until day 35** (first auto-letter), with the
+  first scripted letter (teak) at day 60 and the Wilbraham mystery at day 100.
+  That's ~34 days — 4-5 trade runs — of an inbox-silent world right when the
+  player decides whether this is "a living world of correspondence" or "trading
+  alone." → **Fix (verified live):** (1) first auto-letter cadence 35 → **12**
+  (lands around the maiden voyage's return; subsequent 30-55d cadence
+  unchanged, so no spam — next fired at day 64). (2) Biased the *first* contact
+  (day < 25) to the warm faction-null senders (the sister, Capt. Faulke) rather
+  than a wary rival sizing you up — verified: first letter is now "Mrs. Eliza
+  Wexley, your sister — Concerning Yr. Long Silence", not ter Borch.
+
+**Note:** automating multi-voyage playtests via preview_eval is flaky (encounter
+screens interrupt the button-finding); single-step sails with explicit
+`.closest('.parchment')` port matching are more reliable. Used for future iters.
+
 ### Iteration 6 — 2026-06-12 — the brigantine launch beat
 
 **Investigated:** first-visit foreign-port discovery, then the brigantine launch.

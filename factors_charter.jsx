@@ -4731,7 +4731,10 @@ function tickDays(gs, days) {
       const { letter, outcome, destiny } = makeCharterEndLetter(s);
       s.letters = [...s.letters, letter];
       s.lettersGenerated = (s.lettersGenerated || 0) + 1;
-      s.charterClosed = { day: s.day, outcome, destiny };
+      // letterId lets the hub route the player straight to the climactic letter
+      // — the 3-year finale must not pass as a silent HUD change (it can close
+      // mid-voyage at a foreign port, where no homecoming digest fires).
+      s.charterClosed = { day: s.day, outcome, destiny, letterId: letter.id };
       const destinyText = (
         destiny === 'crown-knighthood'      ? ' His Majesty has been pleased to confer a knighthood.' :
         destiny === 'country-estate'        ? ' Lord Mountfair has set aside an estate.' :
@@ -6921,6 +6924,10 @@ const FALLBACK_AWAY_DIGEST = {
     'You missed the Indiaman, and worse, she had little to take. Her sailing-bills are spread on the desk; the letter that came with them will not be a warm one.',
     'The Company\u2019s ship has come and gone, and the godown was bare when she came. A chance does not return for the asking; the next call must be better met.',
   ],
+  'charter-end': [
+    'The third year is up. A packet from the Court lies on the desk, the heavy seal unbroken, and you know without opening it that the matter of the charter is closed one way or the other. Three years of heat and salt and figures come down to what is written within. You break the wax.',
+    'It is over, then. The Indiaman that should have come will write to a successor, or to you, or to no one — but the charter is run out, and the reckoning of these three years waits under the Court\'s seal on the desk. You sit a while before you open it.',
+  ],
   shipyard: [
     'She was waiting at the slipway when you came in — two-masted, teak-built, her paint still green. The pinnace that carried you out is gone with the tide. You command a country ship now, and the strait will know it.',
     'The new vessel lies at the wharf, thrice the burthen of the old and far more bite. Hodge has the launch entered in the books; Dass walked her deck twice and said nothing, which from him is the highest praise.',
@@ -6948,7 +6955,7 @@ const FALLBACK_AWAY_DIGEST = {
 function pickAwayDigestFallback(awayEvents) {
   const events = awayEvents || [];
   const types = new Set(events.map(e => e.type));
-  for (const key of ['raid', 'incident', 'shipyard', 'indiaman', 'construction', 'harvest', 'letter']) {
+  for (const key of ['charter-end', 'raid', 'incident', 'shipyard', 'indiaman', 'construction', 'harvest', 'letter']) {
     if (!types.has(key)) continue;
     let pool;
     if (key === 'indiaman') {
@@ -8162,6 +8169,22 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
       }
     }
   }, []);
+
+  // The charter's close is the game's climax — route the player straight to
+  // the Court's final letter the moment the hub is clear, so the 3-year arc
+  // never ends as a silent HUD flip. Waits out any homecoming digest /
+  // encounter screen first; `presented` lives inside charterClosed so it's
+  // naturally per-charter (a successor's eventual close presents afresh).
+  useEffect(() => {
+    if (!gs?.charterClosed || gs.charterClosed.presented) return;
+    if (awayDigest || scriptedArrival || encounter || outcome || pending) return;
+    const id = gs.charterClosed.letterId;
+    const letter = id ? gs.letters.find(l => l.id === id) : null;
+    if (!letter) return;
+    setTab('letters');
+    setOpenLetterId(letter.id);
+    setGs(prev => ({ ...prev, charterClosed: { ...prev.charterClosed, presented: true } }));
+  }, [gs?.charterClosed, awayDigest, scriptedArrival, encounter, outcome, pending]);
 
   // Indiaman letters are emitted with a deterministic body and an aiUpgrade
   // marker. Drain the queue one at a time, replacing the body with AI prose

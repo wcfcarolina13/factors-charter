@@ -38,6 +38,43 @@ real-time pressure, anything that breaks the quiet-ledger mood.
 
 ## Findings log (newest first)
 
+### Iteration 8 — 2026-06-12 — the charter-end finale
+
+**Played:** doctored a near-end charter on the knighthood track (Crown 35,
+quota 400/200) and triggered the close both mid-voyage and on a homecoming.
+
+**Finding (shipped, HIGH impact): the game's single biggest moment landed as a
+silent HUD flip.** The charter-end content is excellent — 7 distinct destiny
+letters (knighthood / estate / Resident / Brotherhood / senior-factor / quiet
+retirement / recall-disgrace), each a full period letter. But the *presentation*
+fizzled: the charter can close mid-voyage at a foreign port, where **no
+homecoming digest fires** — so the 3-year culmination (knighthood conferred!)
+passed with the HUD silently flipping to "CHARTER CLOSED" and the climactic
+letter sitting *unopened* in the inbox. Even on a homecoming, `charter-end`
+wasn't in the digest priority list, so the prose fell through to generic
+"godown standing, ledger half-kept."
+
+→ **Fix (verified live, both paths):**
+1. The charter-close stores the end letter's id on `charterClosed`; a GameHub
+   effect auto-routes the player straight to that letter the moment the hub is
+   clear (mirrors how the *opening* auto-opens its first Director letter). The
+   rich destiny letter IS the ceremony — now it can't be missed. `presented`
+   lives inside `charterClosed` so it's naturally per-charter (a successor's
+   eventual close presents afresh).
+2. Added a momentous `charter-end` away-digest branch ("Three years of heat and
+   salt and figures come down to what is written within. You break the wax."),
+   first in the priority list — it's the headline of any homecoming.
+   Verified: foreign-port close → straight to the knighthood letter; homecoming
+   close → momentous digest prose, then the letter auto-opens.
+
+**The "make big moments land" arc is now complete across the whole game:**
+onboarding → early letters → trade/lodging → wealth → Indiaman returns →
+brigantine → and now the finale. Every major beat speaks in the Factor's voice.
+
+**Next candidates:** with the spine polished, look at texture/variety —
+voyage-encounter stakes, or whether a *second* charter (succession) feels
+fresh, or economic decision depth.
+
 ### Iteration 7 — 2026-06-12 — early-game narrative pacing
 
 **Investigated:** building-completion rewards, then early-game letter cadence.

@@ -67,21 +67,20 @@ are listed at the bottom so they don't get re-reported.
 
 ### Mobile UI/UX (open)
 
-9. **Modal scroll-lock on iOS** (S–M) — no `document.body` overflow lock
-   while modals are open; background scrolls behind GalleryModal /
-   ConflictModal / ExportModal. One shared `useModalLock` effect.
-10. **Escape-to-dismiss + backdrop affordance consistency** (S) — modals
-    vary: IllustrationModal has ✕, ConflictModal has none. One pass for ✕ +
-    Escape across the five modals.
-11. **Safe-area insets** (S) — `viewport-fit=cover` is set but the Page
-    wrapper never reads `env(safe-area-inset-*)`; on notched iPhones the
-    header can sit under the dynamic island. (The trade toast shipped today
-    already accounts for the bottom inset.)
-12. **Tab-bar overflow cue** (S) — 6 tabs scroll horizontally with the
-    scrollbar hidden; nothing signals more tabs off-screen. Right-edge fade
-    gradient is the light fix.
-13. **Trade button spacing** (S) — `.trade-row .actions` gap 0.3rem puts
-    three 36px buttons nearly flush on a 375px phone; bump to 0.5rem.
+9. ~~**Modal scroll-lock on iOS**~~ — shipped 2026-06-12 via shared
+   `useModalChrome` hook (body overflow lock + Escape) applied to all five
+   modals.
+10. ~~**Escape-to-dismiss consistency**~~ — shipped 2026-06-12 with #9.
+    ConflictModal deliberately gets scroll-lock only (forced choice — an
+    accidental Escape would leave the saves silently diverged). GalleryModal
+    Escape peels the lightbox first, then the modal.
+11. ~~**Safe-area insets**~~ — shipped 2026-06-12; Page wrapper pads all
+    four `env(safe-area-inset-*)` (resolve to 0 off-notch).
+12. ~~**Tab-bar overflow cue**~~ — shipped 2026-06-12; right-edge parchment
+    fade while more tabs sit off-screen, clears at scroll end
+    (scroll/resize-tracked, not pure CSS — the page background gradient
+    made the CSS scroll-shadow trick look like a band).
+13. ~~**Trade button spacing**~~ — shipped 2026-06-12; gap 0.3 → 0.5rem.
 14. **Unread-letter prominence** (S) — the journal's correspondence card
     distinguishes unread by wording/color only; a wax-red dot or bolder
     treatment would carry further. Tabs already badge a count.
@@ -96,14 +95,17 @@ are listed at the bottom so they don't get re-reported.
     to drop Google Fonts entirely. The legacy artifact runtime keeps the
     Google @import via `window.storage` detection (same idiom as plates.js).
     Unused IM Fell DW Pica dropped from the import.
-17. **Sync-pointer seeding on remote pull** (S–M, data-loss class) — pulling
-    a charter via "⁂ Pull to this device" doesn't seed
-    `factor_save_<slot>_sync`, so the next conflict detection on that device
-    compares against a stale/absent pointer. Verify the exact path, then seed
-    the pointer in `onResumeRemote`.
-18. **Sync-size pre-warning** (S) — pushes >256 KB fail with an error only
-    visible in the menu; warn (and suggest manuscript export) as the payload
-    approaches the cap.
+17. ~~**Sync-pointer seeding on remote pull**~~ — shipped 2026-06-12.
+    Verified the failure: `handleResumeRemote` hydrated a new slot with no
+    pointer, and `detectConflict` treats missing-pointer-with-remote as
+    'conflict', so every relaunch after a cross-device pull fired a
+    false-positive conflict modal. Now the pulled cloud metadata seeds
+    `factor_save_<slot>_sync` directly (the sync hook is still keyed to the
+    old slot at that moment, hence the direct write).
+18. ~~**Sync-size pre-warning**~~ — shipped 2026-06-12. `useSyncState`
+    tracks `sizeWarning` (payload > 200 KB of the 256 KB cap); SyncBadge
+    shows "synced — grows heavy" in amber with a manuscript-export nudge in
+    the tooltip.
 19. **iOS ITP eviction nudge** (S–M) — localStorage saves can be evicted
     after 7 days of disuse in Safari-installed contexts. The factor-key cloud
     copy is the real mitigation; a title-screen nudge ("your key is your

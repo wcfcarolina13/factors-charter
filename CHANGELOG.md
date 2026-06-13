@@ -4,6 +4,24 @@ The Factor's Charter — a chronological log of what's shipped. Newest first.
 
 ---
 
+## 2026-06-12 — Mobile polish batch + sync robustness (Phase 4 of June audit)
+
+Audit items 9–13 and 17–18, closing out everything actionable from the June triage short of content work.
+
+**Mobile polish:**
+- **Modal scroll-lock + Escape** — new shared `useModalChrome` hook (body `overflow: hidden` while open; Escape dismisses) on all five modals. iOS Safari scrolls the page behind `position: fixed` overlays without the lock. ConflictModal deliberately gets lock-only — the conflict demands a choice, and an accidental Escape would leave the two saves silently diverged. GalleryModal's Escape peels the lightbox first, then the modal.
+- **Safe-area insets** — the Page wrapper now pads all four `env(safe-area-inset-*)`; `viewport-fit=cover` had content running under the notch/dynamic island/home bar on installed-PWA iPhones. Resolves to 0 everywhere else.
+- **Tab-bar overflow cue** — the tab row scrolls with its scrollbar hidden; nothing signaled the off-screen tabs. A right-edge parchment fade now shows while there's further to scroll and clears at the end (scroll/resize-tracked).
+- **Trade button spacing** — `.trade-row .actions` gap 0.3 → 0.5rem; three Buy/Sell buttons sat nearly flush on a 375 px phone.
+
+**Sync robustness:**
+- **Pointer seeding on remote pull (false-conflict bug)** — `handleResumeRemote` hydrated a pulled charter into a new slot without seeding `factor_save_<slot>_sync`; `detectConflict` treats a present remote with no pointer as 'conflict', so every relaunch after "⁂ Pull to this device" fired a false-positive conflict modal. The pulled cloud metadata (version/savedAt/day) now seeds the pointer directly — direct localStorage write because the sync hook is still keyed to the previous slot at that moment.
+- **Sync-size pre-warning** — `useSyncState` now tracks `sizeWarning` when the synced payload passes 200 KB (server cap 256 KB). SyncBadge reads "synced — grows heavy" in amber and the tooltip nudges a manuscript export, so the hard failure stops being the first signal.
+
+Verified live at mobile viewport: scroll-lock engages/releases with Escape, tab fade appears on overflow and clears at scroll end, button gap 8px, zero console errors. Tests 145/145; build clean. Pointer-seeding and size-warning verified by code-path reading (the dev server has no Pages Functions to exercise sync E2E).
+
+---
+
 ## 2026-06-12 — Price drivers + raid posture (Phase 3 of June audit)
 
 Items 2 and 3 from the audit triage: the game stops hiding its math.

@@ -1,10 +1,10 @@
 # HANDOFF — The Factor's Charter
 
-**Date:** 2026-06-12 (June audit, Phases 1–4)
+**Date:** 2026-06-12 (June audit, Phases 1–5)
 **For:** Bradley (or a fresh Claude session) resuming this project
 **Branch:** `main`
 **Live build:** https://factors-charter.pages.dev (auto-deploys from `main`)
-**Status:** Ten commits sit on local `main` **UNPUSHED** (awaiting Bradley's go-ahead to deploy), spanning four phases of the 2026-06-09 audit: trade toast + urgency cue + timeouts (P1), Trade Reckoning + self-hosted fonts (P2), price drivers + raid posture (P3), mobile polish + sync hardening (P4). Tests **145/145**; build clean; precache **~800 KiB** (fonts now vendored); JSX file ~**12,890 lines**. Full per-phase detail in `CHANGELOG.md`; the triaged backlog (with shipped items struck and rejected audit claims recorded) is in `DESIGN_NOTES.md` § "Audit triage — 2026-06-09". Workers AI binding live; **R2 bucket binding still pending** (one-time dashboard step — see below).
+**Status:** Phases 1–4 are **pushed and live** (deploy verified 2026-06-12). Phase 5 — **2 commits on local `main`, UNPUSHED** (awaiting go-ahead): the Vizier's-boon payoff + Final Dispatch letter + `closeHookText` primitive, and the offline-enhancement UX (offline banner, SW-update prompt, iOS storage nudge). Across all five phases: trade toast/urgency/timeouts (P1), Trade Reckoning + self-hosted fonts (P2), price drivers + raid posture (P3), mobile polish + sync hardening (P4), content beats + offline UX (P5). Tests **145/145**; build clean; JSX file ~**13,190 lines**. Full per-phase detail in `CHANGELOG.md`; triaged backlog (shipped items struck, rejected/deferred claims recorded) in `DESIGN_NOTES.md` § "Audit triage — 2026-06-09". **Remaining open items all need Bradley's input:** PWA icons (aesthetic), R2 bucket binding (Cloudflare dashboard, ~2 min — see below), fine-goods balance (playtest data), hook-staleness schema migration, acquaintance mechanical gating (tone sign-off). Workers AI binding live; **R2 bucket binding still pending**.
 
 > The 2026-05-10 session detail below is retained as written; its test/size figures are superseded by the status line above. Previous handoff archived in `git log` at commit `5caf118`.
 

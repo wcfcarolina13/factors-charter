@@ -988,6 +988,27 @@ const warehouseCap = (gs) => {
 };
 const warehouseUsed = (gs) => cargoWeight(gs.outpost?.warehouse || {});
 
+// The whole concern's worth — strongbox, godown goods at base price, the
+// buildings raised, the ship, and the ventures' book value. A "sense of scale"
+// prestige metric: surfaced in the Ledger and the Enterprise panel, and the
+// figure the merchant-prince finish reads out. Returns the breakdown + total.
+function enterpriseWorth(gs) {
+  const money = Math.max(0, Math.round(gs?.money || 0));
+  const ware = gs?.outpost?.warehouse || {};
+  let godown = 0;
+  for (const [c, n] of Object.entries(ware)) {
+    godown += Math.floor(n || 0) * (COMMODITIES[c]?.basePrice || 0);
+  }
+  let buildings = 0;
+  for (const [k, b] of Object.entries(gs?.outpost?.buildings || {})) {
+    if (b?.built) buildings += (BUILDINGS[k]?.cost || 0);
+  }
+  const ship = gs?.ship?.type === 'brigantine' ? 700 : 200;
+  const ventures = venturesWorth(gs?.ventures);
+  const total = money + godown + buildings + ship + ventures;
+  return { money, godown, buildings, ship, ventures, total };
+}
+
 const fmtCwt = (n) => {
   // Tidy display: integer if it rounds, otherwise one decimal.
   if (Math.abs(n - Math.round(n)) < 0.05) return String(Math.round(n));
@@ -4383,7 +4404,7 @@ function evalCharterOutcome(s) {
 
 // The Factor's destiny at the close of his charter, drawn from accumulated
 // state: which factions were served, which patrons earned, which paths
-// chosen. Returns one of seven keys. Priority rules:
+// chosen. Returns one of eight keys. Priority rules:
 //
 //   brotherhood-retirement: pirates >= +30, brotherhoodCompact held, Crown
 //     standing burned (<= 0). The Factor has thrown in with the company
@@ -4394,6 +4415,9 @@ function evalCharterOutcome(s) {
 //     Mountfair has set aside an estate.
 //   bayan-kor-seat: Rajah >= +30, outcome >= partial. The Vizier offers
 //     the post of English Resident at the palace.
+//   merchant-prince: >= 3 established ventures, any quota outcome. A house of
+//     yr. own — home a merchant of substance on what you built, not what the
+//     Court gave. Ranks below the patron endings, above the by-outcome ones.
 //   senior-factor: outcome === 'success' default — a second charter at
 //     more agreeable terms.
 //   quiet-retirement: outcome === 'partial' default — the Factor goes
@@ -4421,6 +4445,16 @@ function evalCharterDestiny(s) {
 
   // Bayan-Kor seat — the Resident posting via the Vizier.
   if (rajah >= 30 && outcome !== 'failure') return { outcome, destiny: 'bayan-kor-seat' };
+
+  // Merchant prince — a house of yr. own. The Factor who built a sprawling
+  // concern goes home a merchant of substance on the strength of what HE built,
+  // not what the Court gave him. Gated on a real enterprise (>=3 established
+  // ventures); deliberately NOT gated on quota success — his fortune is on his
+  // own account, not the Company's books. Ranks below the four faction-patron
+  // endings (a claimed patron is the truer ending) but above the Court's
+  // by-outcome defaults, so it can lift even a partial/failed quota into a
+  // genuine alternative life.
+  if (establishedVentureCount(s.ventures) >= 3) return { outcome, destiny: 'merchant-prince' };
 
   // Defaults by outcome.
   if (outcome === 'success') return { outcome, destiny: 'senior-factor' };
@@ -4484,6 +4518,21 @@ The Court will think you dead, in due course; we shall not contradict them.
 Yr. obedt. servant in yr. new station,
 Gerrit Maas`;
       break;
+
+    case 'merchant-prince': {
+      const w = enterpriseWorth(s);
+      from = 'Mr. Josiah Tench, yr. agent in London';
+      subject = 'Yr. Accounts Made Up — and a Word on Coming Home';
+      body = `Sir, — I have made up yr. accounts against the close of the charter, and I send them with more satisfaction than I am used to feel in this work.
+
+The whole of yr. concern — the strongbox, the goods lodged at Bayan-Kor, the buildings raised, the vessel, and the ventures entered to yr. name — I value at not less than £${w.total.toLocaleString()}. It is a house of yr. own, sir, built by yr. own hand and standing on no man's favour but the market's. There are gentlemen at the 'Change with less to their name and a coach besides.
+
+The Court will offer you a second charter, as it offers every man whose file closes clean; but you have no longer any great need of them. A merchant of substance comes home when he pleases and answers to no Standing Committee. I have taken the liberty of enquiring after a house near the Bristol quays, should the notion sit well with you.
+
+Yr. obedt. and faithful agent,
+Josiah Tench, of Mincing Lane.`;
+      break;
+    }
 
     case 'senior-factor':
       from = 'The Court of Directors, London';
@@ -4813,6 +4862,7 @@ function tickDays(gs, days) {
         destiny === 'country-estate'        ? ' Lord Mountfair has set aside an estate.' :
         destiny === 'bayan-kor-seat'        ? ' The Rajah has petitioned the Court for yr. continued post.' :
         destiny === 'brotherhood-retirement'? ' No Indiaman this season; a different roof above the cove.' :
+        destiny === 'merchant-prince'       ? ' Yr. agent has made up the accounts; the concern is yr. own, and considerable.' :
         ''
       );
       s.awayLog.push({ day: s.day, type: 'charter-end', text: 'The third year is up. A packet from the Court closes the file.' + destinyText });
@@ -8065,6 +8115,7 @@ function TitleScreen({ saves, remoteOnlyCharters = [], remoteLoading = false, fa
                             'country-estate':         'a country estate',
                             'bayan-kor-seat':         'Resident at Bayan-Kor',
                             'brotherhood-retirement': 'with the Brotherhood',
+                            'merchant-prince':        'a merchant prince',
                             'senior-factor':          'honourable',
                             'quiet-retirement':       'partial',
                             'recall-disgrace':        'recalled',
@@ -11666,6 +11717,24 @@ function LedgerView({ gs }) {
         );
       })()}
 
+      {(() => {
+        const w = enterpriseWorth(gs);
+        return (
+          <div style={{ marginTop: '1.5rem' }}>
+            <div className="display" style={{ fontSize: '0.85em', color: '#6b4423', marginBottom: '0.4rem' }}>THE WHOLE CONCERN</div>
+            <div className="parchment" style={{ padding: '0.8rem 1rem', background: 'rgba(255,255,255,0.3)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.4rem' }}>
+                <span className="display" style={{ color: '#5c1a08' }}>Estimated worth</span>
+                <span className="display" style={{ color: '#5c1a08', fontSize: '1.15em' }}>£{w.total.toLocaleString()}</span>
+              </div>
+              <div style={{ fontSize: '0.82em', color: '#6b4423', fontStyle: 'italic' }}>
+                Strongbox £{w.money.toLocaleString()} · godown £{w.godown.toLocaleString()} · buildings £{w.buildings.toLocaleString()} · ship £{w.ship.toLocaleString()} · ventures £{w.ventures.toLocaleString()}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       <div style={{ marginTop: '2rem' }}>
         <div className="display" style={{ fontSize: '0.9em', color: '#6b4423', marginBottom: '0.7rem' }}>THE HOUSEHOLD</div>
         <div className="cols-2">
@@ -12732,6 +12801,11 @@ function OutpostView({ gs, startBuild, expediteBuild, establishVenture, viewport
         <p className="italic" style={{ color: '#4a3220', marginBottom: '1rem', fontSize: '0.95em' }}>
           Beyond the compound, yr. fortune may be put to work — a fleet of yr. own, an agent at a foreign port, a stake in the bazaar. Each grows the concern in a different direction.
         </p>
+        {establishedVentures.length > 0 && (
+          <p className="display" style={{ color: '#6b4423', marginTop: '-0.5rem', marginBottom: '1rem', fontSize: '0.85em' }}>
+            The whole concern stands at about £{enterpriseWorth(gs).total.toLocaleString()}.
+          </p>
+        )}
 
         {establishedVentures.length > 0 && (
           <div style={{ marginBottom: '1.2rem' }}>

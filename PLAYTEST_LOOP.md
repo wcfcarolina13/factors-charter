@@ -38,6 +38,52 @@ real-time pressure, anything that breaks the quiet-ledger mood.
 
 ## Findings log (newest first)
 
+### Iteration 13 — 2026-06-12 — economic pressure (verified reasonable; flagged for Bradley)
+
+**Examined the numbers** (not a unilateral change — economy feel is Bradley's call):
+
+- **Buy side is capped.** Kota Pinang pepper: stockMax 80, restock 0.7/day. You
+  can't buy infinite pepper per visit, and frequent visits drain it faster than
+  it refills. The hold (pinnace 60 / brigantine 180) and the **quota** contest
+  the *same* pepper stock + hold space, so arbitrage and quota-filling trade off
+  against each other — real opportunity cost.
+- **Margins are modest.** Pepper base 12 → buy ~£8 at KP (×0.7), sell ~£17 at
+  Eustace (×1.4) / ~£18 at Marlborough (×1.5) — minus Dutch duty and the longer
+  KP→Eustace→home route. ~£400-500 per ~13-day arbitrage cycle, not the ~£3k I'd
+  loosely guessed.
+- **Sinks** total ~£4-5k/charter: buildings ~£1,070, brigantine £600-900, refit
+  ~£2-3/point over ~50 voyages (~£2k). **No punishing recurring upkeep** — which
+  is *deliberate*: Bradley's design explicitly avoided slog (the "day-100 slog"
+  was about tedium, not too-little pressure).
+
+**Conclusion:** money is a meaningful early/mid-game constraint, then yields to
+time/quota pressure late — the normal trading-game arc (scarcity → power →
+execution). No degenerate exploit (stock cap + contested resources gate it).
+Mid-game money abundance is a design *choice*. **If Bradley wants more late-game
+money tension**, the lever is a light recurring cost (household wages / building
+upkeep) — but that risks reintroducing slog, so it's his call, not an autonomous
+change. Flagged, not touched.
+
+---
+
+## Loop retrospective (after 13 iterations)
+
+**11 genuine improvements shipped + 2 verified-good confirmations.** The game is
+now well-polished across its whole arc. Reward beats (lodging, wealth, Indiaman,
+brigantine, finale) all land in the Factor's voice; the spine (onboarding →
+early letters → trade → finale → succession → renewal) presents every major
+moment; the most frequent interaction (encounters) is varied; risk decisions are
+legible. The last several iterations increasingly verify systems *good* — the
+high-value autonomous work is essentially complete.
+
+**Remaining items all need Bradley's input** (subjective/feel or content-tone):
+economic late-game tension (above); faction-keyed encounter variants (content);
+any further balance tuning. These shouldn't be done autonomously.
+
+**Planned next:** one holistic fresh-eyes playthrough as a capstone QA pass
+(verify the 11 changes integrate cleanly start-to-finish), then conclude the
+active loop — re-runnable anytime via /loop.
+
 ### Iteration 12 — 2026-06-12 — prose scan + renewal verification (no code change)
 
 Two verified-good checks; no warranted change — an honest result at the

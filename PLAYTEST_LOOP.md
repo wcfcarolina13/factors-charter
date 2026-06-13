@@ -38,6 +38,31 @@ real-time pressure, anything that breaks the quiet-ledger mood.
 
 ## Findings log (newest first)
 
+### Iteration 12 — 2026-06-12 — prose scan + renewal verification (no code change)
+
+Two verified-good checks; no warranted change — an honest result at the
+polished tail of the loop.
+
+- **Prose/text quality — verified CLEAN.** Systematic scan for double spaces,
+  missing spaces after periods, doubled words ("the the"), common misspellings,
+  and apostrophe inconsistency turned up nothing in the prose. 21 "your" (vs the
+  period "yr.") are all in registers where standard English is correct — UI
+  text, loading/flash messages, away-log narration, the sister's relationship
+  label — while the letters and journal keep "yr." The text is carefully
+  written; imposing "yr." on the UI/narration registers would be wrong.
+- **Renewal path — verified GOOD.** Took the same-Factor second charter from a
+  successful close: fresh 1095-day clock, `charterClosed` cleared, ship +
+  buildings + money kept, and the "Yr. Charter Renewed" letter **auto-opens** —
+  confirming the iter-10 `firstLetterPresented`-keyed fix covers renewal as well
+  as succession.
+
+**Loop standing:** 11 genuine improvements shipped; iterations 11-12 are now
+mostly verifying systems *good*. The obvious high-value work is done. The one
+deep question left that's playtest-answerable (not speculative): does money stay
+a meaningful constraint mid/late-game, or does the pepper arbitrage
+(buy ~£8 at Kota Pinang, sell ~£25 at Eustace/Marlborough → ~£3k/brigantine-run)
+trivialize it? That's the next iteration's focus — observed, not assumed.
+
 ### Iteration 11 — 2026-06-12 — risk/reward levers (bottomry, contraband)
 
 **Investigated:** the bottomry loan and the opium-smuggling contract — where

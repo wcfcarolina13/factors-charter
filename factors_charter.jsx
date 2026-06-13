@@ -12206,12 +12206,15 @@ function ContractRunPanel({ gs, liftContractOpium, runDutchCustoms }) {
         <p className="italic" style={{ margin: '0 0 0.5rem 0', color: '#4a3220', fontSize: '0.92em' }}>
           {cwt} cwt of unmanifested opium sit in yr. hold. The drop is at the back of the Hollander's wharf, by a runner who will know yr. ship. The customs clerks must not see what they are not paid to see.
         </p>
-        <div style={{ fontSize: '0.85em', color: '#6b4423', marginBottom: '0.6rem' }}>
+        <div style={{ fontSize: '0.85em', color: '#6b4423', marginBottom: '0.4rem' }}>
           {passHeld
             ? 'Yr. trade pass holds the customs at a glance — risk is low.'
             : friendly
               ? 'Yr. Dutch standing is cordial; the customs clerks will not press hard, but they will look.'
               : 'No trade pass; standing is ordinary. The customs are a real risk.'}
+        </div>
+        <div style={{ fontSize: '0.82em', color: '#8b1a1a', fontStyle: 'italic', marginBottom: '0.6rem' }}>
+          If they find it: the cargo is forfeit, the contract void, and yr. standing with the Hollanders falls hard. There is no second telling of it.
         </div>
         <button
           className="wax-button"

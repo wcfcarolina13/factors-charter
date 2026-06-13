@@ -38,6 +38,35 @@ real-time pressure, anything that breaks the quiet-ledger mood.
 
 ## Findings log (newest first)
 
+### Iteration 11 — 2026-06-12 — risk/reward levers (bottomry, contraband)
+
+**Investigated:** the bottomry loan and the opium-smuggling contract — where
+spicy, consequential decisions should live.
+
+- **Bottomry — verified GOOD, no change.** The panel clearly states the bond
+  amount, the repayment due (£principal × 1.25), that it falls due on the next
+  return to Bayan-Kor, and the calamity-forgiveness condition. (Initially
+  mis-read it as an empty paragraph — that was an artifact of my own
+  `awk 'length<200'` filter dropping the long content line. **Lesson: filtered
+  grep/sed reads hide long lines; re-read before concluding content is missing.**)
+- **Opium contract — well-built, one small fix.** The Pale Man's contract is a
+  genuine multi-step smuggling risk: lift at the Nest, drop at Eustace under a
+  customs check (30% caught, → 5% with a trade pass, trimmed further by Dutch
+  standing). The drop panel already shows the catch *likelihood* qualitatively
+  ("risk is low" / "a real risk") — but not the *stakes*. → **Fix (verified
+  live):** added a stakes line so the downside is visible before the
+  irreversible choice: "If they find it: the cargo is forfeit, the contract
+  void, and yr. standing with the Hollanders falls hard. There is no second
+  telling of it." Informed-consent for the risk; both odds and consequence now
+  legible.
+
+**Loop status:** at iteration 11, most systems are verifying *good* — the game
+is genuinely well-polished after the spine/reward/pacing/finale/encounter/
+succession work. Improvements are now smaller and more occasional (the natural
+tail of a productive loop). Remaining speculative items (economic rebalance,
+faction-keyed encounters) would need playtest data or risk over-engineering, so
+I'm holding off on those without a clear, verifiable win.
+
 ### Iteration 10 — 2026-06-12 — succession / second-charter freshness
 
 **Played:** doctored a successful charter-end (brigantine + 4 buildings +

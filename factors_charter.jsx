@@ -18,7 +18,7 @@ import { canOfferSabotage, resolveSabotage, sabotageCoda } from './src/util/sabo
 import { recordTrade, reckonRows, reckonTotal } from './src/util/trade-stats.js';
 import { reconcileHookMeta, hookAgeNote, staleHookCount } from './src/util/hooks-age.js';
 import { pendingWealthMilestones, seedWealthFlags } from './src/util/milestones.js';
-import { VENTURES, accrueVentureIncome, accrueVentureProduce, ventureUnlocked, ventureBuyMult, ventureQuarterlyIncome, venturesWorth, establishedVentureCount } from './src/util/ventures.js';
+import { VENTURES, accrueVentureIncome, accrueVentureProduce, ventureUnlocked, ventureBuyMult, ventureQuarterlyIncome, venturesWorth, establishedVentureCount, pickVentureEvent } from './src/util/ventures.js';
 import { nextAmbition } from './src/util/ambition.js';
 
 // ─────────── FACTOR KEY (cross-device identity) ───────────
@@ -1176,6 +1176,11 @@ const ensureShape = (gs) => {
   if (!Array.isArray(next.hooks)) next.hooks = [];
   if (!Array.isArray(next.recentEncounters)) next.recentEncounters = [];
   if (!next.ventures || typeof next.ventures !== 'object') next.ventures = {};
+  // Living-ventures scheduler state (events the enterprise throws): a cooldown
+  // day, the last-fired id (anti-repeat), and the spent `once` events.
+  if (typeof next.ventureEventDay !== 'number') next.ventureEventDay = 0;
+  if (next.lastVentureEventId === undefined) next.lastVentureEventId = null;
+  if (!Array.isArray(next.ventureEventsFired)) next.ventureEventsFired = [];
   // Sidecar timestamps for thread aging (keyed by hook text). Stamp any
   // already-open hooks at the current day on first migration — we begin
   // tracking now rather than inventing a past for old saves.
@@ -5845,6 +5850,31 @@ function tickDays(gs, days) {
           : `Yr. own gardens yielded their season into the godown — ${detail}, bought from no one.`;
         s.awayLog.push({ day: s.day, type: 'harvest', text: txt });
         s.journal = [...(s.journal || []), { day: s.day, entry: txt }];
+      }
+    }
+
+    // Living ventures: the established enterprise occasionally throws an event —
+    // a windfall, a setback, or news worth pursuing — on a cooldown so it reads
+    // as a beat, not noise. One roll per home-station tick.
+    if (establishedVentureCount(s.ventures) > 0 &&
+        (s.day - (s.ventureEventDay || 0)) >= 45 &&
+        Math.random() < 0.22) {
+      const excl = [...(s.ventureEventsFired || []), s.lastVentureEventId].filter(Boolean);
+      const ev = pickVentureEvent(s.ventures, excl, Math.random());
+      if (ev) {
+        s.ventureEventDay = s.day;
+        s.lastVentureEventId = ev.id;
+        if (ev.once) s.ventureEventsFired = [...(s.ventureEventsFired || []), ev.id];
+        if (typeof ev.money === 'number') s.money = Math.max(0, (s.money || 0) + ev.money);
+        if (ev.produce) {
+          const cap = warehouseCap(s);
+          const room = Math.max(0, cap - cargoWeight(s.outpost.warehouse));
+          const fit = Math.min(ev.produce.amount, Math.floor(room / (COMMODITIES[ev.produce.commodity].weight || 1)));
+          if (fit > 0) s.outpost.warehouse[ev.produce.commodity] = (s.outpost.warehouse[ev.produce.commodity] || 0) + fit;
+        }
+        if (ev.hook && !s.hooks.includes(ev.hook)) s.hooks = [...s.hooks, ev.hook];
+        s.awayLog.push({ day: s.day, type: 'venture', text: ev.text });
+        s.journal = [...(s.journal || []), { day: s.day, entry: ev.text }];
       }
     }
   }

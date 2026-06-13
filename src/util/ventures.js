@@ -192,3 +192,85 @@ export function establishedVentureCount(venturesState) {
   for (const v of Object.values(venturesState || {})) if (v?.established) n += 1;
   return n;
 }
+
+// ─── Living ventures — the enterprise writes back ───
+//
+// Established ventures occasionally throw an event: a windfall, a setback, or
+// news worth pursuing. Turns flat passive income into a narrated, VARIABLE
+// stream that feels like the concern is doing things — and, via `hook`, can
+// surface a thread the player chooses to Pursue (agency through the existing
+// system). Pure data; the monolith schedules (cooldown + roll) and applies it.
+//
+// Each event:
+//   id       — stable key (used for once-tracking + anti-repeat)
+//   venture  — the venture id that must be established for it to fire
+//   text     — the journal / away-log line, in the Factor's voice
+//   money    — £ delta (windfall + / setback −), optional
+//   produce  — { commodity, amount } lodged to the godown (a bumper crop), optional
+//   hook     — a thread string planted for the player to Pursue, optional
+//   once     — if true, fires at most once per charter (the hook/news beats)
+//   weight   — relative selection weight (default 1)
+export const VENTURE_EVENTS = [
+  // Shipping — the Kingfisher
+  { id: 'kingfisher_prize',  venture: 'coastal_trader', money: 35,
+    text: 'The Kingfisher fell in with a derelict country boat off the shoals and brought her rice safe in — a small windfall, honestly come by.' },
+  { id: 'kingfisher_storm',  venture: 'coastal_trader', money: -30,
+    text: 'The Kingfisher sprang a plank in a sudden blow and lay three weeks under repair; the cost came to yr. account.' },
+
+  // Shipping — the Carnatic
+  { id: 'carnatic_freight',  venture: 'country_ship', money: 90,
+    text: 'The Carnatic came back deep-laden from the Coromandel, every foot of her hold spoken for — a rich freight this season.' },
+  { id: 'carnatic_becalmed', venture: 'country_ship', money: -45,
+    text: 'The Carnatic lay becalmed a fortnight in the Bay and missed the best of the season’s freight.' },
+  { id: 'carnatic_wreck',    venture: 'country_ship', once: true,
+    hook: 'The Carnatic’s master reports a Dutch wreck on the Pratas with saltpetre aboard, ungoverned — a thing that might repay a closer look.',
+    text: 'The Carnatic’s master sends word of a Dutch ship gone on the Pratas reef, her saltpetre cargo ungoverned. He thinks it might repay a closer look.' },
+
+  // Capital — the bazaar stake
+  { id: 'bazaar_flush',      venture: 'bazaar_stake', money: 50,
+    text: 'A flush quarter at Mehmet Pasha’s house — the bazaar’s coin ran fast, and yr. share of it ran with it.' },
+  { id: 'bazaar_default',    venture: 'bazaar_stake', money: -40,
+    text: 'A debtor of Mehmet Pasha’s house defaulted and fled to the hills; the quarter’s interest came the shorter for it.' },
+
+  // Production — the pepper garden
+  { id: 'garden_bumper',     venture: 'pepper_garden', produce: { commodity: 'pepper', amount: 10 },
+    text: 'A kind monsoon and a heavy set on the vines — the garden gave a bumper crop, lodged with the rest.' },
+  { id: 'garden_blight',     venture: 'pepper_garden', money: -20,
+    text: 'A blight ran through the pepper rows; Aman Singh saved what he could, but the cost of it came to yr. account.' },
+
+  // Production — the spice estate
+  { id: 'estate_cinnamon',   venture: 'spice_estate', produce: { commodity: 'cinnamon', amount: 8 },
+    text: 'The cinnamon peeled clean and dried fair this season; an extra weight of it came down to the godown.' },
+  { id: 'estate_fire',       venture: 'spice_estate', money: -60,
+    text: 'A fire took hold in the drying-floor and a season’s cinnamon with it; the rebuilding came to yr. account.' },
+
+  // Network — the Kota Pinang agent
+  { id: 'agent_intel',       venture: 'kota_agent', once: true,
+    hook: 'Yr. Kota Pinang agent reports the Sultan’s pepper price will fall before the next ships — an opening for a well-timed buy.',
+    text: 'Yr. man at Kota Pinang sends word under seal: the Sultan’s warehouses are over-full, and the price of pepper there will fall before the next ships call.' },
+  { id: 'agent_gift',        venture: 'kota_agent', money: 20,
+    text: 'Yr. agent at Kota Pinang sent up the season’s first mangosteens and a quiet £20 besides, being yr. share of a brokerage he turned on the side.' },
+
+  // Home — the Bristol concern
+  { id: 'bristol_dividend',  venture: 'bristol_concern', money: 55,
+    text: 'A letter from Eliza: Pyne & Wexley had a strong half-year, and an extra dividend rode home with the usual — a fat sum beyond the quarter.' },
+  { id: 'bristol_slow',      venture: 'bristol_concern', money: -25,
+    text: 'Eliza writes that the West-Country cloth sold slow this season; the dividend will be the lighter for it, though the house stands sound.' },
+];
+
+// Pick a venture event to fire now, or null. Eligible = the venture is
+// established and the event is not excluded (a spent `once` event, or the one
+// just fired — anti-repeat). `roll` in [0,1) selects among the eligible pool by
+// weight. The monolith decides IF an event fires (cooldown + a gate roll) and
+// supplies this selection roll + the exclude list.
+export function pickVentureEvent(venturesState, excludeIds, roll) {
+  const excl = new Set(excludeIds || []);
+  const pool = VENTURE_EVENTS.filter(e =>
+    venturesState?.[e.venture]?.established && !excl.has(e.id)
+  );
+  if (!pool.length) return null;
+  const total = pool.reduce((s, e) => s + (e.weight || 1), 0);
+  let r = (typeof roll === 'number' ? roll : 0) * total;
+  for (const e of pool) { r -= (e.weight || 1); if (r < 0) return e; }
+  return pool[pool.length - 1];
+}

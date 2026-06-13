@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   VENTURES, accrueVentureIncome, ventureUnlocked, ventureBuyMult, ventureQuarterlyIncome,
   accrueVentureProduce, ventureWorth, venturesWorth, establishedVentureCount,
+  VENTURE_EVENTS, pickVentureEvent,
 } from './ventures.js';
 
 describe('ventureUnlocked', () => {
@@ -152,5 +153,48 @@ describe('ventureWorth / venturesWorth / establishedVentureCount', () => {
   it('is zero/empty for empty state', () => {
     expect(venturesWorth({})).toBe(0);
     expect(establishedVentureCount(undefined)).toBe(0);
+  });
+});
+
+describe('VENTURE_EVENTS registry integrity', () => {
+  it('every event references a real venture and has unique ids', () => {
+    const ids = new Set();
+    for (const e of VENTURE_EVENTS) {
+      expect(VENTURES[e.venture], `${e.id} → ${e.venture}`).toBeTruthy();
+      expect(ids.has(e.id), `dup id ${e.id}`).toBe(false);
+      ids.add(e.id);
+      expect(typeof e.text).toBe('string');
+      // an event must do *something*
+      expect(e.money !== undefined || e.produce !== undefined || e.hook !== undefined).toBe(true);
+    }
+  });
+});
+
+describe('pickVentureEvent', () => {
+  it('returns null when no venture is established', () => {
+    expect(pickVentureEvent({}, [], 0)).toBeNull();
+    expect(pickVentureEvent({ coastal_trader: { established: false } }, [], 0)).toBeNull();
+  });
+  it('only picks events whose venture is established', () => {
+    const state = { bazaar_stake: { established: true } };
+    for (let i = 0; i < 20; i++) {
+      const e = pickVentureEvent(state, [], i / 20);
+      expect(e.venture).toBe('bazaar_stake');
+    }
+  });
+  it('excludes ids in the exclude list (spent once-events + anti-repeat)', () => {
+    const state = { kota_agent: { established: true } };
+    // kota_agent has agent_intel (once) + agent_gift; exclude the gift → only intel left
+    const e = pickVentureEvent(state, ['agent_gift'], 0.99);
+    expect(e.id).toBe('agent_intel');
+  });
+  it('returns null if every eligible event is excluded', () => {
+    const state = { kota_agent: { established: true } };
+    expect(pickVentureEvent(state, ['agent_intel', 'agent_gift'], 0.5)).toBeNull();
+  });
+  it('roll 0 picks the first eligible, roll near 1 picks the last', () => {
+    const state = { coastal_trader: { established: true } }; // prize, storm (in order)
+    expect(pickVentureEvent(state, [], 0).id).toBe('kingfisher_prize');
+    expect(pickVentureEvent(state, [], 0.999).id).toBe('kingfisher_storm');
   });
 });

@@ -1261,7 +1261,11 @@ Yr. most obedient servants, the Court of Directors, in London, &c.`,
 
 26 March, 1719. \u2014 Took up the Charter today at Bayan-Kor. The Vizier sent two boys with mangoes and a courteous note. Hodge says this means I am owed a return-gift of equal worth before the moon turns. I shall send him salt; the Rajah\u2019s people prize it.
 
+2 May. \u2014 The returns the Court demands \u2014 pepper, four hundredweight; cinnamon, two \u2014 are not grown at this door. The pepper comes up the strait from Kota Pinang, where the Sultan\u2019s barges bring it cheap and the Sultan\u2019s men tax it dear; the cinnamon with it, in lesser quantity. I buy what the hold will carry, lodge it in the godown here, and wait on the Company Indiaman to lift it for London. The godown is the whole art of it: fill it before the ship calls, or she sails light, and the Court reads a light ship as sloth.
+
 12 June. \u2014 The Bugis prahu is in the strait again. Capt. Faulke called it a "Brotherhood trader" and would not say more. I had three barrels of rum traded out of me at gunpoint last month and have learned not to ask.
+
+30 July. \u2014 A man does not grow rich on the Company\u2019s quota; he grows rich in the gaps between the ports. The rum and rice they victual you with fetch little at this wharf \u2014 carry them where they are wanted, eastward to the Nest the Brotherhood keeps, which will pay near double for a barrel, or to any port grown sick of its own surplus. Buy a thing where it is cheap, sell it where it is dear, and let the quota be the floor beneath yr. feet, not the roof above yr. head. It is the first rule of the country trade, and I wish someone had set it before me sooner.
 
 8 September. \u2014 The Vizier requires my presence at the palace each Friday for the audience. I am, I now realise, his preferred Englishman. I do not flatter myself that this is for my conversation.
 

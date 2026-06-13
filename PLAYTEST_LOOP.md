@@ -38,6 +38,41 @@ real-time pressure, anything that breaks the quiet-ledger mood.
 
 ## Findings log (newest first)
 
+### Iteration 5 — 2026-06-12 — the homecoming digest & the Indiaman win
+
+**Played:** engineered a rich return (building completing + Indiaman calling +
+godown stock) and watched the away-digest screen.
+
+- **Away-digest presentation — verified GOOD, no change.** My "wall of text"
+  hypothesis was wrong. "UPON YOUR RETURN / Bayan-Kor in Your Absence" + an
+  atmospheric prose intro + a clean dated house-ledger (stockade done, Lal the
+  watchman arrived, the Indiaman lifted 30 pepper, a Hodge incident) reads as a
+  real homecoming beat. Left alone — don't fix what isn't broken.
+- **Indiaman reward-framing — the real miss, shipped.** When the Indiaman
+  lifts your quota goods toward London, that's the player's *biggest recurring
+  win*. But the digest prose pool had three entries — "You missed the Indiaman
+  by some days", "figures yet to be reconciled", "returns to dispute" — all
+  bureaucratic/near-miss, **picked at random regardless of whether the lift
+  succeeded.** A 30-pepper shipment read as drudgery.
+  → **Fix (verified live):** tagged the indiaman awayLog event with `lifted`
+  (cwt shipped), split the pool into `indiaman_returns` (celebrates progress:
+  "So much of the charter is now on the water, beyond recall and beyond
+  dispute") and `indiaman_empty` (stings a bare-godown call). `pickAwayDigest
+  Fallback` branches on whether any call actually lifted goods. Verified: a
+  successful lift now shows the returns pool.
+
+**Noted, not fixed (minor):**
+- The "A line of squalls" prose is correct in source; "Aline" in `innerText`
+  is a drop-cap float collapsing the space after a single-letter first word.
+  The `::first-letter` has 0.1em right padding so it renders with a small gap —
+  acceptable; not worth a CSS change touching every drop-cap.
+- The private-consignment prompt fires on arrival at a *foreign* port when the
+  Indiaman called at home while away — slightly disjointed from the home digest.
+  Logic wrinkle; would need understanding the consignment timing before touching.
+
+**Next candidates:** (a) first-visit foreign-port discovery beat; (b) encounter
+stakes/variety; (c) whether the player always has a clear near-term anticipation.
+
 ### Iteration 4 — 2026-06-12 — milestone recognition (compounding feels good)
 
 **Investigated:** goal-gradient (is the next ambition a visible target?) and

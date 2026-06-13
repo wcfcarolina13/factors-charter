@@ -4950,7 +4950,7 @@ function tickDays(gs, days) {
       const tail = (peppLifted === 0 && cinnLifted === 0)
         ? 'The hold went away empty, by the harbourmaster’s account.'
         : `${peppLifted} cwt pepper and ${cinnLifted} cwt cinnamon lifted from the godown.`;
-      s.awayLog.push({ day: s.day, type: 'indiaman', text: `${ShipName}, of the Company, called for the returns. ${tail} A letter from the Court came by the same packet.` });
+      s.awayLog.push({ day: s.day, type: 'indiaman', lifted: peppLifted + cinnLifted, text: `${ShipName}, of the Company, called for the returns. ${tail} A letter from the Court came by the same packet.` });
       s.indiaman = { lastVisit: s.day, nextDay: s.day + INDIAMAN_INTERVAL, visits: (s.indiaman.visits || 0) + 1, lastQuarterly: s.day };
 
       // Pay out any private consignment the Factor sent by the previous
@@ -6894,10 +6894,18 @@ const FALLBACK_AWAY_DIGEST = {
     'There has been trouble while you were gone. Hodge is in some agitation; Dass is calmer but says less. The day will not run to its usual hours.',
     'You walk the compound and see what was done in yr. absence. Some matters can be set right by the close of the week; others will not be.',
   ],
-  indiaman: [
-    'An Indiaman had called in yr. absence. Hodge produces the manifests, the receipts, the figures yet to be reconciled. The work of catching up begins.',
-    'You missed the Indiaman by some days. Her sailing-bills are spread on the desk, and there will be a letter from the Court somewhere among them.',
-    'The Company\u2019s ship has come and gone. There are returns to verify, returns to dispute, and a draft on Bombay to be lodged.',
+  // Split by outcome: a successful lift of quota goods is the player's biggest
+  // recurring win and should read as progress, not bureaucratic catch-up; an
+  // empty call (godown bare when she came) should sting and motivate.
+  indiaman_returns: [
+    'The Indiaman has sailed, and yr. returns with her \u2014 bound for the Company\u2019s House and entered against the charter. The godown stands the lighter, and the reckoning the better, for her call.',
+    'Her holds took what you had lodged, and she is away north for the Cape and home. So much of the charter is now on the water, beyond recall and beyond dispute. Hodge has pinned the receipt where you will see it.',
+    'A good call, in yr. absence. The Company\u2019s ship lifted the returns from the godown and is gone for London. The figures move, at last, in the right direction \u2014 and Hodge has said as much, in his dry way.',
+  ],
+  indiaman_empty: [
+    'An Indiaman had called in yr. absence \u2014 and found the godown wanting. Her holds went north the lighter for yr. having had nothing ready, and there will be a letter from the Court somewhere among the bills.',
+    'You missed the Indiaman, and worse, she had little to take. Her sailing-bills are spread on the desk; the letter that came with them will not be a warm one.',
+    'The Company\u2019s ship has come and gone, and the godown was bare when she came. A chance does not return for the asking; the next call must be better met.',
   ],
   construction: [
     'A new beam stands in the compound. Hodge runs through the figures of the build, then the figures of the household. The day proceeds.',
@@ -6919,12 +6927,20 @@ const FALLBACK_AWAY_DIGEST = {
 };
 
 function pickAwayDigestFallback(awayEvents) {
-  const types = new Set((awayEvents || []).map(e => e.type));
+  const events = awayEvents || [];
+  const types = new Set(events.map(e => e.type));
   for (const key of ['raid', 'incident', 'indiaman', 'construction', 'harvest', 'letter']) {
-    if (types.has(key)) {
-      const pool = FALLBACK_AWAY_DIGEST[key];
-      return pool[Math.floor(Math.random() * pool.length)];
+    if (!types.has(key)) continue;
+    let pool;
+    if (key === 'indiaman') {
+      // Did this call actually lift quota goods? Celebrate a real shipment;
+      // sting an empty one.
+      const lifted = events.some(e => e.type === 'indiaman' && (e.lifted || 0) > 0);
+      pool = lifted ? FALLBACK_AWAY_DIGEST.indiaman_returns : FALLBACK_AWAY_DIGEST.indiaman_empty;
+    } else {
+      pool = FALLBACK_AWAY_DIGEST[key];
     }
+    return pool[Math.floor(Math.random() * pool.length)];
   }
   const pool = FALLBACK_AWAY_DIGEST.default;
   return pool[Math.floor(Math.random() * pool.length)];

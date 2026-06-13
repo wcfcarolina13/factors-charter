@@ -1148,6 +1148,7 @@ const ensureShape = (gs) => {
   // Defensive ensureShape additions — fields that have always existed in
   // makeInitialState but old / corrupted saves may have lost.
   if (!Array.isArray(next.hooks)) next.hooks = [];
+  if (!Array.isArray(next.recentEncounters)) next.recentEncounters = [];
   // Sidecar timestamps for thread aging (keyed by hook text). Stamp any
   // already-open hooks at the current day on first migration — we begin
   // tracking now rather than inventing a past for old saves.
@@ -6114,7 +6115,50 @@ const FALLBACK_VOYAGE_ENCOUNTERS = [
       { label: 'Pass it by — we have timber enough', outcomeKey: 'cost', seed: 'Crew uneasy. A small bill.' },
     ],
   },
+  {
+    prose: 'A waterspout stands up off the starboard bow — a grey rope of sea and sky, twisting, walking slowly across yr. course. The bosun has seen one break a mast and seen one pass like a ghost. He waits on yr. word, and not patiently.',
+    choices: [
+      { label: 'Bear away hard and give it room', outcomeKey: 'time_lost', seed: 'Lose ground. Safe.' },
+      { label: 'Hold the course and trust it passes', outcomeKey: 'damage', seed: 'Risk the rigging.' },
+      { label: 'Fire the swivel to break it, by the old belief', outcomeKey: 'cost', seed: 'Powder spent. The crew steadied.' },
+    ],
+  },
+  {
+    prose: 'A vessel lies low in the water two cables off — dismasted, abandoned, her deck awash but not yet gone under. Casks show in the waist, and the glass finds no soul aboard. Salvage is salvage; it is also slow, and the weather is making.',
+    choices: [
+      { label: 'Put a boat across and take what floats', outcomeKey: 'windfall', seed: 'Lose time. A possible prize.' },
+      { label: 'Stand off — she may be plague, or a trap', outcomeKey: 'time_lost', seed: 'Cautious. No gain, no loss.' },
+      { label: 'Mark her position for the next vessel', outcomeKey: 'rep_shift', repFaction: 'company', repDelta: 1, seed: 'A word reaches the underwriters.' },
+    ],
+  },
+  {
+    prose: 'A country ship of English build closes to hailing distance, her master at the rail with a speaking-trumpet. He has come down from the Bengal side, and offers the news of the season — the price of pepper at Madras, the temper of the Dutch, a wreck on the Pratas.',
+    choices: [
+      { label: 'Heave to and trade the news of the coast', outcomeKey: 'hook_opens', hook: 'A country master out of Bengal who knows the season’s prices and offered to know yr. face again.', seed: 'Lose time. Plant a thread.' },
+      { label: 'Press him for the Madras pepper figure', outcomeKey: 'windfall', seed: 'A useful figure. Saves a poor bargain.' },
+      { label: 'Exchange salutes and stand on', outcomeKey: 'time_lost', seed: 'A courtesy. Day passes.' },
+    ],
+  },
+  {
+    prose: 'A topman misses his hold reefing the main and comes down hard to the deck. He is alive, but the leg is wrong, and the carpenter is no surgeon. There is a Malay village in the lee of the next headland where, it is said, a bone-setter keeps.',
+    choices: [
+      { label: 'Put in at the village for the bone-setter', outcomeKey: 'cost', seed: 'A detour and a coin; the man may keep his leg.' },
+      { label: 'Heave to and let the carpenter splint it', outcomeKey: 'time_lost', seed: 'Half a day. The man bears it.' },
+      { label: 'Press on; the season will not wait', outcomeKey: 'hook_opens', hook: 'A topman crippled on the main yard, put off at no port; the foc’sle has not forgotten it.', seed: 'No delay. Plant a thread quietly.' },
+    ],
+  },
 ];
+
+// Pick a fallback encounter avoiding the ones shown most recently (tracked by
+// prose in gs.recentEncounters). With a 16-entry pool and a 4-deep memory, no
+// encounter recurs within four voyages — the felt variety is far better than
+// the pure-random pick, which would jarringly repeat back-to-back ~1 in 16.
+function pickFallbackEncounter(recentProse) {
+  const recent = Array.isArray(recentProse) ? recentProse : [];
+  const fresh = FALLBACK_VOYAGE_ENCOUNTERS.filter(e => !recent.includes(e.prose));
+  const pool = fresh.length > 0 ? fresh : FALLBACK_VOYAGE_ENCOUNTERS;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
 
 async function genVoyageEncounter(gs, fromPort, toPort) {
   const prompt = `Generate a voyage encounter at sea, sailing from ${fromPort} toward ${toPort}.
@@ -6136,7 +6180,7 @@ Return JSON:
     { "label": "5-9 word verb phrase", "seed": "what tonally happens if chosen" }
   ]
 }`;
-  const fallback = FALLBACK_VOYAGE_ENCOUNTERS[Math.floor(Math.random() * FALLBACK_VOYAGE_ENCOUNTERS.length)];
+  const fallback = pickFallbackEncounter(gs.recentEncounters);
   const call = await callClaude(prompt);
   const result = call.parsed || fallback;
   const log = {
@@ -8497,6 +8541,9 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
       setPending(false);
       if (log) setGs(prev => ({ ...prev, aiLog: pushAiLog(prev.aiLog, log) }));
       setEncounter({ ...enc, type: 'voyage', destination: portKey });
+      // Remember the last few encounters (by prose) so the fallback picker
+      // doesn't repeat them — keeps the most frequent interaction feeling varied.
+      if (enc?.prose) setGs(prev => ({ ...prev, recentEncounters: [...(prev.recentEncounters || []), enc.prose].slice(-4) }));
     } else {
       const baseDays = voyageDays(gs, port);
       setPendingMsg('The voyage is uneventful');

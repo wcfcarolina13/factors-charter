@@ -38,6 +38,38 @@ real-time pressure, anything that breaks the quiet-ledger mood.
 
 ## Findings log (newest first)
 
+### Iteration 9 — 2026-06-12 — voyage-encounter texture
+
+**Investigated:** the most frequent interaction (25-65 encounters/charter).
+
+**Finding (shipped): the 12 encounters are well-written, but pure-random
+selection made them feel more repetitive than the pool size warranted** —
+~1-in-12 chance of a jarring back-to-back repeat, and only 12 entries to draw
+from over dozens of voyages.
+
+→ **Fix (verified live):**
+1. **Anti-repetition.** New `pickFallbackEncounter(gs.recentEncounters)` avoids
+   the last 4 encounters (tracked by prose, recorded in sailTo). With a 16-entry
+   pool and 4-deep memory, no encounter recurs within four voyages — the felt
+   variety is far better than pure random. Verified: consecutive encounters came
+   out distinct and the tracking list populated correctly.
+2. **Pool 12 → 16.** Added four new encounters in the established voice with
+   proper outcomeKeys + hint seeds: a **waterspout** (weather wonder), a
+   **derelict with cargo** (salvage/windfall), a **fellow English country master
+   hailing news** (social/price intel — plants a thread or gives a windfall
+   figure), and a **topman fallen from the yards** (crew injury — care vs. time
+   vs. a crew-grudge thread). Verified one (the topman) renders correctly in-game.
+
+**Note:** multi-leg preview automation is unreliable (encounter/digest screens
+stall the button loop, occasional 30s eval timeout) — verified via save-state
+inspection instead, which is the robust path for voyage-sequence checks.
+
+**Where the loop stands:** the game spine (onboarding → letters → trade →
+lodging → wealth → Indiaman → brigantine → finale) and the most frequent
+interaction (encounters) are now all polished. Remaining texture candidates:
+second-charter/succession freshness; economic decision depth; encounter
+*stakes* keyed to faction proximity (the deferred region/faction variation).
+
 ### Iteration 8 — 2026-06-12 — the charter-end finale
 
 **Played:** doctored a near-end charter on the knighthood track (Crown 35,

@@ -38,6 +38,33 @@ real-time pressure, anything that breaks the quiet-ledger mood.
 
 ## Findings log (newest first)
 
+### Iteration 14 — 2026-06-12 — capstone integration playthrough (CLEAN) → loop concluded
+
+Fresh new-game run through the early game, verifying the 11 changes integrate
+together (each was verified individually; this confirms they *flow*):
+
+1. Opening → Director letter **auto-opens** ✓
+2. Wilbraham's papers carry both quota intel + country-trade guidance ✓
+3. Voyage to Kota Pinang — 4 days (3 + 1 encounter), pluralized right ✓
+4. Buy pepper (42 cwt, £8/cwt) ✓
+5. Return — **3 days** (the voyage-time fix holds; not the old 1-day bug) ✓
+6. Lodge → toast "Lodged 42 cwt of Pepper — 42 of 400 secured for London" +
+   HUD jumps **0→42/400** instantly ✓
+7. First world letter arrives **day ~12**, warm: "Mrs. Eliza Wexley, your
+   sister — Of Father's Health and a Matter in the Will"; next at day 43 ✓
+
+Zero console errors. The early-game spine integrates cleanly — onboarding,
+voyage-time, lodging beat, early pacing, warm first contact, and encounter
+handling all work together in a real playthrough.
+
+**→ Loop concluded here.** 11 genuine improvements shipped + 4 verified-good
+confirmations over 14 iterations; the capstone confirms it all holds together.
+The game is well-polished across its whole arc. Remaining items
+(economic late-game tuning, faction-keyed encounter variants) are subjective /
+content decisions that are Bradley's to make, not autonomous work. Re-runnable
+anytime via `/loop`. Tests 165/165, build clean, all work on local `main`
+(unpushed), checkpoint tag `checkpoint-pre-playtest-2026-06-12` as the backup.
+
 ### Iteration 13 — 2026-06-12 — economic pressure (verified reasonable; flagged for Bradley)
 
 **Examined the numbers** (not a unilateral change — economy feel is Bradley's call):

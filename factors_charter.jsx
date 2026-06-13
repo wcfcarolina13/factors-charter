@@ -6248,16 +6248,52 @@ const FALLBACK_VOYAGE_ENCOUNTERS = [
       { label: 'Press on; the season will not wait', outcomeKey: 'hook_opens', hook: 'A topman crippled on the main yard, put off at no port; the foc’sle has not forgotten it.', seed: 'No delay. Plant a thread quietly.' },
     ],
   },
+  // ── FACTION-KEYED ENCOUNTERS ── only surface when yr. standing makes them
+  // plausible (precondition over gs.reputation). The world's vessels reflect
+  // the relationships you've built — a reactive strait.
+  {
+    precondition: (gs) => (gs.reputation?.pirates || 0) >= 10,
+    prose: 'A low sloop runs up out of the haze and shows, for a moment, a recognition you have learned to read — she is Brotherhood, and her master knows yr. flag. She holds station off the quarter, neither closing nor sheering away, and waits to see what you will do.',
+    choices: [
+      { label: 'Show the answering sign and trade news', outcomeKey: 'windfall', seed: 'A friend in the strait. Word, and perhaps a purse.' },
+      { label: 'Pass a courtesy across by the boat', outcomeKey: 'rep_shift', repFaction: 'pirates', repDelta: 3, seed: 'A kindness the Brotherhood remembers.' },
+      { label: 'Hold yr. course and give no sign', outcomeKey: 'rep_shift', repFaction: 'pirates', repDelta: -2, seed: 'The cold shoulder. They note it.' },
+    ],
+  },
+  {
+    precondition: (gs) => (gs.reputation?.dutch || 0) <= 0,
+    prose: 'A VOC patrol boat puts out from the Hollander’s water and closes with purpose, her corporal standing in the bows with a glass to his eye. Yr. standing with the Company of the Netherlands is not such that they will wave you through; they mean to look.',
+    choices: [
+      { label: 'Heave to and let them aboard to inspect', outcomeKey: 'time_lost', seed: 'Lose a day to their thoroughness. Nothing found if nothing is hidden.' },
+      { label: 'Show yr. papers from the rail, stand on', outcomeKey: 'rep_shift', repFaction: 'dutch', repDelta: 1, seed: 'A small civility. The Hollander grudges a nod.' },
+      { label: 'Crowd on sail and put them in yr. wake', outcomeKey: 'rep_shift', repFaction: 'dutch', repDelta: -3, seed: 'You clear them — but the Hollander remembers yr. stern.' },
+    ],
+  },
+  {
+    precondition: (gs) => (gs.reputation?.crown || 0) >= 10,
+    prose: 'A King’s frigate, two-decked and unhurried, lies athwart yr. course and makes the private signal for an English merchant to close and speak. Yr. standing with the Crown is good enough that this is a courtesy, not a summons.',
+    choices: [
+      { label: 'Close and render the news of the strait', outcomeKey: 'rep_shift', repFaction: 'crown', repDelta: 2, seed: 'A service to the Crown, freely given.' },
+      { label: 'Ask her captain for word of convoy home', outcomeKey: 'hook_opens', hook: 'A King’s captain who offered word of the next homeward convoy; worth seeking when you sail for deeper water.', seed: 'Plant a thread. Lose a little time.' },
+      { label: 'Dip yr. colours and stand on', outcomeKey: 'time_lost', seed: 'A courtesy. The day passes.' },
+    ],
+  },
 ];
 
 // Pick a fallback encounter avoiding the ones shown most recently (tracked by
 // prose in gs.recentEncounters). With a 16-entry pool and a 4-deep memory, no
 // encounter recurs within four voyages — the felt variety is far better than
 // the pure-random pick, which would jarringly repeat back-to-back ~1 in 16.
-function pickFallbackEncounter(recentProse) {
-  const recent = Array.isArray(recentProse) ? recentProse : [];
-  const fresh = FALLBACK_VOYAGE_ENCOUNTERS.filter(e => !recent.includes(e.prose));
-  const pool = fresh.length > 0 ? fresh : FALLBACK_VOYAGE_ENCOUNTERS;
+function pickFallbackEncounter(gs) {
+  const recent = Array.isArray(gs?.recentEncounters) ? gs.recentEncounters : [];
+  // Entries may carry a precondition(gs) gate — faction-keyed encounters that
+  // only surface when yr. standing makes them plausible (a Brotherhood sloop
+  // when the pirates know yr. flag, a Dutch patrol when the Hollanders are
+  // cool, a King's frigate when the Crown favours you). So the world's vessels
+  // come to reflect the relationships you've built.
+  const eligible = FALLBACK_VOYAGE_ENCOUNTERS.filter(e => !e.precondition || e.precondition(gs));
+  const fresh = eligible.filter(e => !recent.includes(e.prose));
+  const pool = fresh.length > 0 ? fresh : (eligible.length > 0 ? eligible : FALLBACK_VOYAGE_ENCOUNTERS);
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
@@ -6281,7 +6317,7 @@ Return JSON:
     { "label": "5-9 word verb phrase", "seed": "what tonally happens if chosen" }
   ]
 }`;
-  const fallback = pickFallbackEncounter(gs.recentEncounters);
+  const fallback = pickFallbackEncounter(gs);
   const call = await callClaude(prompt);
   const result = call.parsed || fallback;
   const log = {

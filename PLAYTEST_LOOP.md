@@ -98,6 +98,29 @@ total enterprise value as a prestige metric; then playtest until beautiful.
 
 ## Findings log (newest first)
 
+### Iteration (post-handoff) — 2026-06-12 — faction-keyed encounters
+
+> Scoping: the merchant-prince/Production work was handed to a separate session
+> (chip `task_4cae01ca`). To avoid two agents colliding on the same code, this
+> loop works a non-overlapping subsystem — voyage encounters, not ventures.
+
+**Shipped: the strait now reflects the relationships you've built.** Added an
+optional `precondition(gs)` gate to encounter entries; `pickFallbackEncounter`
+now takes `gs` and filters the pool by it (still anti-repetition + gs.recent
+Encounters aware). Three faction-keyed encounters that surface only when yr.
+standing makes them plausible:
+- **A Brotherhood sloop** (pirates ≥ 10) — shows a recognition; trade news
+  (windfall), pass a courtesy (pirates +3), or give the cold shoulder (−2).
+- **A Dutch VOC patrol** (dutch ≤ 0) — closes to inspect; submit (time), show
+  papers civilly (dutch +1), or outrun them (dutch −3).
+- **A King's frigate** (crown ≥ 10) — a courteous hail; render the news (crown
+  +2), ask after a homeward convoy (hook), or dip colours and stand on.
+
+Verified live both ways: at pirates 25/dutch −15/crown 20 the Brotherhood sloop
+appeared; at low standing no faction encounter surfaced across 5 encounters.
+Tests 177/177, build clean, zero console errors. Reactive world — a genuine
+"your choices change who you meet at sea" lever.
+
 ### Iteration 14 — 2026-06-12 — capstone integration playthrough (CLEAN) → loop concluded
 
 Fresh new-game run through the early game, verifying the 11 changes integrate

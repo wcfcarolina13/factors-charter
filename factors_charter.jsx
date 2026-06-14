@@ -16,7 +16,7 @@ import { priceWindowMult, pruneExpiredWindows, activeWindowsFor, priceDrift } fr
 import { pickPlate } from './src/util/plates.js';
 import { canOfferSabotage, resolveSabotage, sabotageCoda } from './src/util/sabotage.js';
 import { recordTrade, reckonRows, reckonTotal } from './src/util/trade-stats.js';
-import { reconcileHookMeta, hookAgeNote, staleHookCount } from './src/util/hooks-age.js';
+import { reconcileHookMeta, hookAgeNote } from './src/util/hooks-age.js';
 import { pendingWealthMilestones, seedWealthFlags } from './src/util/milestones.js';
 import { VENTURES, VENTURE_EVENTS, accrueVentureIncome, accrueVentureProduce, ventureUnlocked, ventureBuyMult, ventureQuarterlyIncome, venturesWorth, establishedVentureCount, pickVentureEvent } from './src/util/ventures.js';
 import { nextAmbition } from './src/util/ambition.js';
@@ -7224,14 +7224,14 @@ Return JSON:
 // Some open threads are real OPPORTUNITIES, not atmosphere — a wreck to salvage,
 // a market tip to act on. Pursuing one of these should be a hand-written
 // decision with differentiated, consequential outcomes, NOT the generic
-// fallback's three-flavour gamble. Keyed by the EXACT hook string the world
-// plants (drawn from VENTURE_EVENTS so the two can never drift). Each choice
-// carries its own fixedOutcome — applied directly, no AI, no buckets.
-const ventureHook = (id) => (VENTURE_EVENTS.find(e => e.id === id) || {}).hook || `__missing_hook_${id}__`;
-
+// fallback's three-flavour gamble. Keyed by the VENTURE_EVENTS id that plants
+// the hook; findPursueLead resolves a thread → its event → its lead at CALL
+// time (not module-init time), so the lead tracks the planted hook with zero
+// drift and no fragile computed-key evaluation order. Each choice carries its
+// own fixedOutcome — applied directly, no AI, no buckets.
 const PURSUE_LEADS = {
   // The Pratas wreck — salvage greed vs. clean money + Dutch goodwill vs. pass.
-  [ventureHook('carnatic_wreck')]: {
+  carnatic_wreck: {
     scene: 'You lay the Carnatic’s report on the desk beside the chart. A Dutch country ship is fast on the Pratas reef, her people gone off in the boats, her saltpetre cargo sitting in the wet and ungoverned. It is a long sail and the season is closing — but saltpetre is saltpetre, and the Company always wants powder. The matter wants a decision before the monsoon makes it for you.',
     choices: [
       { label: 'Send the Carnatic to lift what she can', seed: 'A cargo won — but the Hollanders will not love you for it.',
@@ -7252,7 +7252,7 @@ const PURSUE_LEADS = {
     ],
   },
   // The Kota Pinang pepper tip — work it / gift it for a favour / let it pass.
-  [ventureHook('agent_intel')]: {
+  agent_intel: {
     scene: 'Yr. man at Kota Pinang has sent word that the Sultan’s warehouses are over-full, and the price of pepper there will break before the next ships call. It is the kind of intelligence that is worth nothing in a drawer and a good deal out of it — but the buy must be made on yr. account, and made now.',
     choices: [
       { label: 'Have the agent buy deep on yr. account', seed: 'Buy low, sell into the turn.',
@@ -7274,9 +7274,13 @@ const PURSUE_LEADS = {
   },
 };
 
-// An authored opportunity for this thread, or null (generic pursue).
+// An authored opportunity for this thread, or null (generic pursue). Resolves
+// at call time: thread → the venture event whose hook matches → its lead. No
+// module-init-order dependency on VENTURE_EVENTS.
 function findPursueLead(thread) {
-  return (thread && PURSUE_LEADS[thread]) || null;
+  if (!thread) return null;
+  const ev = (VENTURE_EVENTS || []).find(e => e.hook === thread);
+  return (ev && PURSUE_LEADS[ev.id]) || null;
 }
 
 async function genPursueThread(gs, thread) {
@@ -11645,6 +11649,8 @@ function JournalView({ gs, arrivalProse, setTab, openLetterById, pursueThread, v
         );
       })()}
 
+      {pursueThread && <OpportunitiesPanel gs={gs} pursueThread={pursueThread} />}
+
       {arrivalProse && arrivalProse.port === gs.location && (
         viewportMode === 'desktop' ? (
           <div style={{ marginBottom: '1.5rem' }}>
@@ -11689,111 +11695,70 @@ function JournalView({ gs, arrivalProse, setTab, openLetterById, pursueThread, v
           ))}
         </div>
       )}
-      {(gs.hooks.length > 0 || (gs.acquaintances || []).length > 0) && pursueThread && (
+      {(gs.hooks || []).some(h => !findPursueLead(h)) && (
         <>
           <Fleuron char="❧" />
-          <PursueThreadPanel gs={gs} pursueThread={pursueThread} />
+          <MattersInHandPanel gs={gs} />
         </>
       )}
     </div>
   );
 }
 
-// Interactive threads panel — replaces the old static OPEN THREADS list.
-// Shows the most recent hooks and named acquaintances; tapping one
-// triggers an AI-generated encounter that brings the thread forward.
-// The Factor "pursues the matter" — 1-2 days advance.
-function PursueThreadPanel({ gs, pursueThread }) {
-  const [open, setOpen] = useState(false);
-  const hooks = (gs.hooks || []).slice(-6);
-  const acqs = (gs.acquaintances || []).slice(-6);
+// OPPORTUNITIES — authored leads worth acting on (a wreck to salvage, a market
+// tip). Prominent, near the top of the hub so they're noticed. Pursuing one
+// opens a hand-written decision with differentiated outcomes — NOT a gamble.
+// (Loose ends that are merely in motion live in MattersInHandPanel below.)
+function OpportunitiesPanel({ gs, pursueThread }) {
+  if (gs.charterClosed || !pursueThread) return null;
+  const opps = (gs.hooks || []).filter(h => findPursueLead(h));
+  if (opps.length === 0) return null;
+  return (
+    <div className="ink-fade-in" style={{ marginBottom: '1.5rem' }}>
+      <div className="display" style={{ fontSize: '0.82em', color: '#5c1a08', letterSpacing: '0.1em', marginBottom: '0.15rem' }}>
+        {opps.length === 1 ? '⁕ AN OPPORTUNITY' : `⁕ ${opps.length} OPPORTUNITIES`}
+      </div>
+      <p className="italic" style={{ fontSize: '0.84em', color: '#6b4423', margin: '0 0 0.6rem 0' }}>
+        A lead worth acting on. Taking it up costs a day or two, and what comes of it turns on what you decide.
+      </p>
+      {opps.map((h, i) => (
+        <div key={i} className="parchment" style={{ padding: '0.8rem 1rem', marginBottom: '0.5rem', background: 'rgba(255,250,235,0.6)', borderLeft: '3px solid #5c1a08' }}>
+          <div className="italic" style={{ color: '#4a3220', marginBottom: '0.6rem' }}>{h}</div>
+          <button className="wax-button" onClick={() => pursueThread(h)}>Take it up</button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// MATTERS IN HAND — loose ends, noted and in motion but not directly actionable;
+// most resolve through correspondence in their own time. Passive: shown with an
+// age note, no pursue button (acting on a vague hook was the old slot-machine).
+// Real, actionable leads live in OpportunitiesPanel above.
+function MattersInHandPanel({ gs }) {
+  const looseEnds = (gs.hooks || []).filter(h => !findPursueLead(h)).slice(-6);
+  if (looseEnds.length === 0) return null;
   const meta = gs.hookMeta || {};
   const today = gs.day || 0;
-  const staleCount = staleHookCount(gs.hooks || [], meta, today);
-
-  const renderAcquaintance = (a) => {
-    const where = a.location ? `, ${a.location}` : '';
-    const note = a.notes ? ` — ${a.notes}` : '';
-    return `${a.name} (${a.role}${where})${note}`;
-  };
-
   return (
     <>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '0.5rem' }}>
-        <div className="display" style={{ fontSize: '0.85em', color: '#6b4423' }}>OPEN THREADS</div>
-        {hooks.length + acqs.length > 0 && (
-          <button
-            className="ghost-button-sm"
-            onClick={() => setOpen(!open)}
-          >
-            {open ? '— hide —' : 'Pursue a matter'}
-          </button>
-        )}
-      </div>
-      {staleCount > 0 && (
-        <div className="italic" style={{ fontSize: '0.8em', color: '#8b1a1a', marginBottom: '0.4rem' }}>
-          {staleCount === 1 ? 'A matter has' : `${staleCount} matters have`} lain long unattended. Pursue {staleCount === 1 ? 'it' : 'them'}, or let {staleCount === 1 ? 'it' : 'them'} go.
-        </div>
-      )}
-
-      {hooks.map((h, i) => {
+      <div className="display" style={{ fontSize: '0.85em', color: '#6b4423', marginBottom: '0.3rem' }}>MATTERS IN HAND</div>
+      <p className="italic" style={{ fontSize: '0.82em', color: '#6b4423', margin: '0 0 0.5rem 0' }}>
+        Loose ends, noted and in motion. The world will return to them in its own time.
+      </p>
+      {looseEnds.map((h, i) => {
         const note = hookAgeNote(h, meta, today);
         return (
-          <div key={`h${i}`} style={{ marginBottom: '0.3rem' }}>
+          <div key={i} style={{ marginBottom: '0.3rem' }}>
             <div className="italic" style={{ color: '#4a3220' }}>&mdash; {h}</div>
             {note && (
-              <div className="italic" style={{ fontSize: '0.76em', color: note.stale ? '#8b1a1a' : '#8a6a3f', marginLeft: '0.9rem' }}>
-                {note.stale ? '↯ ' : ''}{note.text}
+              <div className="italic" style={{ fontSize: '0.76em', color: '#8a6a3f', marginLeft: '0.9rem' }}>
+                {note.text}
               </div>
             )}
           </div>
         );
       })}
-
-      {open && (
-        <div className="ink-fade-in" style={{ marginTop: '0.7rem', padding: '0.7rem 0.9rem', background: 'rgba(255,253,245,0.55)', borderLeft: '3px solid #5c1a08' }}>
-          <div className="display" style={{ fontSize: '0.82em', color: '#5c1a08', letterSpacing: '0.06em', marginBottom: '0.4rem' }}>
-            ⁂ PURSUE A MATTER
-          </div>
-          <p style={{ fontStyle: 'italic', color: '#4a3220', fontSize: '0.88em', margin: '0 0 0.7rem 0' }}>
-            Apply yr. attention to one of these. Pursuing a matter takes a day or two and may surface what was unfinished.
-          </p>
-          {hooks.length > 0 && (
-            <>
-              <div className="display" style={{ fontSize: '0.78em', color: '#6b4423', letterSpacing: '0.06em', marginBottom: '0.3rem' }}>HOOKS</div>
-              <div style={{ marginBottom: '0.6rem' }}>
-                {hooks.map((h, i) => (
-                  <button
-                    key={`hb${i}`}
-                    className="ghost-button"
-                    style={{ width: '100%', textAlign: 'left', marginBottom: '0.3rem', whiteSpace: 'normal', fontSize: '0.88em' }}
-                    onClick={() => { setOpen(false); pursueThread(h); }}
-                  >
-                    &mdash; {h}
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-          {acqs.length > 0 && (
-            <>
-              <div className="display" style={{ fontSize: '0.78em', color: '#6b4423', letterSpacing: '0.06em', marginBottom: '0.3rem' }}>SEND WORD TO</div>
-              <div>
-                {acqs.map((a) => (
-                  <button
-                    key={a.id}
-                    className="ghost-button"
-                    style={{ width: '100%', textAlign: 'left', marginBottom: '0.3rem', whiteSpace: 'normal', fontSize: '0.88em' }}
-                    onClick={() => { setOpen(false); pursueThread(renderAcquaintance(a)); }}
-                  >
-                    &mdash; {a.name} <span style={{ color: '#6b4423', fontStyle: 'italic' }}>({a.role}{a.location ? `, ${a.location}` : ''})</span>
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
-      )}
     </>
   );
 }

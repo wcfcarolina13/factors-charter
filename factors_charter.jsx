@@ -18,7 +18,7 @@ import { canOfferSabotage, resolveSabotage, sabotageCoda } from './src/util/sabo
 import { recordTrade, reckonRows, reckonTotal } from './src/util/trade-stats.js';
 import { reconcileHookMeta, hookAgeNote, staleHookCount } from './src/util/hooks-age.js';
 import { pendingWealthMilestones, seedWealthFlags } from './src/util/milestones.js';
-import { VENTURES, accrueVentureIncome, accrueVentureProduce, ventureUnlocked, ventureBuyMult, ventureQuarterlyIncome, venturesWorth, establishedVentureCount, pickVentureEvent } from './src/util/ventures.js';
+import { VENTURES, VENTURE_EVENTS, accrueVentureIncome, accrueVentureProduce, ventureUnlocked, ventureBuyMult, ventureQuarterlyIncome, venturesWorth, establishedVentureCount, pickVentureEvent } from './src/util/ventures.js';
 import { nextAmbition } from './src/util/ambition.js';
 
 // ─────────── FACTOR KEY (cross-device identity) ───────────
@@ -7220,6 +7220,65 @@ Return JSON:
 // player picks the thread (a hook line, a named acquaintance, or a flag)
 // from the Pursue panel; the AI weaves it into an encounter the player
 // then resolves through the standard outcome flow. 1-2 days advance.
+// ─────────── AUTHORED PURSUE LEADS ───────────
+// Some open threads are real OPPORTUNITIES, not atmosphere — a wreck to salvage,
+// a market tip to act on. Pursuing one of these should be a hand-written
+// decision with differentiated, consequential outcomes, NOT the generic
+// fallback's three-flavour gamble. Keyed by the EXACT hook string the world
+// plants (drawn from VENTURE_EVENTS so the two can never drift). Each choice
+// carries its own fixedOutcome — applied directly, no AI, no buckets.
+const ventureHook = (id) => (VENTURE_EVENTS.find(e => e.id === id) || {}).hook || `__missing_hook_${id}__`;
+
+const PURSUE_LEADS = {
+  // The Pratas wreck — salvage greed vs. clean money + Dutch goodwill vs. pass.
+  [ventureHook('carnatic_wreck')]: {
+    scene: 'You lay the Carnatic’s report on the desk beside the chart. A Dutch country ship is fast on the Pratas reef, her people gone off in the boats, her saltpetre cargo sitting in the wet and ungoverned. It is a long sail and the season is closing — but saltpetre is saltpetre, and the Company always wants powder. The matter wants a decision before the monsoon makes it for you.',
+    choices: [
+      { label: 'Send the Carnatic to lift what she can', seed: 'A cargo won — but the Hollanders will not love you for it.',
+        fixedOutcome: {
+          prose: 'The Carnatic works up to the reef on a falling tide and her people go over the side with tackles and a will. They bring off near twenty hundredweight of saltpetre before the swell makes it folly to stay, and it sells at Bayan-Kor for a fair price. Salvage, by the custom of the sea — though the Hollanders, when they hear, will name it by a harder word.',
+          changes: { money: 130, reputation: { dutch: -5 }, days: 2, journal: 'Salvaged the Pratas wreck’s saltpetre — £130, and the Dutch the angrier for it.', closeHook: true },
+        } },
+      { label: 'Sell the bearing to the Hollanders’ agent', seed: 'Cleaner money, and a Dutchman in yr. debt.',
+        fixedOutcome: {
+          prose: 'You send the wreck’s bearing, quietly and exactly, to the Dutch agent at Eustace — it is their ship, after all, and their loss to recover. He pays for the courtesy without being asked twice, and remembers it. A wreck unlooted is a friend made, and friends among the Hollanders are not cheaply come by.',
+          changes: { money: 85, reputation: { dutch: 4 }, days: 1, journal: 'Sold the Pratas wreck’s bearing to the Dutch agent — £85 and their goodwill.', closeHook: true },
+        } },
+      { label: 'Leave it; a wreck is the Devil’s own bargain', seed: 'Nothing ventured.',
+        fixedOutcome: {
+          prose: 'You let it lie. The Pratas has taken better ships than the Carnatic and would as soon take her too; the saltpetre may rot where it floats. The master nods, privately relieved, and the matter is closed.',
+          changes: { days: 0, journal: 'Left the Pratas wreck to the sea. Some bargains are not worth the candle.', closeHook: true },
+        } },
+    ],
+  },
+  // The Kota Pinang pepper tip — work it / gift it for a favour / let it pass.
+  [ventureHook('agent_intel')]: {
+    scene: 'Yr. man at Kota Pinang has sent word that the Sultan’s warehouses are over-full, and the price of pepper there will break before the next ships call. It is the kind of intelligence that is worth nothing in a drawer and a good deal out of it — but the buy must be made on yr. account, and made now.',
+    choices: [
+      { label: 'Have the agent buy deep on yr. account', seed: 'Buy low, sell into the turn.',
+        fixedOutcome: {
+          prose: 'You write the agent to buy to the depth of yr. credit while the price is on the floor, and to hold against the turn. The turn comes, as he said it would; he sells a portion into the rising market and lodges the rest. The profit is real, and quietly come by.',
+          changes: { money: 95, days: 1, journal: 'Acted on the agent’s pepper tip — bought low, sold the turn. £95 clear.', closeHook: true },
+        } },
+      { label: 'Pass the word to a friendly captain', seed: 'A favour banked, not coin.',
+        fixedOutcome: {
+          prose: 'You send the intelligence on to a friendly English country master rather than work it yrself — a favour costs nothing to give and is rarely forgotten. He makes his buy, and his thanks are warm; the kind of credit that appears in no ledger but is drawn upon all the same.',
+          changes: { reputation: { company: 2 }, days: 1, journal: 'Passed the agent’s pepper tip to a friend. A favour banked.', closeHook: true },
+        } },
+      { label: 'Keep it close; let the chance pass', seed: 'Caution. The window shuts.',
+        fixedOutcome: {
+          prose: 'You decide the risk of a falling market is not worth the candle this season, and let the opening pass. The price falls as the agent foretold, and rises again, and you are neither richer nor poorer for the knowing. He will not waste many such letters on a man who sits on them.',
+          changes: { days: 0, journal: 'Let the agent’s pepper tip pass. The window shut.', closeHook: true },
+        } },
+    ],
+  },
+};
+
+// An authored opportunity for this thread, or null (generic pursue).
+function findPursueLead(thread) {
+  return (thread && PURSUE_LEADS[thread]) || null;
+}
+
 async function genPursueThread(gs, thread) {
   const where = gs.location || 'Bayan-Kor';
   const scene = where === 'Bayan-Kor'
@@ -8955,6 +9014,13 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
   };
 
   const handleEncounterChoice = async (choice) => {
+    // Authored pursue lead — the choice carries its own hand-written outcome.
+    // Apply it directly: no AI, no generic buckets, no slot-machine. This is
+    // the "leads pay off" path.
+    if (choice.fixedOutcome) {
+      setOutcome({ prose: choice.fixedOutcome.prose, changes: { ...choice.fixedOutcome.changes }, encounter });
+      return;
+    }
     setPending(true);
     setPendingMsg('The hour passes');
     // Build the closure-mode opts. Pursue outcomes always close the
@@ -8981,6 +9047,13 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
   // outcome flow as a voyage encounter. Treated as a "pursue" encounter
   // so the outcome's days delta (1-2) ticks the world forward.
   const handlePursueThread = async (thread) => {
+    // Authored opportunity — present the hand-written scene directly (no AI,
+    // no generic gamble). Its choices carry their own fixedOutcome.
+    const lead = findPursueLead(thread);
+    if (lead) {
+      setEncounter({ type: 'pursue', thread, prose: lead.scene, choices: lead.choices, authored: true });
+      return;
+    }
     setPending(true);
     setPendingMsg(`Pursuing ${thread.slice(0, 40)}${thread.length > 40 ? '…' : ''}`);
     const { result: enc, log } = await genPursueThread(gs, thread);

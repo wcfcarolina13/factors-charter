@@ -4,6 +4,24 @@ The Factor's Charter — a chronological log of what's shipped. Newest first.
 
 ---
 
+## 2026-06-13 — "Pursue a matter" reworked: leads pay off, slot machine gone
+
+Bradley's critique: "Pursue a matter" was easily missed, unclear in purpose, and felt like a clunky slot machine. He was right — on the deterministic PWA, every thread funnelled through the same three generic verbs and a small random £ swing, regardless of what the lead actually was. It was built for the live-AI artifact path and collapses to a hollow gamble without AI. Two phases.
+
+**Phase 1 — authored opportunities (leads pay off).** Meaningful leads now open hand-written decisions with differentiated, consequential outcomes. `PURSUE_LEADS` registry, two authored opportunities to start, both from the living-venture news beats:
+- **The Pratas wreck:** salvage the saltpetre (£130, Dutch −5) / sell the bearing to the Hollanders (£85, Dutch +4) / leave it. A real greed-vs-goodwill choice.
+- **The Kota Pinang pepper tip:** work it (£95) / gift it for a favour (Company +2) / let the window shut.
+Each choice legibly different, telegraphed in its seed. `handlePursueThread` routes a matched lead to its authored scene (no AI); `handleEncounterChoice` applies a choice's `fixedOutcome` directly (no generic buckets); `concludeOutcome`'s pursue branch applies changes + closes the hook.
+
+**Phase 2 — clarity, and the slot machine dies.** The journal hub now splits threads:
+- **OPPORTUNITIES** (top, prominent wax card + "Take it up"): authored leads, surfaced near the aim line so they're noticed — not buried at the page bottom.
+- **MATTERS IN HAND** (bottom, passive): loose ends, noted and in motion, shown with an age note but **no pursue button** — acting on a vague hook was the gamble.
+Dropped the generic "Pursue a matter" toggle and the acquaintance "send word" gamble (acquaintances stay in the Ledger). `findPursueLead` resolves a thread → its venture event → its lead at call time (not via module-init computed keys — the prior form crashed `JournalView` under Vite HMR; production was unaffected but the call-time form removes the fragility).
+
+Verified live: pursuing the agent's tip shows the authored scene; "buy deep" applied +£95 and closed the hook; an opportunity renders at the top with "Take it up" while a loose end sits passively below with no button; closing an opportunity no longer crashes the journal and stays healthy through forced re-renders. Tests 203/203; build clean; zero live errors. Follow-up noted: authored acquaintance favours, and more leads as the world plants more meaningful hooks.
+
+---
+
 ## 2026-06-13 — Pursue outcomes name the matter (prose fix)
 
 Pursuing a specific named thread fell to a contextless fallback bucket line ("It plays out as you might expect, neither as well nor as ill as feared. A small purse changes hands at the close.") — it never said *which* matter resolved, so a deliberate investigation read as a flat transaction. The encounter setup echoed the thread; the outcome forgot it.

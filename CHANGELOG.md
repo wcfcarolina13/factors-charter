@@ -4,6 +4,17 @@ The Factor's Charter — a chronological log of what's shipped. Newest first.
 
 ---
 
+## 2026-06-13 — Cut MATTERS IN HAND (and the dead thread-aging system)
+
+The journal's "MATTERS IN HAND" list promised "the world will return to them in its own time" — true only on the live-AI artifact path (the AI wove open threads into encounters via `stateContext`). On the deterministic PWA, tracing every reader of `gs.hooks`, the only things that touch a generic loose end are display, aging, and closure — nothing ever *returns* to one. So it was an inert list with a promise it couldn't keep. Cut it.
+
+- Removed `MattersInHandPanel` and its render. Real leads still surface in ⁕ OPPORTUNITIES; questline threads (the Wexley portion, the Vizier's boon) resolve via their own scripted letters regardless of any list.
+- The panel was the **sole** consumer of the thread-aging sidecar (`gs.hookMeta` / `src/util/hooks-age.js`, shipped 2026-06-12), so that whole feature is now dead weight: removed the import, the `ensureShape` init + reconcile, the `tickDays` reconcile, and deleted the module (+ test). `gs.hooks` is still tracked internally; old saves keep a harmless unused `hookMeta` field.
+
+Verified live: the journal renders cleanly with the section gone, OPPORTUNITIES still shows with "Take it up", no crash, zero console errors. Tests 206 → 195 (−11 hooks-age cases); build clean.
+
+---
+
 ## 2026-06-13 — MY PRESENT AIM → toggleable strategic COUNSEL
 
 The nearest-purchase "aim" line wasn't pulling its weight. Repurposed that hub slot into a **state-aware advisor** that names the single highest-leverage next move toward *winning* (400 cwt pepper + 200 cwt cinnamon lodged → lifted by the Indiaman), and made it **toggleable** for players who'd rather not be coached.

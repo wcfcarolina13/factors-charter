@@ -19,7 +19,7 @@ import { recordTrade, reckonRows, reckonTotal } from './src/util/trade-stats.js'
 import { reconcileHookMeta, hookAgeNote } from './src/util/hooks-age.js';
 import { pendingWealthMilestones, seedWealthFlags } from './src/util/milestones.js';
 import { VENTURES, VENTURE_EVENTS, accrueVentureIncome, accrueVentureProduce, ventureUnlocked, ventureBuyMult, ventureQuarterlyIncome, venturesWorth, establishedVentureCount, pickVentureEvent } from './src/util/ventures.js';
-import { nextAmbition } from './src/util/ambition.js';
+import { winCounsel } from './src/util/counsel.js';
 
 // ─────────── FACTOR KEY (cross-device identity) ───────────
 //
@@ -8590,8 +8590,21 @@ function OpeningSequence({ name, onComplete }) {
 
 // ─────────── GAME HUB ───────────
 
+// Counsel toggle — a device-local UI preference (NOT in gs), like the view
+// override. Default ON; the strategic-counsel line on the Journal hub can be
+// switched off from the ☰ Menu by players who'd rather not be advised.
+const COUNSEL_PREF_KEY = 'factor_counsel';
+function readCounselPref() {
+  try { return localStorage.getItem(COUNSEL_PREF_KEY) !== 'off'; } catch { return true; }
+}
+function writeCounselPref(on) {
+  try { localStorage.setItem(COUNSEL_PREF_KEY, on ? 'on' : 'off'); } catch { /* ignore */ }
+}
+
 function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRenewal, viewportMode, sync }) {
   const [tab, setTab] = useState('journal');
+  const [showCounsel, setShowCounsel] = useState(readCounselPref);
+  const toggleCounsel = () => setShowCounsel(prev => { const next = !prev; writeCounselPref(next); return next; });
   const [encounter, setEncounter] = useState(null);
   const [pending, _setPending] = useState(false);
   const pendingStartRef = useRef(0);
@@ -9707,6 +9720,8 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
           viewportMode={viewportMode}
           sync={sync}
           onOpenGallery={() => setGalleryOpen(true)}
+          showCounsel={showCounsel}
+          onToggleCounsel={toggleCounsel}
         />
         <Tabs tab={tab} setTab={setTab} unread={gs.letters.filter(l => !l.read).length} atHome={atHome} viewportMode={viewportMode} />
         <div className="parchment" style={{ padding: '1.25rem', minHeight: '24rem', background: 'rgba(255,253,245,0.4)' }}>
@@ -9724,7 +9739,7 @@ function GameHub({ gs, setGs, lastSavedAt, onReturnToTitle, onSuccession, onRene
               tab;
             return (
               <>
-                {effectiveTab === 'journal' && <JournalView gs={gs} arrivalProse={arrivalProse} setTab={setTab} openLetterById={openLetterById} pursueThread={handlePursueThread} viewportMode={viewportMode} />}
+                {effectiveTab === 'journal' && <JournalView gs={gs} arrivalProse={arrivalProse} setTab={setTab} openLetterById={openLetterById} pursueThread={handlePursueThread} viewportMode={viewportMode} showCounsel={showCounsel} />}
                 {effectiveTab === 'overview' && viewportMode === 'desktop' && <DesktopOverview gs={gs} sailTo={sailTo} />}
                 {effectiveTab === 'ledger' && viewportMode !== 'desktop' && <LedgerView gs={gs} />}
                 {effectiveTab === 'map' && viewportMode !== 'desktop' && <MapView gs={gs} sailTo={sailTo} />}
@@ -11145,7 +11160,7 @@ function SyncBadge({ gs, sync }) {
   );
 }
 
-function Header({ gs, onReturnToTitle, onSuccession, onRenewal, viewportMode, sync, onOpenGallery }) {
+function Header({ gs, onReturnToTitle, onSuccession, onRenewal, viewportMode, sync, onOpenGallery, showCounsel, onToggleCounsel }) {
   const [confirmingSuccession, setConfirmingSuccession] = useState(false);
   const [successorName, setSuccessorName] = useState('');
   const [confirmingRenewal, setConfirmingRenewal] = useState(false);
@@ -11421,6 +11436,15 @@ function Header({ gs, onReturnToTitle, onSuccession, onRenewal, viewportMode, sy
           >
             {viewportMode === 'desktop' ? '☐ Compact view' : '⊞ Wide view'}
           </button>
+          {onToggleCounsel && (
+            <button
+              className="ghost-button"
+              style={{ width: '100%', textAlign: 'left', marginBottom: '0.3rem' }}
+              onClick={() => { onToggleCounsel(); setMenuOpen(false); }}
+            >
+              {showCounsel ? '⚓ Hide strategic counsel' : '⚓ Show strategic counsel'}
+            </button>
+          )}
           <button
             className="ghost-button"
             style={{ width: '100%', textAlign: 'left', marginBottom: '0.3rem' }}
@@ -11533,56 +11557,67 @@ function Tabs({ tab, setTab, unread, atHome, viewportMode }) {
 
 // ─────────── JOURNAL VIEW ───────────
 
-// The Factor's unowned aspirations, for the Journal-hub goal-gradient line:
-// the brigantine path, ventures not yet taken, buildings not yet raised. Each
-// carries a first-person label and a cost; nextAmbition picks the nearest rung.
-function buildAspirations(gs) {
-  const out = [];
-  const isPinnace = (gs.ship?.type || 'pinnace') !== 'brigantine';
-  const commissioning = gs.shipCommission && gs.shipCommission.daysLeft > 0;
-  if (isPinnace && !commissioning) {
-    const yardBuilt = !!gs.outpost?.buildings?.shipwright?.built;
-    const yardQueued = (gs.outpost?.queue || []).some(q => q.key === 'shipwright');
-    if (yardBuilt) {
-      const ownTeak = gs.flags?.teakConcession === 'self';
-      out.push({ key: 'brigantine', label: 'commission the brigantine', cost: ownTeak ? 600 : 900 });
-    } else if (!yardQueued) {
-      out.push({ key: 'shipwright', label: 'raise the Shipwright’s Yard, that a brigantine may be laid down', cost: BUILDINGS.shipwright.cost });
-    }
-  }
-  for (const [id, def] of Object.entries(VENTURES)) {
-    if (def.viaQuest || gs.ventures?.[id]?.established || !ventureUnlocked(id, gs.ventures)) continue;
-    out.push({ key: 'venture:' + id, label: 'take up ' + def.name.replace(/ —.*$/, ''), cost: def.cost });
-  }
-  const addedYard = out.some(a => a.key === 'shipwright');
-  for (const [k, b] of Object.entries(BUILDINGS)) {
-    if (k === 'shipwright' && addedYard) continue;   // already offered via the brigantine path
-    if (gs.outpost?.buildings?.[k]?.built) continue;
-    if ((gs.outpost?.queue || []).some(q => q.key === k)) continue;
-    if (b.requires?.rep && !Object.entries(b.requires.rep).every(([f, n]) => (gs.reputation?.[f] || 0) >= n)) continue;
-    out.push({ key: 'building:' + k, label: 'raise the ' + b.name, cost: b.cost });
-  }
-  return out;
+// Build the winCounsel projection from gs: quota progress (secured = shipped +
+// lodged), the Indiaman countdown, money, and which engine pieces are in hand.
+function buildCounselState(gs) {
+  const pepperSecured   = Math.floor((gs.quotas?.pepper?.have   || 0) + (gs.outpost?.warehouse?.pepper   || 0));
+  const cinnamonSecured = Math.floor((gs.quotas?.cinnamon?.have || 0) + (gs.outpost?.warehouse?.cinnamon || 0));
+  const visits = gs.indiaman?.visits || 0;
+  const indiamanInDays = (visits < INDIAMAN_TOTAL && typeof gs.indiaman?.nextDay === 'number')
+    ? Math.max(0, gs.indiaman.nextDay - (gs.day || 0))
+    : null;
+  const ownTeak = gs.flags?.teakConcession === 'self';
+  return {
+    daysRemaining: gs.daysRemaining || 0,
+    charterLength: 1095,
+    pepperSecured, pepperNeeded: gs.quotas?.pepper?.needed || 400,
+    cinnamonSecured, cinnamonNeeded: gs.quotas?.cinnamon?.needed || 200,
+    indiamanInDays,
+    money: gs.money || 0,
+    hasBrigantine: gs.ship?.type === 'brigantine',
+    hasShipyard: !!gs.outpost?.buildings?.shipwright?.built,
+    hasPepperGarden: !!gs.ventures?.pepper_garden?.established,
+    hasSpiceEstate: !!gs.ventures?.spice_estate?.established,
+    hasPlantation: !!gs.outpost?.buildings?.plantation?.built,
+    plantationEligible: (gs.reputation?.rajah || 0) >= 10,
+    pepperGardenCost: VENTURES.pepper_garden?.cost || 700,
+    spiceEstateCost: VENTURES.spice_estate?.cost || 1300,
+    brigCost: ownTeak ? 600 : 900,
+  };
 }
 
-// Render a nextAmbition() result into the Factor's first-person journal voice.
-function ambitionLine(a) {
-  if (!a) return null;
-  switch (a.kind) {
-    case 'reach':  return `I have it in mind to ${a.label}. £${a.gap} is yet wanting.`;
-    case 'afford': return `I have the means now to ${a.label} — £${a.cost} lies in the strongbox.`;
-    case 'quota': {
-      const parts = [];
-      if (a.pepGap > 0) parts.push(`${a.pepGap} cwt pepper`);
-      if (a.cinGap > 0) parts.push(`${a.cinGap} cwt cinnamon`);
-      return `The charter wants ${parts.join(' and ')} yet, to be lodged for London.`;
-    }
-    case 'quota-met': return 'The charter’s measure is met; what I build now is my own.';
-    default: return null;
+// Render a winCounsel() result into the Factor's own first-person strategic voice.
+function counselLine(c) {
+  if (!c) return null;
+  switch (c.kind) {
+    case 'won':
+      return 'The charter’s measure is met. Lodge the last of it and let the Indiaman bring you home — what I build now is my own.';
+    case 'behind':
+      return `Time runs short and the reckoning lags. I must crowd on what sail I have for ${c.focus}, and lodge every hundredweight before the last Indiaman calls.`;
+    case 'brigantine':
+      return c.hasShipyard
+        ? 'The pinnace’s sixty hundredweight is the wall I keep striking. Commission the brigantine — thrice the hold, and every run worth three.'
+        : 'The pinnace’s sixty hundredweight is the wall I keep striking. Raise the Shipwright’s Yard, then a brigantine — thrice the hold.';
+    case 'pepper-garden':
+      return 'The quota is won by spice that lodges itself. A pepper garden of my own would fill the godown while I sail — better spent than on another bought cargo.';
+    case 'spice-estate':
+      return 'Cinnamon is my shortfall, and it comes cheap from one port only. The Spice Estate would lodge it season on season — the surest answer to it.';
+    case 'plantation':
+      return 'The Rajah’s favour will let me clear a plantation — five hundredweight of pepper a month, lodged for nothing. Worth the raising.';
+    case 'capital':
+      return 'My purse is too thin to build. The plain course: carry pepper from Kota Pinang to Eustace or Marlborough for coin, and lay it by toward a brigantine and a garden of my own.';
+    case 'cinnamon-runs':
+      return 'The pepper comes on; the cinnamon lags. Kota Pinang is its only cheap source, and a thin one — I must call there often and take all the Sultan’s sheds will give.';
+    case 'steady':
+      return typeof c.indiamanInDays === 'number'
+        ? `The works are in hand and the godown filling. Keep lodging pepper and cinnamon against the Indiaman — she calls in ${c.indiamanInDays} day${c.indiamanInDays === 1 ? '' : 's'}.`
+        : 'The works are in hand and the godown filling. Keep lodging pepper and cinnamon for London.';
+    default:
+      return null;
   }
 }
 
-function JournalView({ gs, arrivalProse, setTab, openLetterById, pursueThread, viewportMode }) {
+function JournalView({ gs, arrivalProse, setTab, openLetterById, pursueThread, viewportMode, showCounsel }) {
   const entries = [...gs.journal].reverse().slice(0, 20);
   const unread = gs.letters.filter(l => !l.read);
   const latestLetter = gs.letters.length > 0 ? gs.letters[gs.letters.length - 1] : null;
@@ -11633,17 +11668,12 @@ function JournalView({ gs, arrivalProse, setTab, openLetterById, pursueThread, v
         </div>
       )}
 
-      {(() => {
-        if (gs.charterClosed) return null;
-        const secured = {
-          pepper:   { needed: gs.quotas?.pepper?.needed   || 400, secured: Math.floor((gs.quotas?.pepper?.have   || 0) + (gs.outpost?.warehouse?.pepper   || 0)) },
-          cinnamon: { needed: gs.quotas?.cinnamon?.needed || 200, secured: Math.floor((gs.quotas?.cinnamon?.have || 0) + (gs.outpost?.warehouse?.cinnamon || 0)) },
-        };
-        const line = ambitionLine(nextAmbition({ money: gs.money, aspirations: buildAspirations(gs), quota: secured }));
+      {showCounsel && !gs.charterClosed && (() => {
+        const line = counselLine(winCounsel(buildCounselState(gs)));
         if (!line) return null;
         return (
           <div className="ink-fade-in" style={{ marginBottom: '1.5rem', padding: '0.6rem 0.9rem', borderLeft: '3px solid rgba(92,26,8,0.55)', background: 'rgba(255,255,255,0.18)' }}>
-            <div className="display" style={{ fontSize: '0.78em', color: '#6b4423', letterSpacing: '0.12em', marginBottom: '0.15rem' }}>MY PRESENT AIM</div>
+            <div className="display" style={{ fontSize: '0.78em', color: '#6b4423', letterSpacing: '0.12em', marginBottom: '0.15rem' }}>⚓ COUNSEL</div>
             <div className="italic" style={{ color: '#4a3220', fontSize: '0.95em' }}>{line}</div>
           </div>
         );

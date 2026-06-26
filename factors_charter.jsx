@@ -16,7 +16,6 @@ import { priceWindowMult, pruneExpiredWindows, activeWindowsFor, priceDrift } fr
 import { pickPlate } from './src/util/plates.js';
 import { canOfferSabotage, resolveSabotage, sabotageCoda } from './src/util/sabotage.js';
 import { recordTrade, reckonRows, reckonTotal } from './src/util/trade-stats.js';
-import { reconcileHookMeta, hookAgeNote } from './src/util/hooks-age.js';
 import { pendingWealthMilestones, seedWealthFlags } from './src/util/milestones.js';
 import { VENTURES, VENTURE_EVENTS, accrueVentureIncome, accrueVentureProduce, ventureUnlocked, ventureBuyMult, ventureQuarterlyIncome, venturesWorth, establishedVentureCount, pickVentureEvent } from './src/util/ventures.js';
 import { winCounsel } from './src/util/counsel.js';
@@ -1181,11 +1180,6 @@ const ensureShape = (gs) => {
   if (typeof next.ventureEventDay !== 'number') next.ventureEventDay = 0;
   if (next.lastVentureEventId === undefined) next.lastVentureEventId = null;
   if (!Array.isArray(next.ventureEventsFired)) next.ventureEventsFired = [];
-  // Sidecar timestamps for thread aging (keyed by hook text). Stamp any
-  // already-open hooks at the current day on first migration — we begin
-  // tracking now rather than inventing a past for old saves.
-  if (!next.hookMeta || typeof next.hookMeta !== 'object') next.hookMeta = {};
-  next.hookMeta = reconcileHookMeta(next.hooks, next.hookMeta, next.day || 1);
   if (!Array.isArray(next.journal)) next.journal = [];
   if (!Array.isArray(next.letters)) next.letters = [];
   if (!Array.isArray(next.crew)) next.crew = [];
@@ -5809,10 +5803,6 @@ function tickDays(gs, days) {
       }
     }
   }
-  // Reconcile thread-age timestamps against the final hook set — any thread
-  // raised during these days gets stamped, any closed one is dropped.
-  s.hookMeta = reconcileHookMeta(s.hooks, s.hookMeta, s.day);
-
   // The enterprise remits — established income ventures (the fleet, the bazaar
   // stake) pay their quarter. Felt as a recurring reward beat in the away log.
   if (!s.charterClosed) {
@@ -11725,12 +11715,6 @@ function JournalView({ gs, arrivalProse, setTab, openLetterById, pursueThread, v
           ))}
         </div>
       )}
-      {(gs.hooks || []).some(h => !findPursueLead(h)) && (
-        <>
-          <Fleuron char="❧" />
-          <MattersInHandPanel gs={gs} />
-        </>
-      )}
     </div>
   );
 }
@@ -11738,7 +11722,6 @@ function JournalView({ gs, arrivalProse, setTab, openLetterById, pursueThread, v
 // OPPORTUNITIES — authored leads worth acting on (a wreck to salvage, a market
 // tip). Prominent, near the top of the hub so they're noticed. Pursuing one
 // opens a hand-written decision with differentiated outcomes — NOT a gamble.
-// (Loose ends that are merely in motion live in MattersInHandPanel below.)
 function OpportunitiesPanel({ gs, pursueThread }) {
   if (gs.charterClosed || !pursueThread) return null;
   const opps = (gs.hooks || []).filter(h => findPursueLead(h));
@@ -11758,38 +11741,6 @@ function OpportunitiesPanel({ gs, pursueThread }) {
         </div>
       ))}
     </div>
-  );
-}
-
-// MATTERS IN HAND — loose ends, noted and in motion but not directly actionable;
-// most resolve through correspondence in their own time. Passive: shown with an
-// age note, no pursue button (acting on a vague hook was the old slot-machine).
-// Real, actionable leads live in OpportunitiesPanel above.
-function MattersInHandPanel({ gs }) {
-  const looseEnds = (gs.hooks || []).filter(h => !findPursueLead(h)).slice(-6);
-  if (looseEnds.length === 0) return null;
-  const meta = gs.hookMeta || {};
-  const today = gs.day || 0;
-  return (
-    <>
-      <div className="display" style={{ fontSize: '0.85em', color: '#6b4423', marginBottom: '0.3rem' }}>MATTERS IN HAND</div>
-      <p className="italic" style={{ fontSize: '0.82em', color: '#6b4423', margin: '0 0 0.5rem 0' }}>
-        Loose ends, noted and in motion. The world will return to them in its own time.
-      </p>
-      {looseEnds.map((h, i) => {
-        const note = hookAgeNote(h, meta, today);
-        return (
-          <div key={i} style={{ marginBottom: '0.3rem' }}>
-            <div className="italic" style={{ color: '#4a3220' }}>&mdash; {h}</div>
-            {note && (
-              <div className="italic" style={{ fontSize: '0.76em', color: '#8a6a3f', marginLeft: '0.9rem' }}>
-                {note.text}
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </>
   );
 }
 

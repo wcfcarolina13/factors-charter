@@ -4,6 +4,18 @@ The Factor's Charter — a chronological log of what's shipped. Newest first.
 
 ---
 
+## 2026-06-13 — MY PRESENT AIM → toggleable strategic COUNSEL
+
+The nearest-purchase "aim" line wasn't pulling its weight. Repurposed that hub slot into a **state-aware advisor** that names the single highest-leverage next move toward *winning* (400 cwt pepper + 200 cwt cinnamon lodged → lifted by the Indiaman), and made it **toggleable** for players who'd rather not be coached.
+
+- Pure `winCounsel()` (`src/util/counsel.js`, 11 vitest cases) encodes the win ladder the real numbers bear out: build capital via arbitrage → break the 60-cwt pinnace wall with the brigantine → lodge pepper passively with a garden of yr. own → answer the cinnamon shortfall (the structural bottleneck — one cheap source, thin stock) with the Spice Estate → plantation → execute (cinnamon runs / steady, with the Indiaman countdown) → a behind-pace push near the deadline → won. `counselLine()` renders each in the Factor's first-person strategic voice; `buildCounselState()` projects gs (secured = shipped + lodged, Indiaman days left, which engine pieces are in hand, rajah/teak gates).
+- **Toggle:** device-local preference (`factor_counsel`, default **on**) via a "⚓ Show/Hide strategic counsel" entry in the ☰ Menu, mirroring the view-override pattern. `GameHub` owns the state and threads it to the Header menu + the Journal.
+- Deleted the obsolete `src/util/ambition.js` (+ test) and `buildAspirations`/`ambitionLine` — fully replaced, no ghosts.
+
+Directly answers the early-game "I make no progress, just maximize loans" confusion: a poor/early Factor is now told *"carry pepper from Kota Pinang to Eustace or Marlborough for coin, and lay it by toward a brigantine and a garden of my own"* — the grind has a stated purpose. Verified live (mobile): advice shifts correctly with state (capital → brigantine-with-yard-nuance), the menu toggle hides/shows and persists across reload. Tests 203 → 206; build clean; zero console errors.
+
+---
+
 ## 2026-06-13 — "Pursue a matter" reworked: leads pay off, slot machine gone
 
 Bradley's critique: "Pursue a matter" was easily missed, unclear in purpose, and felt like a clunky slot machine. He was right — on the deterministic PWA, every thread funnelled through the same three generic verbs and a small random £ swing, regardless of what the lead actually was. It was built for the live-AI artifact path and collapses to a hollow gamble without AI. Two phases.
